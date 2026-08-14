@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SailViz — GPS軌跡ビューア</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header id="topbar">
+    <strong>SailViz</strong>
+    <label class="btn">CSV読込
+      <input type="file" id="file-input" accept=".csv" multiple hidden />
+    </label>
+    <label>整列:
+      <select id="align-mode">
+        <option value="absolute">絶対時刻</option>
+        <option value="elapsed">経過時間</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="accuracy-filter" /> 精度フィルタ</label>
+    <span id="status"></span>
+  </header>
+
+  <main>
+    <aside id="sidebar">
+      <h2>トラック</h2>
+      <div id="track-list"></div>
+      <h2>タグ</h2>
+      <div id="tag-list"></div>
+    </aside>
+    <section id="stage">
+      <canvas id="map"></canvas>
+      <div id="drop-zone">CSVをここにドラッグ&ドロップ</div>
+    </section>
+  </main>
+
+  <footer id="transport">
+    <button id="play-btn">▶</button>
+    <label>速度:
+      <select id="speed-select">
+        <option value="1">1x</option>
+        <option value="2">2x</option>
+        <option value="4">4x</option>
+        <option value="8">8x</option>
+      </select>
+    </label>
+    <span id="clock">--:--:--</span>
+    <canvas id="timeline"></canvas>
+  </footer>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
