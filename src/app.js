@@ -52,7 +52,9 @@ function recomputeView() {
 function draw() {
   const now = playback.getNow();
   const range = globalRange(state.tracks, state.mode);
-  // 基準トラック = 最初の可視トラック。elapsed の 0起点 と lat/lon無しタグの補間位置に使う。
+  // 基準トラック = 最初の可視トラック。elapsed の 0起点、lat/lon無しタグの補間位置、
+  // および elapsed 軸へのタグ変換の基準に使う。elapsed で開始時刻の異なる複数トラックを
+  // 重ねた場合、タグは基準トラックの開始を0とした軸上に配置される（start-together比較の規約）。
   const refTrack = state.tracks.find((t) => t.visible) || null;
   const base = state.mode === 'elapsed' && refTrack ? refTrack.tRange.start : 0;
   const axisEvents = remapEventsToAxis(state.events, state.mode, base);
