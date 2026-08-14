@@ -4,7 +4,7 @@ import { parseGpsPoints, rejectOutliers } from './gps.js';
 import { parseTags } from './tags.js';
 import { computeBounds, fitTransform } from './projection.js';
 import { pan, zoomAt } from './viewport.js';
-import { globalRange } from './timeaxis.js';
+import { globalRange, remapEventsToAxis } from './timeaxis.js';
 import { drawScene } from './renderer.js';
 import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
@@ -51,18 +51,22 @@ function recomputeView() {
 
 function draw() {
   const now = playback.getNow();
+  const range = globalRange(state.tracks, state.mode);
+  // 基準トラック = 最初の可視トラック。elapsed の 0起点 と lat/lon無しタグの補間位置に使う。
+  const refTrack = state.tracks.find((t) => t.visible) || null;
+  const base = state.mode === 'elapsed' && refTrack ? refTrack.tRange.start : 0;
+  const axisEvents = remapEventsToAxis(state.events, state.mode, base);
+
   drawScene(mapCtx, {
     transform: state.transform, tracks: state.tracks, events: state.events,
-    now, mode: state.mode, crop: state.crop,
+    now, mode: state.mode, crop: state.crop, referenceTrack: refTrack,
   });
-  timeline.render({
-    range: globalRange(state.tracks, state.mode), crop: state.crop, now, events: state.events,
-  });
-  $('clock').textContent = formatClock(now, state.mode, state.crop.start);
+  timeline.render({ range, crop: state.crop, now, events: axisEvents });
+  $('clock').textContent = range.end > range.start ? formatClock(now, state.mode) : '--:--:--';
   $('drop-zone').classList.toggle('hidden', state.tracks.length > 0 || state.events.length > 0);
 }
 
-function formatClock(now, mode, base) {
+function formatClock(now, mode) {
   if (mode === 'elapsed') {
     const s = Math.max(0, Math.floor(now / 1000));
     return `+${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;

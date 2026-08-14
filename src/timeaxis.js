@@ -20,3 +20,14 @@ export function globalRange(tracks, mode) {
 export function trackLookupTime(track, now, mode) {
   return mode === 'elapsed' ? track.tRange.start + now : now;
 }
+
+// タイムライン軸に合わせてイベント時刻を変換。
+// absolute: 絶対epoch のまま。elapsed: base(基準トラック開始)を引いて0起点に。
+export function remapEventsToAxis(events, mode, base) {
+  if (mode !== 'elapsed') return events;
+  return events.map((e) => ({
+    ...e,
+    t: e.t - base,
+    tEnd: e.tEnd == null ? null : e.tEnd - base,
+  }));
+}

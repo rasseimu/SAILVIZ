@@ -63,11 +63,14 @@ export function createTimeline(canvas, { onCropChange, onScrub }) {
   }
   canvas.addEventListener('pointerdown', (e) => {
     drag = pickTarget(localX(e));
-    canvas.setPointerCapture(e.pointerId);
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* stale pointer */ }
     handleDrag(e);
   });
   canvas.addEventListener('pointermove', (e) => { if (drag) handleDrag(e); });
-  canvas.addEventListener('pointerup', (e) => { drag = null; canvas.releasePointerCapture(e.pointerId); });
+  canvas.addEventListener('pointerup', (e) => {
+    drag = null;
+    try { canvas.releasePointerCapture(e.pointerId); } catch { /* not captured */ }
+  });
 
   function handleDrag(e) {
     const t = clamp(xToT(localX(e)), state.range.start, state.range.end);

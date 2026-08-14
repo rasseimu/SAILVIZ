@@ -54,6 +54,28 @@ test('renderer draws a real track without throwing and strokes the polyline', ()
   assert.ok(ctx.calls.arc > 0, 'current-position marker drawn');
 });
 
+test('renderer pins a lat/lon-less tag via reference-track interpolation', () => {
+  const track = loadTrack('Location0807.csv', '#1c72b8');
+  const T = fitTransform(track.bounds, 800, 600);
+  const range = globalRange([track], 'absolute');
+  const midT = (track.tRange.start + track.tRange.end) / 2;
+  const ctx = mockCtx();
+  drawScene(ctx, {
+    transform: T, tracks: [track],
+    events: [{ kind: 'point', t: midT, tEnd: null, label: 'x', lat: null, lon: null }],
+    now: range.start, mode: 'absolute', crop: range, referenceTrack: track,
+  });
+  const withPin = ctx.calls.fill || 0;
+  // 基準トラックが無ければ補間ピンは描かれない
+  const ctx2 = mockCtx();
+  drawScene(ctx2, {
+    transform: T, tracks: [track],
+    events: [{ kind: 'point', t: midT, tEnd: null, label: 'x', lat: null, lon: null }],
+    now: range.start, mode: 'absolute', crop: range, referenceTrack: null,
+  });
+  assert.ok(withPin > (ctx2.calls.fill || 0), 'interpolated pin adds a fill when reference track present');
+});
+
 test('playback advances now, clamps to range, and auto-pauses at end', () => {
   // rAF / performance をモック
   let cb = null; let idSeq = 1;

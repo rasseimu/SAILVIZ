@@ -16,7 +16,7 @@ function trackWindow(track, crop, mode) {
 }
 
 export function drawScene(ctx, state) {
-  const { transform: T, tracks, events, now, mode, crop } = state;
+  const { transform: T, tracks, events, now, mode, crop, referenceTrack } = state;
   ctx.clearRect(0, 0, T.w, T.h);
   if (!T.proj) return;
 
@@ -53,10 +53,19 @@ export function drawScene(ctx, state) {
     ctx.stroke();
   }
 
-  // タグピン（lat/lon があるものだけトラック上に表示）
+  // タグピン。lat/lon があればその座標に、無ければ基準トラックの絶対時刻位置を補間して配置。
+  // (ev.t は絶対epoch ms、referenceTrack.points も絶対時刻なので lookup は ev.t をそのまま使う)
   for (const ev of events) {
-    if (ev.lat == null || ev.lon == null) continue;
-    const s = toScreen(ev.lat, ev.lon, T);
+    let lat = ev.lat;
+    let lon = ev.lon;
+    if (lat == null || lon == null) {
+      if (!referenceTrack) continue;
+      const pos = positionAt(referenceTrack.points, ev.t);
+      if (!pos) continue;
+      lat = pos.lat;
+      lon = pos.lon;
+    }
+    const s = toScreen(lat, lon, T);
     ctx.beginPath();
     ctx.moveTo(s.px, s.py);
     ctx.lineTo(s.px - 6, s.py - 14);
