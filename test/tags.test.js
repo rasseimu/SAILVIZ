@@ -32,3 +32,12 @@ test('skips rows with invalid time', () => {
   assert.equal(ev.length, 1);
   assert.equal(ev[0].label, 'ok');
 });
+
+test('skips range rows with an invalid end timestamp', () => {
+  const ev = parseTags(['start', 'end', 'label'],
+    [['1786078560000000000', 'bad', 'broken'],
+     ['1786078560000000000', '1786078620000000000', 'ok']]);
+  assert.equal(ev.length, 1);
+  assert.equal(ev[0].label, 'ok');
+  assert.equal(ev[0].kind, 'range');
+});

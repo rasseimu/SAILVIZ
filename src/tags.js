@@ -31,10 +31,11 @@ export function parseTags(header, rows) {
     const t = parseTime(row[iPrimary]);
     if (Number.isNaN(t)) continue;
     const tEnd = isRange ? parseTime(row[iEnd]) : null;
+    if (isRange && Number.isNaN(tEnd)) continue; // 不正な end を持つ range 行はスキップ
     events.push({
       kind: isRange ? 'range' : 'point',
       t,
-      tEnd: isRange && !Number.isNaN(tEnd) ? tEnd : null,
+      tEnd: isRange ? tEnd : null,
       label: iLabel >= 0 ? (row[iLabel] ?? '') : '',
       lat: iLat >= 0 ? numOrNull(row[iLat]) : null,
       lon: iLon >= 0 ? numOrNull(row[iLon]) : null,

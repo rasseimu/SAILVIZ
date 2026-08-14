@@ -29,10 +29,24 @@ test('project: north is +y, east is +x, origin at center', () => {
   assert.ok(east.x > 0);
 });
 
-test('fitTransform keeps aspect ratio (uniform scale)', () => {
+test('fitTransform keeps aspect ratio and fits bounds within usable area', () => {
   const b = { minLat: 35, maxLat: 35.1, minLon: 139, maxLon: 139.2 };
   const t = fitTransform(b, 800, 400, 0.05);
   assert.ok(t.scale > 0 && Number.isFinite(t.scale));
   assert.equal(t.w, 800);
   assert.equal(t.h, 400);
+
+  // world 実寸を投影して、両軸とも usable(=90%) 内に収まり、片軸はタイトであること
+  const c1 = project(b.minLat, b.minLon, t.proj);
+  const c2 = project(b.maxLat, b.maxLon, t.proj);
+  const worldW = Math.abs(c2.x - c1.x);
+  const worldH = Math.abs(c2.y - c1.y);
+  const usableW = 800 * 0.9;
+  const usableH = 400 * 0.9;
+  assert.ok(t.scale * worldW <= usableW + 1e-6, 'fits width');
+  assert.ok(t.scale * worldH <= usableH + 1e-6, 'fits height');
+  assert.ok(
+    Math.abs(t.scale * worldW - usableW) < 1 || Math.abs(t.scale * worldH - usableH) < 1,
+    'at least one axis is tight (no wasted zoom)',
+  );
 });

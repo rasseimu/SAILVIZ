@@ -23,3 +23,8 @@ test('case-insensitive', () => {
 test('missing required -> unknown', () => {
   assert.equal(detectType(['foo', 'bar']), 'unknown');
 });
+
+test('tag CSV with latitude/longitude+time still classified as tag (label wins)', () => {
+  // parseTags は latitude/longitude を受理する。label がある限り tag と判定されねばならない。
+  assert.equal(detectType(['time', 'latitude', 'longitude', 'label']), 'tag');
+});

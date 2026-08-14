@@ -32,4 +32,8 @@ test('zoomAt keeps the cursor world point fixed', () => {
 test('pan shifts center by pixel delta', () => {
   const T2 = pan(T, 100, 0); // ドラッグで右へ100px -> world中心は左へ
   assert.ok(T2.cx < 0);
+  // ドラッグで下へ50px -> 内容が下がる = world中心(北正y)は上へ
+  const T3 = pan(T, 0, 50);
+  assert.ok(T3.cy > 0);
+  assert.equal(T3.cx, 0);
 });

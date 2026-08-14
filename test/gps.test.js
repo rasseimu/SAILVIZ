@@ -70,3 +70,18 @@ test('drops duplicate/backwards timestamps', () => {
 test('MAX_SPEED_MPS is 25', () => {
   assert.equal(MAX_SPEED_MPS, 25);
 });
+
+test('threshold is used: ~24 m/s kept, ~26 m/s rejected', () => {
+  // 緯度1度 ≈ 111000 m。dt=1000ms のとき、緯度差 d 度 -> 速度 ≈ d*111000 m/s
+  const dLatFor = (mps) => mps / 111000; // 目標速度に対応する緯度差
+  const kept = rejectOutliers([
+    { t: 0, lat: 35.0, lon: 139.0 },
+    { t: 1000, lat: 35.0 + dLatFor(24), lon: 139.0 }, // ~24 m/s
+  ]);
+  assert.equal(kept.removed, 0, '24 m/s point kept');
+  const rej = rejectOutliers([
+    { t: 0, lat: 35.0, lon: 139.0 },
+    { t: 1000, lat: 35.0 + dLatFor(26), lon: 139.0 }, // ~26 m/s
+  ]);
+  assert.equal(rej.removed, 1, '26 m/s point rejected');
+});
