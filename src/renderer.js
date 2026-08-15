@@ -15,26 +15,60 @@ function trackWindow(track, crop, mode) {
   return { lo: crop.start, hi: crop.end };
 }
 
+// 点列を折れ線で描く。include(p) が真の点だけを繋ぐ(偽の点で線を切る)。
+function strokePolyline(ctx, points, T, include) {
+  ctx.beginPath();
+  let started = false;
+  for (const p of points) {
+    if (include && !include(p)) { started = false; continue; }
+    const s = toScreen(p.lat, p.lon, T);
+    if (!started) { ctx.moveTo(s.px, s.py); started = true; }
+    else ctx.lineTo(s.px, s.py);
+  }
+  ctx.stroke();
+}
+
+// コースマーク(回航ブイ等)。クリック地点中心に 三角/丸 を塗り＋濃い輪郭で描く。
+function drawMark(ctx, s, mark) {
+  ctx.beginPath();
+  if (mark.shape === 'triangle') {
+    ctx.moveTo(s.px, s.py - 11);
+    ctx.lineTo(s.px - 10, s.py + 7);
+    ctx.lineTo(s.px + 10, s.py + 7);
+    ctx.closePath();
+  } else {
+    ctx.arc(s.px, s.py, 8, 0, Math.PI * 2);
+  }
+  ctx.fillStyle = mark.color;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#12283a';
+  ctx.stroke();
+}
+
 export function drawScene(ctx, state) {
-  const { transform: T, tracks, events, now, mode, crop, referenceTrack } = state;
+  const { transform: T, tracks, events, now, mode, crop, referenceTrack, marks = [] } = state;
   ctx.clearRect(0, 0, T.w, T.h);
   if (!T.proj) return;
 
-  // ポリライン
+  // ポリライン: 範囲外は点線(文脈として残す)、範囲内は実線。重複描画しないので破線が隠れない。
   for (const tr of tracks) {
     if (!tr.visible || tr.points.length < 2) continue;
     const win = trackWindow(tr, crop, mode);
-    ctx.beginPath();
-    let started = false;
-    for (const p of tr.points) {
-      if (p.t < win.lo || p.t > win.hi) { started = false; continue; }
-      const s = toScreen(p.lat, p.lon, T);
-      if (!started) { ctx.moveTo(s.px, s.py); started = true; }
-      else ctx.lineTo(s.px, s.py);
-    }
+    const inWin = (p) => p.t >= win.lo && p.t <= win.hi;
     ctx.strokeStyle = tr.color;
     ctx.lineWidth = 2;
-    ctx.stroke();
+    ctx.globalAlpha = 0.5;
+    ctx.setLineDash([3, 4]);
+    strokePolyline(ctx, tr.points, T, (p) => !inWin(p)); // 範囲外のみ点線
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    strokePolyline(ctx, tr.points, T, inWin); // 範囲内のみ実線
+  }
+
+  // コースマーク(ポリラインの上・現在地マーカーの下)
+  for (const mk of marks) {
+    drawMark(ctx, toScreen(mk.lat, mk.lon, T), mk);
   }
 
   // 現在位置マーカー
@@ -44,12 +78,18 @@ export function drawScene(ctx, state) {
     const pos = positionAt(tr.points, lookup);
     if (!pos) continue;
     const s = toScreen(pos.lat, pos.lon, T);
+    // 現在地: 塗り(トラック色) + 白の内輪郭 + 黒の外輪郭で明暗どちらの背景でも目立たせる
     ctx.beginPath();
-    ctx.arc(s.px, s.py, 6, 0, Math.PI * 2);
+    ctx.arc(s.px, s.py, 9, 0, Math.PI * 2);
     ctx.fillStyle = tr.color;
     ctx.fill();
-    ctx.strokeStyle = '#fff';
     ctx.lineWidth = 2;
+    ctx.strokeStyle = '#fff';
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(s.px, s.py, 10.5, 0, Math.PI * 2);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#000';
     ctx.stroke();
   }
 

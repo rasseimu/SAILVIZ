@@ -24,8 +24,8 @@ function mockCtx() {
     calls,
     clearRect: rec('clearRect'), beginPath: rec('beginPath'), moveTo: rec('moveTo'),
     lineTo: rec('lineTo'), stroke: rec('stroke'), arc: rec('arc'), fill: rec('fill'),
-    closePath: rec('closePath'), fillRect: rec('fillRect'),
-    set strokeStyle(_v) {}, set fillStyle(_v) {}, set lineWidth(_v) {},
+    closePath: rec('closePath'), fillRect: rec('fillRect'), setLineDash: rec('setLineDash'),
+    set strokeStyle(_v) {}, set fillStyle(_v) {}, set lineWidth(_v) {}, set globalAlpha(_v) {},
   };
 }
 

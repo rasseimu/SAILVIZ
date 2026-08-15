@@ -45,6 +45,15 @@ export function createTimeline(canvas, { onCropChange, onScrub }) {
     ctx.fillStyle = '#0d3b5e';
     ctx.fillRect(xL - 2, 0, 4, h);
     ctx.fillRect(xR - 2, 0, 4, h);
+    // 区間選択の始点プレビュー(終点クリック待ち)
+    if (state.pending != null) {
+      const xP = tToX(state.pending);
+      ctx.strokeStyle = '#e6a817';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath(); ctx.moveTo(xP, 0); ctx.lineTo(xP, h); ctx.stroke();
+      ctx.setLineDash([]);
+    }
     // playhead
     const xN = tToX(state.now);
     ctx.strokeStyle = '#e67e22';

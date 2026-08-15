@@ -27,6 +27,11 @@ export function project(lat, lon, proj) {
   return { x: (lon - proj.lon0) * proj.kx, y: lat - proj.lat0 };
 }
 
+// project の逆。world(x,y) -> lat/lon。右クリック地点の座標確定に使う。
+export function unproject(x, y, proj) {
+  return { lat: y + proj.lat0, lon: x / proj.kx + proj.lon0 };
+}
+
 // 外接矩形を w×h にアスペクト維持でフィットする Transform を返す。
 // (cx,cy) は world 中心 = (0,0)。scale = px / world単位。
 export function fitTransform(bounds, w, h, marginFrac = 0.05) {

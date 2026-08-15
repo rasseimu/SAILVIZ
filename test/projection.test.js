@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeBounds, makeProjection, project, fitTransform } from '../src/projection.js';
+import { computeBounds, makeProjection, project, unproject, fitTransform } from '../src/projection.js';
 
 function track(points) {
   return { visible: true, points };
@@ -27,6 +27,17 @@ test('project: north is +y, east is +x, origin at center', () => {
   assert.ok(north.y > 0);
   const east = project(35.5, 140, proj);
   assert.ok(east.x > 0);
+});
+
+test('unproject inverts project (round-trip lat/lon)', () => {
+  const b = { minLat: 35, maxLat: 36, minLon: 139, maxLon: 140 };
+  const proj = makeProjection(b);
+  for (const [lat, lon] of [[35.5, 139.5], [35.0, 139.0], [36.0, 140.0], [35.7, 139.2]]) {
+    const p = project(lat, lon, proj);
+    const back = unproject(p.x, p.y, proj);
+    assert.ok(Math.abs(back.lat - lat) < 1e-9, `lat round-trip ${lat}`);
+    assert.ok(Math.abs(back.lon - lon) < 1e-9, `lon round-trip ${lon}`);
+  }
 });
 
 test('fitTransform keeps aspect ratio and fits bounds within usable area', () => {

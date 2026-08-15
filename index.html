@@ -28,10 +28,18 @@
       <div id="track-list"></div>
       <h2>タグ</h2>
       <div id="tag-list"></div>
+      <h2>マーク</h2>
+      <div id="mark-list"></div>
     </aside>
     <section id="stage">
       <canvas id="map"></canvas>
       <div id="drop-zone">CSVをここにドラッグ&ドロップ</div>
+      <div id="mark-menu" class="hidden">
+        <button data-shape="triangle" data-color="#e02020"><span style="color:#e02020">▲</span> 赤三角</button>
+        <button data-shape="triangle" data-color="#f1c40f"><span style="color:#f1c40f">▲</span> 黄三角</button>
+        <button data-shape="circle" data-color="#e02020"><span style="color:#e02020">●</span> 赤丸</button>
+        <button data-shape="circle" data-color="#f1c40f"><span style="color:#f1c40f">●</span> 黄丸</button>
+      </div>
     </section>
   </main>
 

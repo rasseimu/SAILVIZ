@@ -2,8 +2,8 @@ import { parseCsv } from './csv.js';
 import { detectType } from './detect.js';
 import { parseGpsPoints, rejectOutliers } from './gps.js';
 import { parseTags } from './tags.js';
-import { computeBounds, fitTransform } from './projection.js';
-import { pan, zoomAt } from './viewport.js';
+import { computeBounds, fitTransform, unproject, project } from './projection.js';
+import { pan, zoomAt, screenToWorld, worldToScreen } from './viewport.js';
 import { globalRange, remapEventsToAxis } from './timeaxis.js';
 import { drawScene } from './renderer.js';
 import { createPlayback } from './playback.js';
@@ -14,6 +14,7 @@ const PALETTE = ['#1c72b8', '#e67e22', '#27ae60', '#8e44ad', '#c0392b', '#16a085
 const state = {
   tracks: [],
   events: [],
+  marks: [],
   mode: 'absolute',
   accuracyFilter: false,
   crop: { start: 0, end: 0 },
@@ -61,9 +62,10 @@ function draw() {
 
   drawScene(mapCtx, {
     transform: state.transform, tracks: state.tracks, events: state.events,
+    marks: state.marks,
     now, mode: state.mode, crop: state.crop, referenceTrack: refTrack,
   });
-  timeline.render({ range, crop: state.crop, now, events: axisEvents });
+  timeline.render({ range, crop: state.crop, now, events: axisEvents, pending: pendingStart });
   $('clock').textContent = range.end > range.start ? formatClock(now, state.mode) : '--:--:--';
   $('drop-zone').classList.toggle('hidden', state.tracks.length > 0 || state.events.length > 0);
 }
@@ -138,6 +140,22 @@ function renderSidebar() {
     row.textContent = `${ev.kind === 'range' ? '▬' : '▲'} ${ev.label || '(無題)'}`;
     gl.appendChild(row);
   });
+
+  const ml = $('mark-list'); ml.innerHTML = '';
+  state.marks.forEach((mk, i) => {
+    const row = document.createElement('div'); row.className = 'track-row';
+    const glyph = mk.shape === 'triangle' ? '▲' : '●';
+    row.innerHTML =
+      `<span style="color:${mk.color}">${glyph}</span>` +
+      `<span>${mk.shape === 'triangle' ? '三角' : '丸'}</span>` +
+      `<button data-delmark="${i}">×</button>`;
+    ml.appendChild(row);
+  });
+  ml.querySelectorAll('button[data-delmark]').forEach((b) =>
+    b.addEventListener('click', (e) => {
+      state.marks.splice(+e.target.dataset.delmark, 1);
+      draw(); renderSidebar();
+    }));
 }
 
 // --- 入力配線 ---
@@ -163,22 +181,92 @@ const stage = $('stage');
 }));
 stage.addEventListener('drop', (e) => { if (e.dataTransfer?.files?.length) loadFiles(e.dataTransfer.files); });
 
-// pan/zoom
+// pan/zoom + 軌跡クリックで区間選択(ドラッグはpan、単クリックは区間選択)
 let dragging = null;
-mapCanvas.addEventListener('pointerdown', (e) => { dragging = { x: e.offsetX, y: e.offsetY }; });
+mapCanvas.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return; // 左ドラッグのみpan(右クリックはマークメニュー用)
+  dragging = { x: e.offsetX, y: e.offsetY, ox: e.offsetX, oy: e.offsetY, moved: false };
+});
 mapCanvas.addEventListener('pointermove', (e) => {
   if (!dragging) return;
+  if (Math.abs(e.offsetX - dragging.ox) + Math.abs(e.offsetY - dragging.oy) > 4) dragging.moved = true;
   state.transform = pan(state.transform, e.offsetX - dragging.x, e.offsetY - dragging.y);
-  dragging = { x: e.offsetX, y: e.offsetY };
+  dragging.x = e.offsetX; dragging.y = e.offsetY;
   draw();
 });
-window.addEventListener('pointerup', () => { dragging = null; });
+window.addEventListener('pointerup', () => {
+  if (dragging && !dragging.moved) handleMapClick(dragging.ox, dragging.oy);
+  dragging = null;
+});
 mapCanvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
   state.transform = zoomAt(state.transform, e.offsetX, e.offsetY, factor);
   draw();
 }, { passive: false });
+
+// 区間選択: 軌跡上の点を単クリック→1回目=始点, 2回目=終点でクロップを設定
+let pendingStart = null; // 選択軸上の時刻(絶対 or elapsed)
+const PICK_PX = 8;
+function pickTrackTime(px, py) {
+  const T = state.transform;
+  if (!T.proj) return null;
+  let best = null;
+  for (const tr of state.tracks) {
+    if (!tr.visible) continue;
+    for (const p of tr.points) {
+      const s = worldToScreen(project(p.lat, p.lon, T.proj), T);
+      const d = Math.hypot(s.px - px, s.py - py);
+      if (d <= PICK_PX && (!best || d < best.d)) {
+        best = { d, time: state.mode === 'elapsed' ? p.t - tr.tRange.start : p.t };
+      }
+    }
+  }
+  return best ? best.time : null;
+}
+function handleMapClick(px, py) {
+  const t = pickTrackTime(px, py);
+  if (t == null) return; // 軌跡から離れたクリックは無視
+  if (pendingStart == null) {
+    pendingStart = t;
+    statusEl.textContent = '始点を選択。終点を軌跡上でクリック（Escで取消）';
+    draw();
+  } else {
+    const c = { start: Math.min(pendingStart, t), end: Math.max(pendingStart, t) };
+    pendingStart = null;
+    state.crop = c; playback.setRange(c);
+    statusEl.textContent = '区間を設定しました（下バーのハンドルで全体に戻せます）';
+    draw();
+  }
+}
+function cancelPending() {
+  if (pendingStart == null) return;
+  pendingStart = null; statusEl.textContent = '区間選択を取消しました'; draw();
+}
+
+// マーク配置: 右クリック→4択メニュー→クリック地点に配置
+const markMenu = $('mark-menu');
+let menuPos = null;
+let markSeq = 0;
+function hideMenu() { markMenu.classList.add('hidden'); menuPos = null; }
+mapCanvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  if (!state.transform.proj) { statusEl.textContent = '先にGPS軌跡を読み込んでください'; return; }
+  menuPos = { px: e.offsetX, py: e.offsetY };
+  markMenu.style.left = `${e.offsetX}px`;
+  markMenu.style.top = `${e.offsetY}px`;
+  markMenu.classList.remove('hidden');
+});
+markMenu.querySelectorAll('button').forEach((b) =>
+  b.addEventListener('click', () => {
+    if (!menuPos) return;
+    const world = screenToWorld(menuPos, state.transform);
+    const { lat, lon } = unproject(world.x, world.y, state.transform.proj);
+    state.marks.push({ id: `mk${markSeq++}`, lat, lon, shape: b.dataset.shape, color: b.dataset.color });
+    hideMenu(); draw(); renderSidebar();
+  }));
+window.addEventListener('pointerdown', (e) => { if (!markMenu.contains(e.target)) hideMenu(); });
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideMenu(); cancelPending(); } });
 
 window.addEventListener('resize', () => { resizeCanvas(); recomputeView(); draw(); });
 resizeCanvas();
