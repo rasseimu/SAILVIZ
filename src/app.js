@@ -5,6 +5,8 @@ import { parseTags } from './tags.js';
 import { computeBounds, fitTransform, unproject, project } from './projection.js';
 import { pan, zoomAt, screenToWorld, worldToScreen } from './viewport.js';
 import { globalRange, remapEventsToAxis } from './timeaxis.js';
+import { positionAt } from './interpolate.js';
+import { parseMp4CreationTime } from './videometa.js';
 import { drawScene } from './renderer.js';
 import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
@@ -15,6 +17,7 @@ const state = {
   tracks: [],
   events: [],
   marks: [],
+  videos: [],
   mode: 'absolute',
   accuracyFilter: false,
   crop: { start: 0, end: 0 },
@@ -62,7 +65,7 @@ function draw() {
 
   drawScene(mapCtx, {
     transform: state.transform, tracks: state.tracks, events: state.events,
-    marks: state.marks,
+    marks: state.marks, videos: state.videos,
     now, mode: state.mode, crop: state.crop, referenceTrack: refTrack,
   });
   timeline.render({ range, crop: state.crop, now, events: axisEvents, pending: pendingStart });
@@ -81,6 +84,10 @@ function formatClock(now, mode) {
 
 async function loadFiles(fileList) {
   for (const file of fileList) {
+    if (file.type.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(file.name)) {
+      await addVideo(file);
+      continue;
+    }
     const text = await file.text();
     const { header, rows } = parseCsv(text);
     const type = detectType(header);
@@ -91,6 +98,31 @@ async function loadFiles(fileList) {
   recomputeView();
   draw();
   renderSidebar();
+}
+
+// ドロップされた動画を、その瞬間の再生位置(絶対時刻)に紐付けて登録。
+let videoSeq = 0;
+function firstVisibleTrack() { return state.tracks.find((t) => t.visible) || null; }
+function nowAbsolute() {
+  const r = firstVisibleTrack();
+  return state.mode === 'elapsed' && r ? r.tRange.start + playback.getNow() : playback.getNow();
+}
+async function addVideo(file) {
+  if (!firstVisibleTrack()) { statusEl.textContent = '先にGPS軌跡を読み込んでください'; return; }
+  const url = URL.createObjectURL(file);
+  // 埋め込み撮影時刻を優先。取れない/軌跡範囲外なら現在の再生位置にフォールバック。
+  let meta = null;
+  try { meta = parseMp4CreationTime(await file.arrayBuffer()); } catch { /* パース失敗はフォールバック */ }
+  const range = globalRange(state.tracks, 'absolute');
+  let t, src;
+  if (meta != null && meta >= range.start && meta <= range.end) {
+    t = meta; src = '埋め込み撮影時刻';
+  } else {
+    t = nowAbsolute();
+    src = meta != null ? '現在位置(撮影時刻は軌跡範囲外)' : '現在の再生位置';
+  }
+  state.videos.push({ id: `vid${videoSeq++}`, t, url, name: file.name });
+  statusEl.textContent = `動画「${file.name}」を${src}に配置しました`;
 }
 
 function addTrack(name, header, rows) {
@@ -154,6 +186,23 @@ function renderSidebar() {
   ml.querySelectorAll('button[data-delmark]').forEach((b) =>
     b.addEventListener('click', (e) => {
       state.marks.splice(+e.target.dataset.delmark, 1);
+      draw(); renderSidebar();
+    }));
+
+  const vl = $('video-list'); vl.innerHTML = '';
+  state.videos.forEach((v, i) => {
+    const row = document.createElement('div'); row.className = 'track-row';
+    row.innerHTML =
+      `<span>▶</span><span class="vid-name" data-play="${i}">${v.name}</span>` +
+      `<button data-delvid="${i}">×</button>`;
+    vl.appendChild(row);
+  });
+  vl.querySelectorAll('span[data-play]').forEach((s) =>
+    s.addEventListener('click', (e) => openVideoPanel(state.videos[+e.target.dataset.play])));
+  vl.querySelectorAll('button[data-delvid]').forEach((b) =>
+    b.addEventListener('click', (e) => {
+      const [v] = state.videos.splice(+e.target.dataset.delvid, 1);
+      URL.revokeObjectURL(v.url);
       draw(); renderSidebar();
     }));
 }
@@ -224,7 +273,21 @@ function pickTrackTime(px, py) {
   }
   return best ? best.time : null;
 }
+function pickVideo(px, py) {
+  const T = state.transform;
+  const ref = firstVisibleTrack();
+  if (!T.proj || !ref) return null;
+  for (const v of state.videos) {
+    const pos = positionAt(ref.points, v.t);
+    if (!pos) continue;
+    const s = worldToScreen(project(pos.lat, pos.lon, T.proj), T);
+    if (Math.abs(s.px - px) <= 14 && Math.abs(s.py - py) <= 12) return v;
+  }
+  return null;
+}
 function handleMapClick(px, py) {
+  const v = pickVideo(px, py); // 動画バッジ優先
+  if (v) { openVideoPanel(v); return; }
   const t = pickTrackTime(px, py);
   if (t == null) return; // 軌跡から離れたクリックは無視
   if (pendingStart == null) {
@@ -242,6 +305,40 @@ function handleMapClick(px, py) {
 function cancelPending() {
   if (pendingStart == null) return;
   pendingStart = null; statusEl.textContent = '区間選択を取消しました'; draw();
+}
+
+// 左右分割の動画パネル。開閉でキャンバスを左半分に再フィット(クロップは維持)。
+let currentVideo = null; // 再生中の動画(GPS現在位置の同期元)
+function refitTransform() {
+  const bounds = computeBounds(state.tracks);
+  if (bounds) state.transform = fitTransform(bounds, mapCanvas.width, mapCanvas.height);
+}
+// 動画の再生位置を絶対時刻に直し、現在モードの軸へ変換して playhead を追従させる。
+function syncFromVideo() {
+  if (!currentVideo) return;
+  const r = firstVisibleTrack();
+  const base = state.mode === 'elapsed' && r ? r.tRange.start : 0;
+  playback.seek(currentVideo.t + $('video-el').currentTime * 1000 - base);
+}
+function openVideoPanel(v) {
+  const vid = $('video-el');
+  $('video-name').textContent = v.name;
+  vid.src = v.url;
+  $('video-panel').classList.remove('hidden');
+  // 動画をmasterにするので app のクロックは止める
+  playback.pause(); $('play-btn').textContent = '▶';
+  currentVideo = v;
+  resizeCanvas(); refitTransform(); draw();
+  vid.play().catch(() => { /* autoplayブロックは手動再生に委ねる */ });
+}
+function closeVideoPanel() {
+  const panel = $('video-panel');
+  if (panel.classList.contains('hidden')) return;
+  const vid = $('video-el');
+  vid.pause(); vid.removeAttribute('src'); vid.load();
+  currentVideo = null;
+  panel.classList.add('hidden');
+  resizeCanvas(); refitTransform(); draw();
 }
 
 // マーク配置: 右クリック→4択メニュー→クリック地点に配置
@@ -266,7 +363,18 @@ markMenu.querySelectorAll('button').forEach((b) =>
     hideMenu(); draw(); renderSidebar();
   }));
 window.addEventListener('pointerdown', (e) => { if (!markMenu.contains(e.target)) hideMenu(); });
-window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideMenu(); cancelPending(); } });
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideMenu(); cancelPending(); closeVideoPanel(); } });
+$('video-close').addEventListener('click', closeVideoPanel);
+// 再生中はrAFで毎フレーム同期(滑らか)。停止/スクラブ時はtimeupdate/seekedで追従。
+function videoTickLoop() {
+  const vid = $('video-el');
+  if (!currentVideo || vid.paused) return;
+  syncFromVideo();
+  requestAnimationFrame(videoTickLoop);
+}
+$('video-el').addEventListener('play', () => requestAnimationFrame(videoTickLoop));
+$('video-el').addEventListener('timeupdate', syncFromVideo);
+$('video-el').addEventListener('seeked', syncFromVideo);
 
 window.addEventListener('resize', () => { resizeCanvas(); recomputeView(); draw(); });
 resizeCanvas();

@@ -30,10 +30,12 @@
       <div id="tag-list"></div>
       <h2>マーク</h2>
       <div id="mark-list"></div>
+      <h2>動画</h2>
+      <div id="video-list"></div>
     </aside>
     <section id="stage">
       <canvas id="map"></canvas>
-      <div id="drop-zone">CSVをここにドラッグ&ドロップ</div>
+      <div id="drop-zone">CSV / 動画をここにドラッグ&ドロップ</div>
       <div id="mark-menu" class="hidden">
         <button data-shape="triangle" data-color="#e02020"><span style="color:#e02020">▲</span> 赤三角</button>
         <button data-shape="triangle" data-color="#f1c40f"><span style="color:#f1c40f">▲</span> 黄三角</button>
@@ -41,6 +43,13 @@
         <button data-shape="circle" data-color="#f1c40f"><span style="color:#f1c40f">●</span> 黄丸</button>
       </div>
     </section>
+    <aside id="video-panel" class="hidden">
+      <div id="video-bar">
+        <span id="video-name"></span>
+        <button id="video-close" title="閉じる (Esc)">×</button>
+      </div>
+      <video id="video-el" controls></video>
+    </aside>
   </main>
 
   <footer id="transport">

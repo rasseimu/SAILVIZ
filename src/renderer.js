@@ -46,8 +46,34 @@ function drawMark(ctx, s, mark) {
   ctx.stroke();
 }
 
+// 動画バッジ。開始時刻に当たる軌跡点へ 角丸矩形＋白い▶ を描く(クリックで再生)。
+function drawVideoBadge(ctx, s) {
+  const w = 22, h = 16, r = 4;
+  const x = s.px - w / 2, y = s.py - h / 2;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+  ctx.fillStyle = '#0d3b5e';
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = '#fff';
+  ctx.stroke();
+  // 白い再生三角
+  ctx.beginPath();
+  ctx.moveTo(s.px - 3, s.py - 4);
+  ctx.lineTo(s.px - 3, s.py + 4);
+  ctx.lineTo(s.px + 5, s.py);
+  ctx.closePath();
+  ctx.fillStyle = '#fff';
+  ctx.fill();
+}
+
 export function drawScene(ctx, state) {
-  const { transform: T, tracks, events, now, mode, crop, referenceTrack, marks = [] } = state;
+  const { transform: T, tracks, events, now, mode, crop, referenceTrack, marks = [], videos = [] } = state;
   ctx.clearRect(0, 0, T.w, T.h);
   if (!T.proj) return;
 
@@ -113,5 +139,13 @@ export function drawScene(ctx, state) {
     ctx.closePath();
     ctx.fillStyle = '#c0392b';
     ctx.fill();
+  }
+
+  // 動画バッジ。開始時刻(絶対epoch)を基準トラックで補間した位置に置く。
+  for (const v of videos) {
+    if (!referenceTrack) continue;
+    const pos = positionAt(referenceTrack.points, v.t);
+    if (!pos) continue;
+    drawVideoBadge(ctx, toScreen(pos.lat, pos.lon, T));
   }
 }

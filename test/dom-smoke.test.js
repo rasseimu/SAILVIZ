@@ -25,6 +25,7 @@ function mockCtx() {
     clearRect: rec('clearRect'), beginPath: rec('beginPath'), moveTo: rec('moveTo'),
     lineTo: rec('lineTo'), stroke: rec('stroke'), arc: rec('arc'), fill: rec('fill'),
     closePath: rec('closePath'), fillRect: rec('fillRect'), setLineDash: rec('setLineDash'),
+    arcTo: rec('arcTo'),
     set strokeStyle(_v) {}, set fillStyle(_v) {}, set lineWidth(_v) {}, set globalAlpha(_v) {},
   };
 }
@@ -52,6 +53,28 @@ test('renderer draws a real track without throwing and strokes the polyline', ()
   }));
   assert.ok(ctx.calls.stroke > 0, 'polyline stroked');
   assert.ok(ctx.calls.arc > 0, 'current-position marker drawn');
+});
+
+test('renderer draws a video badge at the interpolated reference-track position', () => {
+  const track = loadTrack('Location0807.csv', '#1c72b8');
+  const T = fitTransform(track.bounds, 800, 600);
+  const range = globalRange([track], 'absolute');
+  const midT = (track.tRange.start + track.tRange.end) / 2;
+  const ctx = mockCtx();
+  drawScene(ctx, {
+    transform: T, tracks: [track], events: [], marks: [],
+    videos: [{ id: 'v0', t: midT, url: 'blob:x', name: 'clip.mp4' }],
+    now: range.start, mode: 'absolute', crop: range, referenceTrack: track,
+  });
+  const withBadge = ctx.calls.fill || 0;
+  // 基準トラックが無ければバッジは描かれない
+  const ctx2 = mockCtx();
+  drawScene(ctx2, {
+    transform: T, tracks: [track], events: [], marks: [],
+    videos: [{ id: 'v0', t: midT, url: 'blob:x', name: 'clip.mp4' }],
+    now: range.start, mode: 'absolute', crop: range, referenceTrack: null,
+  });
+  assert.ok(withBadge > (ctx2.calls.fill || 0), 'video badge adds fills when reference track present');
 });
 
 test('renderer pins a lat/lon-less tag via reference-track interpolation', () => {
