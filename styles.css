@@ -42,8 +42,9 @@ main { flex: 1; display: flex; min-height: 0; }
 #video-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
   color: #dfe8ef; font-size: 13px; }
 #video-bar #video-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#video-close { margin-left: auto; width: 26px; height: 26px; border: none; border-radius: 4px;
-  background: #24313d; color: #fff; font-size: 16px; cursor: pointer; }
-#video-close:hover { background: #33475a; }
+#video-bar button { width: 26px; height: 26px; border: none; border-radius: 4px;
+  background: #24313d; color: #fff; font-size: 14px; cursor: pointer; }
+#video-bar button:hover { background: #33475a; }
+#video-delete { margin-left: auto; }
 #video-el { flex: 1; min-height: 0; width: 100%; background: #000; object-fit: contain; }
 .vid-name { cursor: pointer; text-decoration: underline dotted; }

@@ -204,11 +204,18 @@ function renderSidebar() {
   vl.querySelectorAll('span[data-play]').forEach((s) =>
     s.addEventListener('click', (e) => openVideoPanel(state.videos[+e.target.dataset.play])));
   vl.querySelectorAll('button[data-delvid]').forEach((b) =>
-    b.addEventListener('click', (e) => {
-      const [v] = state.videos.splice(+e.target.dataset.delvid, 1);
-      URL.revokeObjectURL(v.url);
-      draw(); renderSidebar();
-    }));
+    b.addEventListener('click', (e) => deleteVideo(+e.target.dataset.delvid)));
+}
+
+// 動画を削除。開いている動画ならパネルを閉じ、ObjectURLを解放。
+function deleteVideo(index) {
+  const v = state.videos[index];
+  if (!v) return;
+  if (v === currentVideo) closeVideoPanel();
+  state.videos.splice(index, 1);
+  URL.revokeObjectURL(v.url);
+  statusEl.textContent = `動画「${v.name}」を削除しました`;
+  draw(); renderSidebar();
 }
 
 // --- 入力配線 ---
@@ -369,6 +376,7 @@ markMenu.querySelectorAll('button').forEach((b) =>
 window.addEventListener('pointerdown', (e) => { if (!markMenu.contains(e.target)) hideMenu(); });
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideMenu(); cancelPending(); closeVideoPanel(); } });
 $('video-close').addEventListener('click', closeVideoPanel);
+$('video-delete').addEventListener('click', () => { if (currentVideo) deleteVideo(state.videos.indexOf(currentVideo)); });
 // 再生中はrAFで毎フレーム同期(滑らか)。停止/スクラブ時はtimeupdate/seekedで追従。
 function videoTickLoop() {
   const vid = $('video-el');
