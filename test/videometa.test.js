@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMp4CreationTime } from '../src/videometa.js';
+import { parseMp4CreationTime, parseMp4Times } from '../src/videometa.js';
 
 const MAC_EPOCH_OFFSET = 2082844800; // 1904→1970 の秒差
 
@@ -21,21 +21,25 @@ function concat(...arrs) {
   for (const a of arrs) { out.set(a, o); o += a.length; }
   return out;
 }
-// version0 の mvhd ペイロード(creation/modification/timescale/duration + 残りは省略可)
-function mvhdV0(creationSec) {
+// version0 の mvhd ペイロード(creation/modification/timescale/duration)
+function mvhdV0(creationSec, timescale = 0, duration = 0) {
   const p = new Uint8Array(4 + 16);
   const dv = new DataView(p.buffer);
   dv.setUint8(0, 0);            // version
   dv.setUint32(4, creationSec); // creation_time
+  dv.setUint32(12, timescale);  // timescale
+  dv.setUint32(16, duration);   // duration
   return p;
 }
-function mvhdV1(creationSec) {
+function mvhdV1(creationSec, timescale = 0, duration = 0) {
   const p = new Uint8Array(4 + 28);
   const dv = new DataView(p.buffer);
   dv.setUint8(0, 1);                    // version 1 → 64bit
   // creation_time は 8 バイト。上位32bitは0、下位に値。
   dv.setUint32(4, Math.floor(creationSec / 2 ** 32));
   dv.setUint32(8, creationSec >>> 0);
+  dv.setUint32(20, timescale);          // timescale (4)
+  dv.setUint32(28, duration >>> 0);     // duration 下位32bit
   return p;
 }
 
@@ -55,6 +59,24 @@ test('parses mvhd creation_time (version 1 / 64-bit)', () => {
   const moov = box('moov', box('mvhd', mvhdV1(creation)));
   const got = parseMp4CreationTime(moov.buffer);
   assert.equal(got, unixSec * 1000);
+});
+
+test('parseMp4Times returns creation and duration (ms)', () => {
+  const unixSec = Math.floor(Date.parse('2024-08-07T05:30:00Z') / 1000);
+  const creation = unixSec + MAC_EPOCH_OFFSET;
+  const timescale = 600, durationUnits = 600 * 90; // 90秒
+  const moov = box('moov', box('mvhd', mvhdV0(creation, timescale, durationUnits)));
+  const got = parseMp4Times(moov.buffer);
+  assert.equal(got.creationMs, unixSec * 1000);
+  assert.equal(got.durationMs, 90 * 1000);
+  // creation_time が「録画終了」の端末では 開始 = creation - duration
+  assert.equal(got.creationMs - got.durationMs, (unixSec - 90) * 1000);
+});
+
+test('parseMp4Times: durationMs is null when timescale is 0', () => {
+  const moov = box('moov', box('mvhd', mvhdV0(2082844800 + 100, 0, 0)));
+  const got = parseMp4Times(moov.buffer);
+  assert.equal(got.durationMs, null);
 });
 
 test('returns null when moov/mvhd absent', () => {

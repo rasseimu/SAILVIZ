@@ -6,7 +6,7 @@ import { computeBounds, fitTransform, unproject, project } from './projection.js
 import { pan, zoomAt, screenToWorld, worldToScreen } from './viewport.js';
 import { globalRange, remapEventsToAxis } from './timeaxis.js';
 import { positionAt } from './interpolate.js';
-import { parseMp4CreationTime } from './videometa.js';
+import { parseMp4Times } from './videometa.js';
 import { drawScene } from './renderer.js';
 import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
@@ -110,16 +110,20 @@ function nowAbsolute() {
 async function addVideo(file) {
   if (!firstVisibleTrack()) { statusEl.textContent = '先にGPS軌跡を読み込んでください'; return; }
   const url = URL.createObjectURL(file);
-  // 埋め込み撮影時刻を優先。取れない/軌跡範囲外なら現在の再生位置にフォールバック。
+  // 埋め込み撮影時刻を優先。creation_time は端末により録画終了時刻なので、
+  // duration が取れれば 開始 = creation - duration で録画開始を復元する。
   let meta = null;
-  try { meta = parseMp4CreationTime(await file.arrayBuffer()); } catch { /* パース失敗はフォールバック */ }
+  try { meta = parseMp4Times(await file.arrayBuffer()); } catch { /* パース失敗はフォールバック */ }
+  const embedded = meta && meta.durationMs != null ? meta.creationMs - meta.durationMs
+    : (meta ? meta.creationMs : null);
   const range = globalRange(state.tracks, 'absolute');
   let t, src;
-  if (meta != null && meta >= range.start && meta <= range.end) {
-    t = meta; src = '埋め込み撮影時刻';
+  if (embedded != null && embedded >= range.start && embedded <= range.end) {
+    t = embedded;
+    src = meta.durationMs != null ? '埋め込み撮影時刻(終了−長さ=開始)' : '埋め込み撮影時刻';
   } else {
     t = nowAbsolute();
-    src = meta != null ? '現在位置(撮影時刻は軌跡範囲外)' : '現在の再生位置';
+    src = embedded != null ? '現在位置(撮影時刻は軌跡範囲外)' : '現在の再生位置';
   }
   state.videos.push({ id: `vid${videoSeq++}`, t, url, name: file.name });
   statusEl.textContent = `動画「${file.name}」を${src}に配置しました`;

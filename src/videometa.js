@@ -27,24 +27,43 @@ function findBox(dv, start, end, type) {
   return null;
 }
 
-function readMvhdCreation(dv, payloadStart) {
+// mvhd から creation_time(Unix ms) と duration(ms) を読む。
+// version0: creation(4)/modification(4)/timescale(4)/duration(4)
+// version1: creation(8)/modification(8)/timescale(4)/duration(8)
+function readMvhd(dv, payloadStart) {
   const version = dv.getUint8(payloadStart);
   const p = payloadStart + 4; // version(1)+flags(3) をスキップ
-  const creation = version === 1
-    ? dv.getUint32(p) * 2 ** 32 + dv.getUint32(p + 4)
-    : dv.getUint32(p);
+  let creation, timescale, duration;
+  if (version === 1) {
+    creation = dv.getUint32(p) * 2 ** 32 + dv.getUint32(p + 4);
+    timescale = dv.getUint32(p + 16);
+    duration = dv.getUint32(p + 20) * 2 ** 32 + dv.getUint32(p + 24);
+  } else {
+    creation = dv.getUint32(p);
+    timescale = dv.getUint32(p + 8);
+    duration = dv.getUint32(p + 12);
+  }
   if (!creation) return null; // 0 は未設定扱い
   const unixSec = creation - MAC_EPOCH_OFFSET;
-  return unixSec > 0 ? unixSec * 1000 : null;
+  if (unixSec <= 0) return null;
+  return {
+    creationMs: unixSec * 1000,
+    durationMs: timescale > 0 ? (duration / timescale) * 1000 : null,
+  };
 }
 
-// ArrayBuffer を受け取り、撮影時刻(Unix ms) を返す。取れなければ null。
-// 注意: creation_time はUTC想定だが、端末によっては現地時刻で書かれ tz ぶんズレ得る。
-export function parseMp4CreationTime(arrayBuffer) {
+// ArrayBuffer から { creationMs, durationMs } を返す。取れなければ null。
+// 注意: creation_time はUTC想定だが端末により現地時刻/録画終了時刻で書かれ得る。
+export function parseMp4Times(arrayBuffer) {
   const dv = new DataView(arrayBuffer);
   const moov = findBox(dv, 0, dv.byteLength, 'moov');
   if (!moov) return null;
   const mvhd = findBox(dv, moov.start, moov.end, 'mvhd');
   if (!mvhd) return null;
-  return readMvhdCreation(dv, mvhd.start);
+  return readMvhd(dv, mvhd.start);
+}
+
+// 後方互換: creation_time(Unix ms) のみ。
+export function parseMp4CreationTime(arrayBuffer) {
+  return parseMp4Times(arrayBuffer)?.creationMs ?? null;
 }
