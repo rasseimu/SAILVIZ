@@ -47,7 +47,7 @@ function drawMark(ctx, s, mark) {
 }
 
 // 動画バッジ。開始時刻に当たる軌跡点へ 角丸矩形＋白い▶ を描く(クリックで再生)。
-function drawVideoBadge(ctx, s) {
+function drawVideoBadge(ctx, s, active = false) {
   const w = 22, h = 16, r = 4;
   const x = s.px - w / 2, y = s.py - h / 2;
   ctx.beginPath();
@@ -57,7 +57,7 @@ function drawVideoBadge(ctx, s) {
   ctx.arcTo(x, y + h, x, y, r);
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
-  ctx.fillStyle = '#0d3b5e';
+  ctx.fillStyle = active ? '#e67e22' : '#0d3b5e'; // 再生中の動画はオレンジ
   ctx.fill();
   ctx.lineWidth = 1.5;
   ctx.strokeStyle = '#fff';
@@ -73,7 +73,7 @@ function drawVideoBadge(ctx, s) {
 }
 
 export function drawScene(ctx, state) {
-  const { transform: T, tracks, events, now, mode, crop, referenceTrack, marks = [], videos = [] } = state;
+  const { transform: T, tracks, events, now, mode, crop, referenceTrack, marks = [], videos = [], activeVideoId = null } = state;
   ctx.clearRect(0, 0, T.w, T.h);
   if (!T.proj) return;
 
@@ -146,6 +146,6 @@ export function drawScene(ctx, state) {
     if (!referenceTrack) continue;
     const pos = positionAt(referenceTrack.points, v.t);
     if (!pos) continue;
-    drawVideoBadge(ctx, toScreen(pos.lat, pos.lon, T));
+    drawVideoBadge(ctx, toScreen(pos.lat, pos.lon, T), v.id === activeVideoId);
   }
 }

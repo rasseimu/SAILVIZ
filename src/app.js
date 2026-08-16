@@ -24,9 +24,10 @@ const state = {
   events: [],
   marks: [],
   videos: [],
+  pins: [], // タイムライン上に自由に刺すピン(絶対時刻)。クリックでcrop開始を移動。
   reflections: loadReflections(),
   mode: 'absolute',
-  accuracyFilter: false,
+  accuracyFilter: true,
   crop: { start: 0, end: 0 },
   transform: { scale: 1, cx: 0, cy: 0, w: 1, h: 1, proj: null },
 };
@@ -50,7 +51,15 @@ const playback = createPlayback({ onTick: () => draw() });
 const timeline = createTimeline($('timeline'), {
   onCropChange: (c) => { state.crop = c; playback.setRange(c); draw(); },
   onScrub: (t) => playback.seek(t),
+  onPinAdd: (axisT) => { state.pins.push(axisT + currentBase()); draw(); },
+  onPinRemove: (idx) => { state.pins.splice(idx, 1); draw(); },
 });
+
+// elapsedモードでの軸オフセット(基準トラック開始)。軸時刻⇄絶対時刻の変換に使う。
+function currentBase() {
+  const refTrack = state.tracks.find((t) => t.visible) || null;
+  return state.mode === 'elapsed' && refTrack ? refTrack.tRange.start : 0;
+}
 
 function recomputeView() {
   const bounds = computeBounds(state.tracks);
@@ -67,20 +76,22 @@ function draw() {
   // および elapsed 軸へのタグ変換の基準に使う。elapsed で開始時刻の異なる複数トラックを
   // 重ねた場合、タグは基準トラックの開始を0とした軸上に配置される（start-together比較の規約）。
   const refTrack = state.tracks.find((t) => t.visible) || null;
-  const base = state.mode === 'elapsed' && refTrack ? refTrack.tRange.start : 0;
+  const base = currentBase();
   const axisEvents = remapEventsToAxis(state.events, state.mode, base);
   // 動画を [開始, 開始+長さ] の区間としてタイムライン軸に変換(長さ不明なら点)
   const axisVideos = remapEventsToAxis(
     state.videos.map((v) => ({ t: v.t, tEnd: v.durationMs != null ? v.t + v.durationMs : null })),
     state.mode, base,
   );
+  // ピンを軸時刻へ変換(タグ/動画と同様、絶対時刻で保持)
+  const axisPins = remapEventsToAxis(state.pins.map((t) => ({ t })), state.mode, base).map((e) => e.t);
 
   drawScene(mapCtx, {
     transform: state.transform, tracks: state.tracks, events: state.events,
-    marks: state.marks, videos: state.videos,
+    marks: state.marks, videos: state.videos, activeVideoId: currentVideo?.id,
     now, mode: state.mode, crop: state.crop, referenceTrack: refTrack,
   });
-  timeline.render({ range, crop: state.crop, now, events: axisEvents, pending: pendingStart, videos: axisVideos });
+  timeline.render({ range, crop: state.crop, now, events: axisEvents, pending: pendingStart, videos: axisVideos, pins: axisPins });
   $('clock').textContent = range.end > range.start ? formatClock(now, state.mode) : '--:--:--';
   $('drop-zone').classList.toggle('hidden', state.tracks.length > 0 || state.events.length > 0);
 }
@@ -264,7 +275,8 @@ function renderSidebar() {
 
   const vl = $('video-list'); vl.innerHTML = '';
   state.videos.forEach((v, i) => {
-    const row = document.createElement('div'); row.className = 'track-row';
+    const row = document.createElement('div');
+    row.className = v === currentVideo ? 'track-row active' : 'track-row'; // 再生中はオレンジ
     row.innerHTML =
       `<span>▶</span><span class="vid-name" data-play="${i}">${v.name}</span>` +
       `<button data-delvid="${i}">×</button>`;
@@ -419,7 +431,7 @@ function openVideoPanel(v) {
   // 動画をmasterにするので app のクロックは止める
   playback.pause(); $('play-btn').textContent = '▶';
   currentVideo = v;
-  resizeCanvas(); refitTransform(); draw();
+  resizeCanvas(); refitTransform(); draw(); renderSidebar();
   vid.play().catch(() => { /* autoplayブロックは手動再生に委ねる */ });
 }
 function closeVideoPanel() {
@@ -429,7 +441,7 @@ function closeVideoPanel() {
   vid.pause(); vid.removeAttribute('src'); vid.load();
   currentVideo = null;
   panel.classList.add('hidden');
-  resizeCanvas(); refitTransform(); draw();
+  resizeCanvas(); refitTransform(); draw(); renderSidebar();
 }
 
 // マーク配置: 右クリック→4択メニュー→クリック地点に配置
