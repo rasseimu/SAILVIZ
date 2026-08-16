@@ -45,6 +45,13 @@ export function createTimeline(canvas, { onCropChange, onScrub }) {
     ctx.fillStyle = '#0d3b5e';
     ctx.fillRect(xL - 2, 0, 4, h);
     ctx.fillRect(xR - 2, 0, 4, h);
+    // 動画範囲(上端の濃紺バー。動画バッジと同色で対応づけ。長さ不明なら▶ティック)
+    for (const v of state.videos || []) {
+      const x0 = tToX(v.t);
+      ctx.fillStyle = '#0d3b5e';
+      if (v.tEnd != null) ctx.fillRect(x0, 1, Math.max(2, tToX(v.tEnd) - x0), 6);
+      else ctx.fillRect(x0 - 1, 1, 2, 6);
+    }
     // 区間選択の始点プレビュー(終点クリック待ち)
     if (state.pending != null) {
       const xP = tToX(state.pending);

@@ -32,6 +32,9 @@
       <div id="mark-list"></div>
       <h2>動画</h2>
       <div id="video-list"></div>
+      <h2>反省</h2>
+      <button id="reflection-add" class="side-add">＋ 反省を追加</button>
+      <div id="reflection-list"></div>
     </aside>
     <section id="stage">
       <canvas id="map"></canvas>
@@ -52,6 +55,26 @@
       <video id="video-el" controls></video>
     </aside>
   </main>
+
+  <section id="reflection-editor" class="hidden">
+    <div id="refl-bar">
+      <strong id="refl-title">反省を記入</strong>
+      <span id="refl-hint">＠で部員をメンション・動画リストのクリックで動画をメンション</span>
+      <label class="refl-wind-field">風向
+        <select id="refl-wind-dir"></select>
+      </label>
+      <label class="refl-wind-field">風速
+        <input id="refl-wind-speed" type="number" step="0.1" min="0" /> m/s
+      </label>
+      <span id="refl-wind-src"></span>
+      <button id="refl-save">保存</button>
+      <button id="refl-cancel">破棄</button>
+    </div>
+    <div id="refl-input-wrap">
+      <textarea id="refl-text" rows="3" placeholder="今日の反省…（@ で部員、動画リストのクリックで動画をメンション）"></textarea>
+      <ul id="refl-mention" class="hidden"></ul>
+    </div>
+  </section>
 
   <footer id="transport">
     <button id="play-btn">▶</button>

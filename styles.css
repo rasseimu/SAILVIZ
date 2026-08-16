@@ -48,3 +48,38 @@ main { flex: 1; display: flex; min-height: 0; }
 #video-delete { margin-left: auto; }
 #video-el { flex: 1; min-height: 0; width: 100%; background: #000; object-fit: contain; }
 .vid-name { cursor: pointer; text-decoration: underline dotted; }
+
+/* --- 反省ノート --- */
+.side-add { width: 100%; padding: 5px; margin-bottom: 6px; border: 1px dashed #9db2c4;
+  background: #e7eef4; color: #0d3b5e; border-radius: 5px; cursor: pointer; font-size: 13px; }
+.side-add:hover { background: #d8e4ee; }
+.refl-row { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; padding: 4px 0;
+  border-bottom: 1px solid #e1e8ee; }
+.refl-row .refl-snippet { flex: 1; min-width: 0; cursor: pointer; }
+.refl-row .refl-snippet .refl-meta { color: #5a6b7b; font-size: 11px; }
+.refl-row button { border: none; background: none; cursor: pointer; color: #b23; }
+
+#reflection-editor { flex: 0 0 auto; background: #eef4f9; border-top: 2px solid #1c72b8;
+  padding: 8px 14px; }
+#reflection-editor.hidden { display: none; }
+#refl-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+#refl-title { color: #0d3b5e; }
+#refl-hint { font-size: 12px; color: #5a6b7b; }
+.refl-wind-field { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+#refl-wind-speed { width: 62px; }
+#refl-wind-src { font-size: 12px; color: #5a6b7b; }
+#refl-save, #refl-cancel { padding: 4px 12px; border-radius: 4px; border: 1px solid #b7c4d0;
+  cursor: pointer; }
+#refl-save { margin-left: auto; background: #1c72b8; color: #fff; border-color: #1c72b8; }
+#refl-cancel { background: #fff; }
+#refl-input-wrap { position: relative; }
+#refl-text { width: 100%; resize: vertical; font-family: inherit; font-size: 14px;
+  padding: 6px; border: 1px solid #b7c4d0; border-radius: 4px; }
+#refl-mention { position: absolute; left: 8px; bottom: 100%; z-index: 20; margin: 0 0 2px;
+  padding: 4px 0; list-style: none; min-width: 180px; max-height: 220px; overflow-y: auto;
+  background: #fff; border: 1px solid #b7c4d0; border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(13,59,94,0.25); }
+#refl-mention.hidden { display: none; }
+#refl-mention li { padding: 5px 12px; cursor: pointer; font-size: 13px; }
+#refl-mention li.active, #refl-mention li:hover { background: #eaf1f7; }
+#refl-mention li .m-kana { color: #5a6b7b; margin-left: 6px; font-size: 12px; }

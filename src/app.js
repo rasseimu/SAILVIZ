@@ -10,6 +10,11 @@ import { parseMp4Times } from './videometa.js';
 import { drawScene } from './renderer.js';
 import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
+import { memberList, filterMembers } from './members.js';
+import { DIR_NAMES, fetchWind } from './wind.js';
+import {
+  createReflection, loadReflections, saveReflections, windLabel, formatVideoPos,
+} from './reflections.js';
 
 const PALETTE = ['#1c72b8', '#e67e22', '#27ae60', '#8e44ad', '#c0392b', '#16a085'];
 
@@ -18,6 +23,7 @@ const state = {
   events: [],
   marks: [],
   videos: [],
+  reflections: loadReflections(),
   mode: 'absolute',
   accuracyFilter: false,
   crop: { start: 0, end: 0 },
@@ -62,13 +68,18 @@ function draw() {
   const refTrack = state.tracks.find((t) => t.visible) || null;
   const base = state.mode === 'elapsed' && refTrack ? refTrack.tRange.start : 0;
   const axisEvents = remapEventsToAxis(state.events, state.mode, base);
+  // 動画を [開始, 開始+長さ] の区間としてタイムライン軸に変換(長さ不明なら点)
+  const axisVideos = remapEventsToAxis(
+    state.videos.map((v) => ({ t: v.t, tEnd: v.durationMs != null ? v.t + v.durationMs : null })),
+    state.mode, base,
+  );
 
   drawScene(mapCtx, {
     transform: state.transform, tracks: state.tracks, events: state.events,
     marks: state.marks, videos: state.videos,
     now, mode: state.mode, crop: state.crop, referenceTrack: refTrack,
   });
-  timeline.render({ range, crop: state.crop, now, events: axisEvents, pending: pendingStart });
+  timeline.render({ range, crop: state.crop, now, events: axisEvents, pending: pendingStart, videos: axisVideos });
   $('clock').textContent = range.end > range.start ? formatClock(now, state.mode) : '--:--:--';
   $('drop-zone').classList.toggle('hidden', state.tracks.length > 0 || state.events.length > 0);
 }
@@ -125,8 +136,21 @@ async function addVideo(file) {
     t = nowAbsolute();
     src = embedded != null ? '現在位置(撮影時刻は軌跡範囲外)' : '現在の再生位置';
   }
-  state.videos.push({ id: `vid${videoSeq++}`, t, url, name: file.name });
+  const v = { id: `vid${videoSeq++}`, t, url, name: file.name, durationMs: meta?.durationMs ?? null };
+  state.videos.push(v);
   statusEl.textContent = `動画「${file.name}」を${src}に配置しました`;
+  if (v.durationMs == null) loadVideoDuration(v); // mvhdで取れなければ要素から補完
+}
+
+// 動画の再生時間を <video> のメタから読み、範囲バー用に埋める(mp4以外/パース失敗の保険)。
+function loadVideoDuration(v) {
+  const probe = document.createElement('video');
+  probe.preload = 'metadata';
+  probe.onloadedmetadata = () => {
+    if (Number.isFinite(probe.duration)) { v.durationMs = probe.duration * 1000; draw(); }
+    probe.removeAttribute('src'); probe.load();
+  };
+  probe.src = v.url;
 }
 
 function addTrack(name, header, rows) {
@@ -202,9 +226,15 @@ function renderSidebar() {
     vl.appendChild(row);
   });
   vl.querySelectorAll('span[data-play]').forEach((s) =>
-    s.addEventListener('click', (e) => openVideoPanel(state.videos[+e.target.dataset.play])));
+    s.addEventListener('click', (e) => {
+      const v = state.videos[+e.target.dataset.play];
+      // 反省エディタが開いていれば「クリックで動画をメンション」、そうでなければ再生。
+      if (editorOpen) insertVideoMention(v); else openVideoPanel(v);
+    }));
   vl.querySelectorAll('button[data-delvid]').forEach((b) =>
     b.addEventListener('click', (e) => deleteVideo(+e.target.dataset.delvid)));
+
+  renderReflectionList();
 }
 
 // 動画を削除。開いている動画ならパネルを閉じ、ObjectURLを解放。
@@ -388,6 +418,234 @@ $('video-el').addEventListener('play', () => requestAnimationFrame(videoTickLoop
 $('video-el').addEventListener('timeupdate', syncFromVideo);
 $('video-el').addEventListener('seeked', syncFromVideo);
 
+// ================= 反省ノート =================
+let editorOpen = false;
+let editingId = null;        // 既存反省の編集時にそのid
+let pendingPeople = [];      // 挿入済みメンション [{fullName, given}]
+let pendingVideos = [];      // 挿入済み動画 [{name, tMs, token}]
+let currentWind = null;      // 取得/入力中の風 {dir,speed,source,station,obsMs}
+let windEdited = false;      // ユーザーが風欄を手編集したか
+let reflSeq = 0;
+const mention = { active: false, atPos: -1, items: [], index: 0 };
+
+// 風向セレクトを16方位(＋空)で初期化。
+(function initWindSelect() {
+  const sel = $('refl-wind-dir');
+  sel.innerHTML = '<option value="">—</option>'
+    + DIR_NAMES.map((d) => `<option value="${d}">${d}</option>`).join('');
+})();
+
+// 練習日時(絶対時刻の全体範囲, JST日付)。トラック未読込なら null。
+function practiceInfo() {
+  const range = globalRange(state.tracks, 'absolute');
+  if (!(range.end > range.start)) return null;
+  const date = new Intl.DateTimeFormat('ja-JP', {
+    timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(range.start));
+  return { date, startMs: range.start, endMs: range.end };
+}
+
+// 保存済み反省の一覧をサイドバーに描画。
+function renderReflectionList() {
+  const list = $('reflection-list'); list.innerHTML = '';
+  state.reflections.forEach((r, i) => {
+    const row = document.createElement('div'); row.className = 'refl-row';
+    const snippet = (r.text || '(空)').replace(/\s+/g, ' ').slice(0, 40);
+    const meta = [r.practice?.date, windLabel(r.wind, { formatObs: formatObsTime }).replace('風: ', '🍃')]
+      .filter(Boolean).join(' ・ ');
+    row.innerHTML =
+      `<span class="refl-snippet" data-edit="${i}">${escapeHtml(snippet)}`
+      + `<div class="refl-meta">${escapeHtml(meta)}</div></span>`
+      + `<button data-delrefl="${i}" title="削除">×</button>`;
+    list.appendChild(row);
+  });
+  list.querySelectorAll('span[data-edit]').forEach((s) =>
+    s.addEventListener('click', (e) => openReflectionEditor(state.reflections[+e.currentTarget.dataset.edit])));
+  list.querySelectorAll('button[data-delrefl]').forEach((b) =>
+    b.addEventListener('click', (e) => {
+      state.reflections.splice(+e.target.dataset.delrefl, 1);
+      persistReflections(); renderReflectionList();
+    }));
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function formatObsTime(ms) {
+  return new Intl.DateTimeFormat('ja-JP', {
+    timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date(ms));
+}
+function persistReflections() { saveReflections(state.reflections); }
+
+function setWindInputs(wind) {
+  $('refl-wind-dir').value = wind?.dir ?? '';
+  $('refl-wind-speed').value = wind && wind.speed != null ? wind.speed : '';
+  $('refl-wind-src').textContent = wind
+    ? (wind.source === 'amedas'
+      ? `アメダス${wind.station ?? ''}${wind.obsMs != null ? ' ' + formatObsTime(wind.obsMs) : ''}`
+      : '手入力')
+    : '';
+}
+
+// エディタを開く(existing を渡せば編集、無ければ新規)。
+async function openReflectionEditor(existing = null) {
+  editorOpen = true;
+  editingId = existing?.id ?? null;
+  windEdited = false;
+  const members = memberList();
+  $('refl-text').value = existing?.text ?? '';
+  pendingPeople = (existing?.people ?? []).map((full) => {
+    const m = members.find((x) => x.fullName === full);
+    return { fullName: full, given: m?.given ?? full.split(' ').pop() };
+  });
+  pendingVideos = (existing?.videos ?? []).map((v) => ({
+    name: v.name, tMs: v.tMs ?? 0, token: videoToken(v.name, v.tMs ?? 0),
+  }));
+  $('refl-title').textContent = existing ? '反省を編集' : '反省を記入';
+  $('reflection-editor').classList.remove('hidden');
+  hideMention();
+  $('refl-text').focus();
+
+  if (existing) {
+    currentWind = existing.wind ?? null;
+    setWindInputs(currentWind);
+  } else {
+    currentWind = null;
+    setWindInputs(null);
+    $('refl-wind-src').textContent = '風取得中…';
+    const target = firstVisibleTrack() ? nowAbsolute() : Date.now();
+    const w = await fetchWind(target);
+    // 取得中にユーザーが手入力/別操作したら上書きしない。
+    if (editorOpen && !editingId && !windEdited) {
+      currentWind = w;
+      setWindInputs(w);
+      if (!w) $('refl-wind-src').textContent = '自動取得できず(手入力してください)';
+    }
+  }
+}
+
+function closeReflectionEditor() {
+  editorOpen = false; editingId = null;
+  hideMention();
+  $('reflection-editor').classList.add('hidden');
+}
+
+function videoToken(name, tMs) { return `[動画:${name}@${formatVideoPos(tMs)}]`; }
+
+// 動画メンションを本文カーソル位置に挿入(「クリックで動画をメンション」)。
+function insertVideoMention(v) {
+  const tMs = v === currentVideo ? $('video-el').currentTime * 1000 : 0;
+  const token = videoToken(v.name, tMs);
+  insertAtCaret(token + ' ');
+  pendingVideos.push({ name: v.name, tMs, token });
+  statusEl.textContent = `動画「${v.name}」を反省にメンションしました`;
+}
+
+function insertAtCaret(text) {
+  const ta = $('refl-text');
+  const s = ta.selectionStart ?? ta.value.length;
+  const e = ta.selectionEnd ?? ta.value.length;
+  ta.value = ta.value.slice(0, s) + text + ta.value.slice(e);
+  const pos = s + text.length;
+  ta.setSelectionRange(pos, pos);
+  ta.focus();
+}
+
+// --- @メンションのオートコンプリート ---
+function updateMention() {
+  const ta = $('refl-text');
+  const caret = ta.selectionStart ?? ta.value.length;
+  const before = ta.value.slice(0, caret);
+  const m = before.match(/@([^\s@]*)$/); // 直近の@以降(空白を含まない)
+  if (!m) { hideMention(); return; }
+  mention.atPos = caret - m[0].length;
+  mention.items = filterMembers(m[1]);
+  mention.index = 0;
+  renderMention();
+}
+
+function renderMention() {
+  const box = $('refl-mention');
+  if (!mention.items.length) { hideMention(); return; }
+  mention.active = true;
+  box.innerHTML = mention.items.map((m, i) =>
+    `<li data-i="${i}" class="${i === mention.index ? 'active' : ''}">`
+    + `${escapeHtml(m.fullName)}<span class="m-kana">${escapeHtml(m.kana)}</span></li>`).join('');
+  box.classList.remove('hidden');
+  box.querySelectorAll('li').forEach((li) =>
+    li.addEventListener('mousedown', (e) => { // mousedownでtextareaのblur前に確定
+      e.preventDefault(); chooseMention(+li.dataset.i);
+    }));
+}
+
+function hideMention() { mention.active = false; $('refl-mention').classList.add('hidden'); }
+
+function chooseMention(i) {
+  const m = mention.items[i];
+  if (!m) return;
+  const ta = $('refl-text');
+  const caret = ta.selectionStart ?? ta.value.length;
+  const insert = `@${m.given} `;
+  ta.value = ta.value.slice(0, mention.atPos) + insert + ta.value.slice(caret);
+  const pos = mention.atPos + insert.length;
+  ta.setSelectionRange(pos, pos);
+  if (!pendingPeople.some((p) => p.fullName === m.fullName)) {
+    pendingPeople.push({ fullName: m.fullName, given: m.given });
+  }
+  hideMention();
+  ta.focus();
+}
+
+function saveReflection() {
+  const text = $('refl-text').value.trim();
+  const dir = $('refl-wind-dir').value;
+  const speedRaw = $('refl-wind-speed').value;
+  const speed = speedRaw === '' ? null : Number(speedRaw);
+  const wind = (dir || speed != null) ? {
+    dir, speed,
+    source: windEdited ? 'manual' : (currentWind?.source ?? 'manual'),
+    station: currentWind?.station,
+    obsMs: currentWind?.obsMs,
+  } : null;
+  // 本文に残っているメンションだけを構造化して保存(手で消したものは除外)。
+  const people = pendingPeople.filter((p) => text.includes(`@${p.given}`)).map((p) => p.fullName);
+  const videos = pendingVideos.filter((v) => text.includes(v.token)).map((v) => ({ name: v.name, tMs: v.tMs }));
+
+  if (editingId) {
+    const idx = state.reflections.findIndex((r) => r.id === editingId);
+    if (idx >= 0) {
+      state.reflections[idx] = { ...state.reflections[idx], text, people, videos, wind };
+    }
+  } else {
+    state.reflections.push(createReflection({
+      id: `refl${Date.now()}_${reflSeq++}`, createdAt: Date.now(),
+      text, people, videos, wind, practice: practiceInfo(),
+    }));
+  }
+  persistReflections();
+  closeReflectionEditor();
+  renderReflectionList();
+  statusEl.textContent = '反省を保存しました';
+}
+
+$('reflection-add').addEventListener('click', () => openReflectionEditor(null));
+$('refl-cancel').addEventListener('click', closeReflectionEditor);
+$('refl-save').addEventListener('click', saveReflection);
+$('refl-wind-dir').addEventListener('change', () => { windEdited = true; });
+$('refl-wind-speed').addEventListener('input', () => { windEdited = true; });
+$('refl-text').addEventListener('input', updateMention);
+$('refl-text').addEventListener('click', updateMention);
+$('refl-text').addEventListener('keydown', (e) => {
+  if (!mention.active) return;
+  if (e.key === 'ArrowDown') { e.preventDefault(); mention.index = (mention.index + 1) % mention.items.length; renderMention(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); mention.index = (mention.index - 1 + mention.items.length) % mention.items.length; renderMention(); }
+  else if (e.key === 'Enter') { e.preventDefault(); chooseMention(mention.index); }
+  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); hideMention(); }
+});
+
 window.addEventListener('resize', () => { resizeCanvas(); recomputeView(); draw(); });
 resizeCanvas();
 draw();
+renderReflectionList();

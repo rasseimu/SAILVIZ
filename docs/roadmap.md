@@ -51,6 +51,9 @@
 - **ステータス**: ✅ 完了（動画パネルを開くとその動画がmaster。appクロックを止め、動画のcurrentTimeを絶対時刻に直して毎フレーム(rAF)＋timeupdate/seekedでplayheadをseek→GPS現在位置マーカーが動画に追従。閉じると解除）
 - **既知の注意**: playback.seekはcrop(選択範囲)にクランプされるため、狭い区間を選択中は範囲端でマーカーが止まる。全体を追う場合は区間選択を解除（下バーで全体に戻す）。将来: 動画master時はクランプ回避も検討。
 
+### 7. 動画範囲をタイムラインに可視化
+- **ステータス**: ✅ 完了（各動画を [開始, 開始+duration] の区間としてタイムライン上端に濃紺バー表示。動画バッジと同色。durationはmvhd優先、無ければ<video>のloadedmetadataから補完。長さ不明時は▶ティック。絶対/経過モード両対応）
+
 ### 6. 動画の埋め込み撮影時刻で自動アンカー
 - **ステータス**: ✅ 完了（src/videometa.js: moov>mvhd の creation_time(1904起点)＋duration をパース→Unix ms。creation_timeは端末により「録画終了時刻」なので 開始=creation−duration で復元。addVideoで優先採用、取れない/軌跡範囲外なら現在の再生位置にフォールバック。TDDで単体テスト）
 - **動機**: Google Drive等でDLするとFSの作成日が書き換わる。埋め込みメタは中身なので保持される。
