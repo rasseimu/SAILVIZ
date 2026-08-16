@@ -6,7 +6,8 @@ import { computeBounds, fitTransform, unproject, project } from './projection.js
 import { pan, zoomAt, screenToWorld, worldToScreen } from './viewport.js';
 import { globalRange, remapEventsToAxis } from './timeaxis.js';
 import { positionAt } from './interpolate.js';
-import { parseMp4Times } from './videometa.js';
+import { parseMp4TimesFromFile, embeddedStartMs } from './videometa.js';
+import { scanFolderVideos } from './folderimport.js';
 import { drawScene } from './renderer.js';
 import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
@@ -118,28 +119,72 @@ function nowAbsolute() {
   const r = firstVisibleTrack();
   return state.mode === 'elapsed' && r ? r.tRange.start + playback.getNow() : playback.getNow();
 }
+// 時刻 t(絶対ms) に動画を配置。src を渡すと status に配置理由を表示。
+function placeVideo(file, t, durationMs, src) {
+  const url = URL.createObjectURL(file);
+  const v = { id: `vid${videoSeq++}`, t, url, name: file.name, durationMs };
+  state.videos.push(v);
+  if (src) statusEl.textContent = `動画「${file.name}」を${src}に配置しました`;
+  if (v.durationMs == null) loadVideoDuration(v); // mvhdで取れなければ要素から補完
+  return v;
+}
+
 async function addVideo(file) {
   if (!firstVisibleTrack()) { statusEl.textContent = '先にGPS軌跡を読み込んでください'; return; }
-  const url = URL.createObjectURL(file);
-  // 埋め込み撮影時刻を優先。creation_time は端末により録画終了時刻なので、
-  // duration が取れれば 開始 = creation - duration で録画開始を復元する。
+  // 埋め込み撮影時刻(録画開始 = creation − 長さ)を優先。moov だけ部分読みする。
   let meta = null;
-  try { meta = parseMp4Times(await file.arrayBuffer()); } catch { /* パース失敗はフォールバック */ }
-  const embedded = meta && meta.durationMs != null ? meta.creationMs - meta.durationMs
-    : (meta ? meta.creationMs : null);
+  try { meta = await parseMp4TimesFromFile(file); } catch { /* パース失敗はフォールバック */ }
+  const embedded = embeddedStartMs(meta);
   const range = globalRange(state.tracks, 'absolute');
-  let t, src;
   if (embedded != null && embedded >= range.start && embedded <= range.end) {
-    t = embedded;
-    src = meta.durationMs != null ? '埋め込み撮影時刻(終了−長さ=開始)' : '埋め込み撮影時刻';
+    const src = meta.durationMs != null ? '埋め込み撮影時刻(終了−長さ=開始)' : '埋め込み撮影時刻';
+    placeVideo(file, embedded, meta.durationMs ?? null, src);
   } else {
-    t = nowAbsolute();
-    src = embedded != null ? '現在位置(撮影時刻は軌跡範囲外)' : '現在の再生位置';
+    const src = embedded != null ? '現在位置(撮影時刻は軌跡範囲外)' : '現在の再生位置';
+    placeVideo(file, nowAbsolute(), meta?.durationMs ?? null, src);
   }
-  const v = { id: `vid${videoSeq++}`, t, url, name: file.name, durationMs: meta?.durationMs ?? null };
-  state.videos.push(v);
-  statusEl.textContent = `動画「${file.name}」を${src}に配置しました`;
-  if (v.durationMs == null) loadVideoDuration(v); // mvhdで取れなければ要素から補完
+}
+
+// 取込ボタンの状態表示。state: idle|loading|success|error。
+// loading 以外は詳細を status にも出す。成功/失敗は数秒後に待機へ戻す。
+const FOLDER_BTN_IDLE = '📁 動画フォルダ取込';
+let folderBtnTimer = null;
+function setFolderBtn(stateName, label) {
+  const btn = $('folder-import');
+  btn.textContent = label;
+  btn.className = stateName === 'idle' ? 'btn' : `btn btn-${stateName}`;
+  btn.disabled = stateName === 'loading';
+  if (folderBtnTimer) { clearTimeout(folderBtnTimer); folderBtnTimer = null; }
+  if (stateName === 'success' || stateName === 'error') {
+    folderBtnTimer = setTimeout(() => setFolderBtn('idle', FOLDER_BTN_IDLE), 4000);
+  }
+}
+
+// 同期フォルダ(Drive for Desktop 等)から GPS 範囲内の動画を自動取込。
+async function importFromVideoFolder() {
+  if (!firstVisibleTrack()) {
+    setFolderBtn('error', '⚠️ 先にGPSを読込');
+    statusEl.textContent = '先にGPS軌跡を読み込んでください'; return;
+  }
+  if (!window.showDirectoryPicker) {
+    setFolderBtn('error', '⚠️ 非対応ブラウザ');
+    statusEl.textContent = 'このブラウザは非対応です（Chrome/Edge で開いてください）'; return;
+  }
+  let dir;
+  try { dir = await window.showDirectoryPicker(); } catch { return; } // キャンセルは何もしない
+  setFolderBtn('loading', '⏳ 走査中…');
+  statusEl.textContent = '動画フォルダを走査中…';
+  const range = globalRange(state.tracks, 'absolute');
+  let res;
+  try { res = await scanFolderVideos(dir, range); } catch (e) {
+    setFolderBtn('error', '⚠️ 失敗');
+    statusEl.textContent = `フォルダ走査に失敗: ${e.message}`; return;
+  }
+  for (const m of res.matched) placeVideo(m.file, m.t, m.durationMs, null);
+  draw(); renderSidebar();
+  setFolderBtn('success', `✅ ${res.matched.length}本取込`);
+  statusEl.textContent = `${res.scanned}本中${res.matched.length}本を取込`
+    + `（${res.skipped}本は範囲外/時刻不明でスキップ）`;
 }
 
 // 動画の再生時間を <video> のメタから読み、範囲バー用に埋める(mp4以外/パース失敗の保険)。
@@ -250,6 +295,7 @@ function deleteVideo(index) {
 
 // --- 入力配線 ---
 $('file-input').addEventListener('change', (e) => loadFiles(e.target.files));
+$('folder-import').addEventListener('click', importFromVideoFolder);
 $('play-btn').addEventListener('click', () => {
   playback.toggle();
   $('play-btn').textContent = playback.isPlaying() ? '⏸' : '▶';
@@ -328,7 +374,11 @@ function pickVideo(px, py) {
 }
 function handleMapClick(px, py) {
   const v = pickVideo(px, py); // 動画バッジ優先
-  if (v) { openVideoPanel(v); return; }
+  if (v) {
+    if (v === currentVideo) closeVideoPanel(); // 開いている動画なら閉じる（トグル）
+    else openVideoPanel(v); // 別動画/未開なら開く（自動で差し替え）
+    return;
+  }
   const t = pickTrackTime(px, py);
   if (t == null) return; // 軌跡から離れたクリックは無視
   if (pendingStart == null) {

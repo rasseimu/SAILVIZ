@@ -67,3 +67,36 @@ export function parseMp4Times(arrayBuffer) {
 export function parseMp4CreationTime(arrayBuffer) {
   return parseMp4Times(arrayBuffer)?.creationMs ?? null;
 }
+
+// 埋め込みメタ({creationMs,durationMs}|null) から録画開始(絶対ms)を求める。
+// creation_time は端末により録画終了時刻なので、長さが取れれば 開始 = 終了 − 長さ。
+// 取れなければ creation そのもの。meta 無しは null。
+export function embeddedStartMs(meta) {
+  if (!meta) return null;
+  return meta.durationMs != null ? meta.creationMs - meta.durationMs : meta.creationMs;
+}
+
+// File/Blob からトップレベル box を辿り、moov box だけを部分読みして時刻を返す。
+// 数GBの動画でも全読みせずに済む（mdat はサイズ分だけ seek で飛ばす）。
+// 取れなければ null。File System Access API で得た File にそのまま使える。
+export async function parseMp4TimesFromFile(file) {
+  const size = file.size;
+  let pos = 0;
+  while (pos + 8 <= size) {
+    const head = new DataView(await file.slice(pos, Math.min(pos + 16, size)).arrayBuffer());
+    let boxSize = head.getUint32(0);
+    const type = readType(head, 4);
+    let headerSize = 8;
+    if (boxSize === 1) { // 64bit largesize
+      if (head.byteLength < 16) break;
+      boxSize = head.getUint32(8) * 2 ** 32 + head.getUint32(12);
+      headerSize = 16;
+    } else if (boxSize === 0) {
+      boxSize = size - pos; // 末尾まで
+    }
+    if (boxSize < headerSize || pos + boxSize > size) break; // 壊れている
+    if (type === 'moov') return parseMp4Times(await file.slice(pos, pos + boxSize).arrayBuffer());
+    pos += boxSize;
+  }
+  return null;
+}
