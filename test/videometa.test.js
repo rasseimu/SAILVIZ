@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMp4CreationTime, parseMp4Times } from '../src/videometa.js';
+import { parseMp4CreationTime, parseMp4Times, parseMp4TimesFromFile } from '../src/videometa.js';
 
 const MAC_EPOCH_OFFSET = 2082844800; // 1904→1970 の秒差
 
@@ -87,4 +87,36 @@ test('returns null when moov/mvhd absent', () => {
 test('returns null when creation_time is 0 (未設定)', () => {
   const moov = box('moov', box('mvhd', mvhdV0(0)));
   assert.equal(parseMp4CreationTime(moov.buffer), null);
+});
+
+// --- parseMp4TimesFromFile: Blob を部分読みして moov を探す（大容量動画で全読みしない）---
+function blobOf(u8) { return new Blob([u8]); }
+
+test('parseMp4TimesFromFile: moov が先頭側にある（fast-start）', async () => {
+  const unixSec = Math.floor(Date.parse('2024-08-07T05:30:00Z') / 1000);
+  const creation = unixSec + MAC_EPOCH_OFFSET;
+  const ftyp = box('ftyp', new Uint8Array([0, 0, 0, 0]));
+  const moov = box('moov', box('mvhd', mvhdV0(creation, 600, 600 * 90)));
+  const mdat = box('mdat', new Uint8Array(1000)); // 実データ相当の大きめ box
+  const got = await parseMp4TimesFromFile(blobOf(concat(ftyp, moov, mdat)));
+  assert.equal(got.creationMs, unixSec * 1000);
+  assert.equal(got.durationMs, 90 * 1000);
+});
+
+test('parseMp4TimesFromFile: moov が末尾にある（mdat を飛ばして探す）', async () => {
+  const unixSec = Math.floor(Date.parse('2024-08-07T05:30:00Z') / 1000);
+  const creation = unixSec + MAC_EPOCH_OFFSET;
+  const ftyp = box('ftyp', new Uint8Array([0, 0, 0, 0]));
+  const mdat = box('mdat', new Uint8Array(5000)); // 巨大な実データを飛ばす必要がある
+  const moov = box('moov', box('mvhd', mvhdV0(creation, 600, 600 * 90)));
+  const got = await parseMp4TimesFromFile(blobOf(concat(ftyp, mdat, moov)));
+  assert.equal(got.creationMs, unixSec * 1000);
+  assert.equal(got.durationMs, 90 * 1000);
+});
+
+test('parseMp4TimesFromFile: moov が無ければ null', async () => {
+  const ftyp = box('ftyp', new Uint8Array([1, 2, 3, 4]));
+  const mdat = box('mdat', new Uint8Array(100));
+  const got = await parseMp4TimesFromFile(blobOf(concat(ftyp, mdat)));
+  assert.equal(got, null);
 });

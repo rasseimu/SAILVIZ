@@ -3,7 +3,11 @@ html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
 body { display: flex; flex-direction: column; height: 100vh; color: #1a2733; }
 #topbar { display: flex; gap: 14px; align-items: center; padding: 8px 14px;
   background: #0d3b5e; color: #fff; }
-#topbar .btn { background: #1c72b8; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
+#topbar .btn { background: #1c72b8; color: #fff; border: 0; font: inherit; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
+#topbar .btn-loading { background: #5a6b7b; cursor: progress; }
+#topbar .btn-success { background: #27ae60; }
+#topbar .btn-error { background: #c0392b; }
+#topbar .btn:disabled { cursor: progress; opacity: 0.9; }
 #topbar select { padding: 2px; }
 #status { margin-left: auto; font-size: 12px; opacity: 0.85; }
 main { flex: 1; display: flex; min-height: 0; }

@@ -15,11 +15,13 @@ export const MEMBERS = [
   { family: '佐藤', given: '妙',   kana: 'たえ' },     // ⚠ 未確認
   { family: '大澤', given: '希',   kana: 'のぞみ' },   // ⚠ 未確認
   { family: '押尾', given: '明汰', kana: 'あらた' },   // ⚠ 未確認
-  { family: '上島', given: '滉起', kana: 'こうき' },   // ⚠ 未確認
-  { family: '吉田', given: '悠翔', kana: 'はると' },   // ⚠ 未確認
+  { family: '上島', given: '滉起', kana: 'ひろき' },   // ⚠ 未確認
+  { family: '吉田', given: '悠翔', kana: 'ゆうと' },   // ⚠ 未確認
   { family: '宮田', given: '櫂澄', kana: 'かいと' },   // ⚠ 未確認
   { family: '引池', given: '匠',   kana: 'たくみ' },   // ⚠ 未確認
   { family: '緒方', given: '菜那子', kana: 'ななこ' }, // ⚠ 未確認
+  { family: '田巻', given: '隆雅', kana: 'りゅうが' },
+  { family: '原田', given: '修有', kana: 'しゅゆ' },
   { family: '田巻', given: '隆雅', kana: 'りゅうが' },
 ];
 
