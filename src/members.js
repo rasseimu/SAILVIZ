@@ -22,7 +22,7 @@ export const MEMBERS = [
   { family: '緒方', given: '菜那子', kana: 'ななこ' }, // ⚠ 未確認
   { family: '田巻', given: '隆雅', kana: 'りゅうが' },
   { family: '原田', given: '修有', kana: 'しゅゆ' },
-  { family: '田巻', given: '隆雅', kana: 'りゅうが' },
+  { family: '星川', given: '桃香', kana: 'ももか' },
 ];
 
 // 各部員に安定IDとフルネームを付与(メンションの一意識別に使う)。

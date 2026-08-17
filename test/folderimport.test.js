@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { videoOverlapsRange, scanFolderVideos } from '../src/folderimport.js';
+import { videoOverlapsRange, scanFolderVideos, collectVideoFiles } from '../src/folderimport.js';
 
 const range = { start: 1000, end: 2000 };
 
@@ -56,4 +56,17 @@ test('範囲内の動画だけを返し、走査数/スキップ数も数える'
   assert.equal(res.skipped, 2);   // b, d
   assert.deepEqual(res.matched.map((m) => m.file.name), ['a.mp4', 'c.mov']);
   assert.deepEqual(res.matched.map((m) => m.t), [1500, 1000]); // 開始(録画開始=creation−duration)
+});
+
+// --- collectVideoFiles: 名前一致の動画 File のみ収集 ---
+test('collectVideoFiles は nameSet に含まれる名前の File だけ返す', async () => {
+  const dir = fakeDir([
+    fileHandle('a.mp4', null),
+    fileHandle('b.mov', null),
+    fileHandle('c.mp4', null),
+    { kind: 'directory', name: 'sub' },
+  ]);
+  const map = await collectVideoFiles(dir, new Set(['a.mp4', 'c.mp4', 'missing.mp4']));
+  assert.deepEqual([...map.keys()].sort(), ['a.mp4', 'c.mp4']);
+  assert.equal(map.get('a.mp4').name, 'a.mp4');
 });

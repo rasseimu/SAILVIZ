@@ -7,15 +7,19 @@ import { pan, zoomAt, screenToWorld, worldToScreen } from './viewport.js';
 import { globalRange, remapEventsToAxis } from './timeaxis.js';
 import { positionAt } from './interpolate.js';
 import { parseMp4TimesFromFile, embeddedStartMs } from './videometa.js';
-import { scanFolderVideos } from './folderimport.js';
+import { scanFolderVideos, collectVideoFiles } from './folderimport.js';
 import { drawScene } from './renderer.js';
 import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
 import { memberList, filterMembers } from './members.js';
 import { DIR_NAMES, fetchWind } from './wind.js';
+import { fetchWindFromCsv } from './windCsv.js';
 import {
   createReflection, loadReflections, saveReflections, windLabel, formatVideoPos,
 } from './reflections.js';
+import { serializeProject, deserializeProject } from './project.js';
+import { projectFileName, listProjectFiles, readProject, writeProject } from './projectfs.js';
+import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
 
 const PALETTE = ['#1c72b8', '#e67e22', '#27ae60', '#8e44ad', '#c0392b', '#16a085'];
 
@@ -24,9 +28,10 @@ const state = {
   events: [],
   marks: [],
   videos: [],
+  pins: [], // タイムライン上に自由に刺すピン(絶対時刻)。クリックでcrop開始を移動。
   reflections: loadReflections(),
   mode: 'absolute',
-  accuracyFilter: false,
+  accuracyFilter: true,
   crop: { start: 0, end: 0 },
   transform: { scale: 1, cx: 0, cy: 0, w: 1, h: 1, proj: null },
 };
@@ -50,7 +55,15 @@ const playback = createPlayback({ onTick: () => draw() });
 const timeline = createTimeline($('timeline'), {
   onCropChange: (c) => { state.crop = c; playback.setRange(c); draw(); },
   onScrub: (t) => playback.seek(t),
+  onPinAdd: (axisT) => { state.pins.push(axisT + currentBase()); draw(); },
+  onPinRemove: (idx) => { state.pins.splice(idx, 1); draw(); },
 });
+
+// elapsedモードでの軸オフセット(基準トラック開始)。軸時刻⇄絶対時刻の変換に使う。
+function currentBase() {
+  const refTrack = state.tracks.find((t) => t.visible) || null;
+  return state.mode === 'elapsed' && refTrack ? refTrack.tRange.start : 0;
+}
 
 function recomputeView() {
   const bounds = computeBounds(state.tracks);
@@ -67,20 +80,22 @@ function draw() {
   // および elapsed 軸へのタグ変換の基準に使う。elapsed で開始時刻の異なる複数トラックを
   // 重ねた場合、タグは基準トラックの開始を0とした軸上に配置される（start-together比較の規約）。
   const refTrack = state.tracks.find((t) => t.visible) || null;
-  const base = state.mode === 'elapsed' && refTrack ? refTrack.tRange.start : 0;
+  const base = currentBase();
   const axisEvents = remapEventsToAxis(state.events, state.mode, base);
   // 動画を [開始, 開始+長さ] の区間としてタイムライン軸に変換(長さ不明なら点)
   const axisVideos = remapEventsToAxis(
     state.videos.map((v) => ({ t: v.t, tEnd: v.durationMs != null ? v.t + v.durationMs : null })),
     state.mode, base,
   );
+  // ピンを軸時刻へ変換(タグ/動画と同様、絶対時刻で保持)
+  const axisPins = remapEventsToAxis(state.pins.map((t) => ({ t })), state.mode, base).map((e) => e.t);
 
   drawScene(mapCtx, {
     transform: state.transform, tracks: state.tracks, events: state.events,
-    marks: state.marks, videos: state.videos,
+    marks: state.marks, videos: state.videos, activeVideoId: currentVideo?.id,
     now, mode: state.mode, crop: state.crop, referenceTrack: refTrack,
   });
-  timeline.render({ range, crop: state.crop, now, events: axisEvents, pending: pendingStart, videos: axisVideos });
+  timeline.render({ range, crop: state.crop, now, events: axisEvents, pending: pendingStart, videos: axisVideos, pins: axisPins });
   $('clock').textContent = range.end > range.start ? formatClock(now, state.mode) : '--:--:--';
   $('drop-zone').classList.toggle('hidden', state.tracks.length > 0 || state.events.length > 0);
 }
@@ -145,6 +160,95 @@ async function addVideo(file) {
   }
 }
 
+// 保存フォルダハンドル(セッション内キャッシュ)。起動時に IndexedDB から復元。
+let projectDir = null;
+const PICK_SENTINEL = '__pick__';
+
+// 保存フォルダを確保する。未設定/権限切れなら選択させ、永続化する。
+async function ensureProjectDir() {
+  if (projectDir && await ensurePermission(projectDir)) return projectDir;
+  if (!window.showDirectoryPicker) {
+    statusEl.textContent = 'このブラウザは非対応です（Chrome/Edge で開いてください）';
+    return null;
+  }
+  let dir;
+  try { dir = await window.showDirectoryPicker(); } catch { return null; } // キャンセル
+  projectDir = dir;
+  try { await saveDirHandle(dir); } catch { /* 永続化失敗は致命ではない */ }
+  return projectDir;
+}
+
+// 「過去の練習」プルダウンを再構築する。
+async function refreshPracticeList() {
+  const sel = $('practice-select');
+  const items = projectDir ? await listProjectFiles(projectDir) : [];
+  sel.innerHTML = '';
+  const ph = document.createElement('option');
+  ph.value = ''; ph.textContent = projectDir ? '（練習を選択…）' : '（保存フォルダ未選択）';
+  sel.appendChild(ph);
+  const pick = document.createElement('option');
+  pick.value = PICK_SENTINEL; pick.textContent = '▶ 保存フォルダを選択…';
+  sel.appendChild(pick);
+  for (const it of items) {
+    const o = document.createElement('option');
+    o.value = it.name; o.textContent = it.label;
+    sel.appendChild(o);
+  }
+}
+
+// 現在の状態を保存フォルダに書き出す。
+async function saveProject() {
+  const dir = await ensureProjectDir();
+  if (!dir) return;
+  const name = projectFileName(new Date());
+  try {
+    await writeProject(dir, name, serializeProject(state, { savedAt: new Date().toISOString() }));
+  } catch (e) {
+    statusEl.textContent = `保存に失敗: ${e.message}`; return;
+  }
+  await refreshPracticeList();
+  statusEl.textContent = `保存しました: ${name}`;
+}
+
+// 選択した練習ファイルを読み込み、state を置換する。
+async function loadPractice(name) {
+  if (state.tracks.length && !window.confirm('現在の内容を破棄して読み込みますか？')) {
+    $('practice-select').value = ''; return;
+  }
+  let data;
+  try {
+    data = deserializeProject(await readProject(projectDir, name));
+  } catch (e) {
+    statusEl.textContent = `読込に失敗: ${e.message}`;
+    $('practice-select').value = ''; return;
+  }
+  closeVideoPanel(); // stale currentVideo を破棄（パネルが閉じていれば即 return）
+  state.mode = data.mode;
+  state.accuracyFilter = data.accuracyFilter;
+  state.tracks = data.tracks;
+  state.events = data.events;
+  state.marks = data.marks;
+  state.pins = data.pins;
+  for (const v of state.videos) if (v.url) URL.revokeObjectURL(v.url); // blob URL リーク防止
+  state.videos = data.videos; // url なし=未リンク
+  state.reflections = data.reflections;
+  saveReflections(state.reflections); // localStorage にも反映
+  $('align-mode').value = state.mode;
+  $('accuracy-filter').checked = state.accuracyFilter;
+  recomputeView(); // tracks から transform と既定 crop を再計算
+  // 保存されたクロップ範囲が妥当なら復元(recomputeView の全域クロップを上書き)
+  if (data.crop && data.crop.end > data.crop.start) {
+    state.crop = { start: data.crop.start, end: data.crop.end };
+    playback.setRange(state.crop);
+  }
+  renderSidebar();
+  draw();
+  const n = state.videos.length;
+  statusEl.textContent = n
+    ? `読込: ${name}。動画${n}本は未リンク（📁 動画フォルダ取込で再リンク）`
+    : `読込: ${name}`;
+}
+
 // 取込ボタンの状態表示。state: idle|loading|success|error。
 // loading 以外は詳細を status にも出す。成功/失敗は数秒後に待機へ戻す。
 const FOLDER_BTN_IDLE = '📁 動画フォルダ取込';
@@ -180,11 +284,28 @@ async function importFromVideoFolder() {
     setFolderBtn('error', '⚠️ 失敗');
     statusEl.textContent = `フォルダ走査に失敗: ${e.message}`; return;
   }
-  for (const m of res.matched) placeVideo(m.file, m.t, m.durationMs, null);
+  // 読込済みで未リンクの動画を、フォルダ内の同名ファイルで再リンク
+  const unlinked = new Set(state.videos.filter((v) => !v.url).map((v) => v.name));
+  let relinked = 0;
+  if (unlinked.size) {
+    const files = await collectVideoFiles(dir, unlinked);
+    for (const v of state.videos) {
+      if (!v.url && files.has(v.name)) {
+        v.url = URL.createObjectURL(files.get(v.name));
+        if (v.durationMs == null) loadVideoDuration(v);
+        relinked++;
+      }
+    }
+  }
+  const present = new Set(state.videos.map((v) => v.name));
+  for (const m of res.matched) {
+    if (!present.has(m.file.name)) placeVideo(m.file, m.t, m.durationMs, null);
+  }
   draw(); renderSidebar();
   setFolderBtn('success', `✅ ${res.matched.length}本取込`);
   statusEl.textContent = `${res.scanned}本中${res.matched.length}本を取込`
-    + `（${res.skipped}本は範囲外/時刻不明でスキップ）`;
+    + `（${res.skipped}本は範囲外/時刻不明でスキップ）`
+    + (relinked ? `（再リンク${relinked}本）` : '');
 }
 
 // 動画の再生時間を <video> のメタから読み、範囲バー用に埋める(mp4以外/パース失敗の保険)。
@@ -264,7 +385,8 @@ function renderSidebar() {
 
   const vl = $('video-list'); vl.innerHTML = '';
   state.videos.forEach((v, i) => {
-    const row = document.createElement('div'); row.className = 'track-row';
+    const row = document.createElement('div');
+    row.className = v === currentVideo ? 'track-row active' : 'track-row'; // 再生中はオレンジ
     row.innerHTML =
       `<span>▶</span><span class="vid-name" data-play="${i}">${v.name}</span>` +
       `<button data-delvid="${i}">×</button>`;
@@ -296,6 +418,26 @@ function deleteVideo(index) {
 // --- 入力配線 ---
 $('file-input').addEventListener('change', (e) => loadFiles(e.target.files));
 $('folder-import').addEventListener('click', importFromVideoFolder);
+$('project-save').addEventListener('click', saveProject);
+$('practice-select').addEventListener('change', async (e) => {
+  const v = e.target.value;
+  if (v === PICK_SENTINEL) {
+    e.target.value = '';
+    if (await ensureProjectDir()) await refreshPracticeList();
+  } else if (v) {
+    await loadPractice(v);
+  }
+});
+
+// 起動時: 保存フォルダを IndexedDB から復元し、権限があれば一覧化。
+(async () => {
+  try {
+    const h = await loadDirHandle();
+    if (h && await ensurePermission(h)) { projectDir = h; }
+  } catch { /* 復元失敗は無視 */ }
+  await refreshPracticeList();
+})();
+
 $('play-btn').addEventListener('click', () => {
   playback.toggle();
   $('play-btn').textContent = playback.isPlaying() ? '⏸' : '▶';
@@ -419,7 +561,7 @@ function openVideoPanel(v) {
   // 動画をmasterにするので app のクロックは止める
   playback.pause(); $('play-btn').textContent = '▶';
   currentVideo = v;
-  resizeCanvas(); refitTransform(); draw();
+  resizeCanvas(); refitTransform(); draw(); renderSidebar();
   vid.play().catch(() => { /* autoplayブロックは手動再生に委ねる */ });
 }
 function closeVideoPanel() {
@@ -429,7 +571,7 @@ function closeVideoPanel() {
   vid.pause(); vid.removeAttribute('src'); vid.load();
   currentVideo = null;
   panel.classList.add('hidden');
-  resizeCanvas(); refitTransform(); draw();
+  resizeCanvas(); refitTransform(); draw(); renderSidebar();
 }
 
 // マーク配置: 右クリック→4択メニュー→クリック地点に配置
@@ -535,7 +677,9 @@ function setWindInputs(wind) {
   $('refl-wind-src').textContent = wind
     ? (wind.source === 'amedas'
       ? `アメダス${wind.station ?? ''}${wind.obsMs != null ? ' ' + formatObsTime(wind.obsMs) : ''}`
-      : '手入力')
+      : wind.source === 'csv'
+        ? `${wind.station ?? ''}(CSV)${wind.obsMs != null ? ' ' + formatObsTime(wind.obsMs) : ''}`
+        : '手入力')
     : '';
 }
 
@@ -566,7 +710,8 @@ async function openReflectionEditor(existing = null) {
     setWindInputs(null);
     $('refl-wind-src').textContent = '風取得中…';
     const target = firstVisibleTrack() ? nowAbsolute() : Date.now();
-    const w = await fetchWind(target);
+    // アメダスAPIで取れないとき(取得失敗/配信範囲外の過去日)は辻堂の時別CSVへ。
+    const w = await fetchWind(target) ?? await fetchWindFromCsv(target);
     // 取得中にユーザーが手入力/別操作したら上書きしない。
     if (editorOpen && !editingId && !windEdited) {
       currentWind = w;
