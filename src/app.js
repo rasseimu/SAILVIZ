@@ -7,7 +7,7 @@ import { pan, zoomAt, screenToWorld, worldToScreen } from './viewport.js';
 import { globalRange, remapEventsToAxis } from './timeaxis.js';
 import { positionAt } from './interpolate.js';
 import { parseMp4TimesFromFile, embeddedStartMs } from './videometa.js';
-import { scanFolderVideos } from './folderimport.js';
+import { scanFolderVideos, collectVideoFiles } from './folderimport.js';
 import { drawScene } from './renderer.js';
 import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
@@ -17,6 +17,9 @@ import { fetchWindFromCsv } from './windCsv.js';
 import {
   createReflection, loadReflections, saveReflections, windLabel, formatVideoPos,
 } from './reflections.js';
+import { serializeProject, deserializeProject } from './project.js';
+import { projectFileName, listProjectFiles, readProject, writeProject } from './projectfs.js';
+import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
 
 const PALETTE = ['#1c72b8', '#e67e22', '#27ae60', '#8e44ad', '#c0392b', '#16a085'];
 
@@ -157,6 +160,93 @@ async function addVideo(file) {
   }
 }
 
+// 保存フォルダハンドル(セッション内キャッシュ)。起動時に IndexedDB から復元。
+let projectDir = null;
+const PICK_SENTINEL = '__pick__';
+
+// 保存フォルダを確保する。未設定/権限切れなら選択させ、永続化する。
+async function ensureProjectDir() {
+  if (projectDir && await ensurePermission(projectDir)) return projectDir;
+  if (!window.showDirectoryPicker) {
+    statusEl.textContent = 'このブラウザは非対応です（Chrome/Edge で開いてください）';
+    return null;
+  }
+  let dir;
+  try { dir = await window.showDirectoryPicker(); } catch { return null; } // キャンセル
+  projectDir = dir;
+  try { await saveDirHandle(dir); } catch { /* 永続化失敗は致命ではない */ }
+  return projectDir;
+}
+
+// 「過去の練習」プルダウンを再構築する。
+async function refreshPracticeList() {
+  const sel = $('practice-select');
+  const items = projectDir ? await listProjectFiles(projectDir) : [];
+  sel.innerHTML = '';
+  const ph = document.createElement('option');
+  ph.value = ''; ph.textContent = projectDir ? '（練習を選択…）' : '（保存フォルダ未選択）';
+  sel.appendChild(ph);
+  const pick = document.createElement('option');
+  pick.value = PICK_SENTINEL; pick.textContent = '▶ 保存フォルダを選択…';
+  sel.appendChild(pick);
+  for (const it of items) {
+    const o = document.createElement('option');
+    o.value = it.name; o.textContent = it.label;
+    sel.appendChild(o);
+  }
+}
+
+// 現在の状態を保存フォルダに書き出す。
+async function saveProject() {
+  const dir = await ensureProjectDir();
+  if (!dir) return;
+  const name = projectFileName(new Date());
+  try {
+    await writeProject(dir, name, serializeProject(state, { savedAt: new Date().toISOString() }));
+  } catch (e) {
+    statusEl.textContent = `保存に失敗: ${e.message}`; return;
+  }
+  await refreshPracticeList();
+  statusEl.textContent = `保存しました: ${name}`;
+}
+
+// 選択した練習ファイルを読み込み、state を置換する。
+async function loadPractice(name) {
+  if (state.tracks.length && !window.confirm('現在の内容を破棄して読み込みますか？')) {
+    $('practice-select').value = ''; return;
+  }
+  let data;
+  try {
+    data = deserializeProject(await readProject(projectDir, name));
+  } catch (e) {
+    statusEl.textContent = `読込に失敗: ${e.message}`;
+    $('practice-select').value = ''; return;
+  }
+  state.mode = data.mode;
+  state.accuracyFilter = data.accuracyFilter;
+  state.tracks = data.tracks;
+  state.events = data.events;
+  state.marks = data.marks;
+  state.pins = data.pins;
+  state.videos = data.videos; // url なし=未リンク
+  state.reflections = data.reflections;
+  saveReflections(state.reflections); // localStorage にも反映
+  $('align-mode').value = state.mode;
+  $('accuracy-filter').checked = state.accuracyFilter;
+  recomputeView(); // tracks から transform と既定 crop を再計算
+  // 保存されたクロップ範囲が妥当なら復元(recomputeView の全域クロップを上書き)
+  if (data.crop && data.crop.end > data.crop.start) {
+    state.crop = { start: data.crop.start, end: data.crop.end };
+    playback.setRange(state.crop);
+  }
+  renderSidebar();
+  draw();
+  const n = state.videos.length;
+  statusEl.textContent = n
+    ? `読込: ${name}。動画${n}本は未リンク（📁 動画フォルダ取込で再リンク）`
+    : `読込: ${name}`;
+}
+
 // 取込ボタンの状態表示。state: idle|loading|success|error。
 // loading 以外は詳細を status にも出す。成功/失敗は数秒後に待機へ戻す。
 const FOLDER_BTN_IDLE = '📁 動画フォルダ取込';
@@ -192,11 +282,28 @@ async function importFromVideoFolder() {
     setFolderBtn('error', '⚠️ 失敗');
     statusEl.textContent = `フォルダ走査に失敗: ${e.message}`; return;
   }
-  for (const m of res.matched) placeVideo(m.file, m.t, m.durationMs, null);
+  // 読込済みで未リンクの動画を、フォルダ内の同名ファイルで再リンク
+  const unlinked = new Set(state.videos.filter((v) => !v.url).map((v) => v.name));
+  let relinked = 0;
+  if (unlinked.size) {
+    const files = await collectVideoFiles(dir, unlinked);
+    for (const v of state.videos) {
+      if (!v.url && files.has(v.name)) {
+        v.url = URL.createObjectURL(files.get(v.name));
+        if (v.durationMs == null) loadVideoDuration(v);
+        relinked++;
+      }
+    }
+  }
+  const present = new Set(state.videos.map((v) => v.name));
+  for (const m of res.matched) {
+    if (!present.has(m.file.name)) placeVideo(m.file, m.t, m.durationMs, null);
+  }
   draw(); renderSidebar();
   setFolderBtn('success', `✅ ${res.matched.length}本取込`);
   statusEl.textContent = `${res.scanned}本中${res.matched.length}本を取込`
-    + `（${res.skipped}本は範囲外/時刻不明でスキップ）`;
+    + `（${res.skipped}本は範囲外/時刻不明でスキップ）`
+    + (relinked ? `（再リンク${relinked}本）` : '');
 }
 
 // 動画の再生時間を <video> のメタから読み、範囲バー用に埋める(mp4以外/パース失敗の保険)。
@@ -309,6 +416,26 @@ function deleteVideo(index) {
 // --- 入力配線 ---
 $('file-input').addEventListener('change', (e) => loadFiles(e.target.files));
 $('folder-import').addEventListener('click', importFromVideoFolder);
+$('project-save').addEventListener('click', saveProject);
+$('practice-select').addEventListener('change', async (e) => {
+  const v = e.target.value;
+  if (v === PICK_SENTINEL) {
+    e.target.value = '';
+    if (await ensureProjectDir()) await refreshPracticeList();
+  } else if (v) {
+    await loadPractice(v);
+  }
+});
+
+// 起動時: 保存フォルダを IndexedDB から復元し、権限があれば一覧化。
+(async () => {
+  try {
+    const h = await loadDirHandle();
+    if (h && await ensurePermission(h)) { projectDir = h; }
+  } catch { /* 復元失敗は無視 */ }
+  await refreshPracticeList();
+})();
+
 $('play-btn').addEventListener('click', () => {
   playback.toggle();
   $('play-btn').textContent = playback.isPlaying() ? '⏸' : '▶';
