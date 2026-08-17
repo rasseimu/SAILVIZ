@@ -222,12 +222,14 @@ async function loadPractice(name) {
     statusEl.textContent = `読込に失敗: ${e.message}`;
     $('practice-select').value = ''; return;
   }
+  closeVideoPanel(); // stale currentVideo を破棄（パネルが閉じていれば即 return）
   state.mode = data.mode;
   state.accuracyFilter = data.accuracyFilter;
   state.tracks = data.tracks;
   state.events = data.events;
   state.marks = data.marks;
   state.pins = data.pins;
+  for (const v of state.videos) if (v.url) URL.revokeObjectURL(v.url); // blob URL リーク防止
   state.videos = data.videos; // url なし=未リンク
   state.reflections = data.reflections;
   saveReflections(state.reflections); // localStorage にも反映
