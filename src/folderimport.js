@@ -30,3 +30,15 @@ export async function scanFolderVideos(dirHandle, range, readTimes = parseMp4Tim
   }
   return { matched, scanned, skipped: scanned - matched.length };
 }
+
+// dirHandle 直下のファイルのうち、名前が nameSet に含まれるものを収集して
+// Map<name, File> で返す。blob URL 生成はしない(呼び出し側で createObjectURL)。
+export async function collectVideoFiles(dirHandle, nameSet) {
+  const map = new Map();
+  for await (const entry of dirHandle.values()) {
+    if (entry.kind === 'file' && nameSet.has(entry.name)) {
+      map.set(entry.name, await entry.getFile());
+    }
+  }
+  return map;
+}
