@@ -13,6 +13,7 @@ import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
 import { memberList, filterMembers } from './members.js';
 import { DIR_NAMES, fetchWind } from './wind.js';
+import { fetchWindFromCsv } from './windCsv.js';
 import {
   createReflection, loadReflections, saveReflections, windLabel, formatVideoPos,
 } from './reflections.js';
@@ -547,7 +548,9 @@ function setWindInputs(wind) {
   $('refl-wind-src').textContent = wind
     ? (wind.source === 'amedas'
       ? `アメダス${wind.station ?? ''}${wind.obsMs != null ? ' ' + formatObsTime(wind.obsMs) : ''}`
-      : '手入力')
+      : wind.source === 'csv'
+        ? `${wind.station ?? ''}(CSV)${wind.obsMs != null ? ' ' + formatObsTime(wind.obsMs) : ''}`
+        : '手入力')
     : '';
 }
 
@@ -578,7 +581,8 @@ async function openReflectionEditor(existing = null) {
     setWindInputs(null);
     $('refl-wind-src').textContent = '風取得中…';
     const target = firstVisibleTrack() ? nowAbsolute() : Date.now();
-    const w = await fetchWind(target);
+    // アメダスAPIで取れないとき(取得失敗/配信範囲外の過去日)は辻堂の時別CSVへ。
+    const w = await fetchWind(target) ?? await fetchWindFromCsv(target);
     // 取得中にユーザーが手入力/別操作したら上書きしない。
     if (editorOpen && !editingId && !windEdited) {
       currentWind = w;
