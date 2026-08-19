@@ -53,7 +53,7 @@ function readMvhd(dv, payloadStart) {
 }
 
 // ArrayBuffer から { creationMs, durationMs } を返す。取れなければ null。
-// 注意: creation_time はUTC想定だが端末により現地時刻/録画終了時刻で書かれ得る。
+// 注意: creation_time はUTC想定だが端末により現地時刻で書かれ得る(TZは別途注意)。
 export function parseMp4Times(arrayBuffer) {
   const dv = new DataView(arrayBuffer);
   const moov = findBox(dv, 0, dv.byteLength, 'moov');
@@ -69,11 +69,12 @@ export function parseMp4CreationTime(arrayBuffer) {
 }
 
 // 埋め込みメタ({creationMs,durationMs}|null) から録画開始(絶対ms)を求める。
-// creation_time は端末により録画終了時刻なので、長さが取れれば 開始 = 終了 − 長さ。
-// 取れなければ creation そのもの。meta 無しは null。
+// creation_time は「録画開始時刻」として扱う(端末により終了時刻で書かれ得るが、
+// 実機動画で確認した結果ずれの主因が duration の二重減算だったため減算しない)。
+// meta 無しは null。
 export function embeddedStartMs(meta) {
   if (!meta) return null;
-  return meta.durationMs != null ? meta.creationMs - meta.durationMs : meta.creationMs;
+  return meta.creationMs;
 }
 
 // File/Blob からトップレベル box を辿り、moov box だけを部分読みして時刻を返す。

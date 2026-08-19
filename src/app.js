@@ -146,13 +146,13 @@ function placeVideo(file, t, durationMs, src) {
 
 async function addVideo(file) {
   if (!firstVisibleTrack()) { statusEl.textContent = '先にGPS軌跡を読み込んでください'; return; }
-  // 埋め込み撮影時刻(録画開始 = creation − 長さ)を優先。moov だけ部分読みする。
+  // 埋め込み撮影時刻(creation_time=録画開始)を優先。moov だけ部分読みする。
   let meta = null;
   try { meta = await parseMp4TimesFromFile(file); } catch { /* パース失敗はフォールバック */ }
   const embedded = embeddedStartMs(meta);
   const range = globalRange(state.tracks, 'absolute');
   if (embedded != null && embedded >= range.start && embedded <= range.end) {
-    const src = meta.durationMs != null ? '埋め込み撮影時刻(終了−長さ=開始)' : '埋め込み撮影時刻';
+    const src = '埋め込み撮影時刻(録画開始)';
     placeVideo(file, embedded, meta.durationMs ?? null, src);
   } else {
     const src = embedded != null ? '現在位置(撮影時刻は軌跡範囲外)' : '現在の再生位置';
