@@ -25,8 +25,9 @@ function mockCtx() {
     clearRect: rec('clearRect'), beginPath: rec('beginPath'), moveTo: rec('moveTo'),
     lineTo: rec('lineTo'), stroke: rec('stroke'), arc: rec('arc'), fill: rec('fill'),
     closePath: rec('closePath'), fillRect: rec('fillRect'), setLineDash: rec('setLineDash'),
-    arcTo: rec('arcTo'),
+    arcTo: rec('arcTo'), fillText: rec('fillText'), strokeText: rec('strokeText'),
     set strokeStyle(_v) {}, set fillStyle(_v) {}, set lineWidth(_v) {}, set globalAlpha(_v) {},
+    set font(_v) {}, set textAlign(_v) {}, set textBaseline(_v) {}, set lineJoin(_v) {},
   };
 }
 
@@ -97,6 +98,33 @@ test('renderer pins a lat/lon-less tag via reference-track interpolation', () =>
     now: range.start, mode: 'absolute', crop: range, referenceTrack: null,
   });
   assert.ok(withPin > (ctx2.calls.fill || 0), 'interpolated pin adds a fill when reference track present');
+});
+
+test('renderer draws a per-track speed label at the current position', () => {
+  const track = {
+    id: 't', name: 't', color: '#1c72b8', visible: true,
+    points: [
+      { t: 0, lat: 35.0, lon: 139.0, speed: 3 },
+      { t: 1000, lat: 35.001, lon: 139.001, speed: 5 },
+    ],
+    bounds: { minLat: 35.0, maxLat: 35.001, minLon: 139.0, maxLon: 139.001 },
+    tRange: { start: 0, end: 1000 },
+  };
+  const T = fitTransform(track.bounds, 800, 600);
+  const ctx = mockCtx();
+  drawScene(ctx, {
+    transform: T, tracks: [track], events: [], now: 500,
+    mode: 'absolute', crop: { start: 0, end: 1000 },
+  });
+  assert.ok(ctx.calls.fillText > 0, 'speed label drawn as text');
+
+  // now が軌跡の時間範囲外なら現在位置マーカーごと描かれない=速度ラベルも無し
+  const ctx2 = mockCtx();
+  drawScene(ctx2, {
+    transform: T, tracks: [track], events: [], now: 5000,
+    mode: 'absolute', crop: { start: 0, end: 1000 },
+  });
+  assert.ok(!ctx2.calls.fillText, 'no label when now is out of range');
 });
 
 test('playback advances now, clamps to range, and auto-pauses at end', () => {

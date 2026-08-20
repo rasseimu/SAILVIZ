@@ -17,6 +17,15 @@ main { flex: 1; display: flex; min-height: 0; }
 #stage { position: relative; flex: 1; min-width: 0; background: #dfeaf2; }
 #map { width: 100%; height: 100%; display: block; cursor: grab; }
 #map:active { cursor: grabbing; }
+#rotate-control { position: absolute; top: 10px; right: 10px; z-index: 10;
+  display: flex; align-items: center; gap: 6px; padding: 5px 8px;
+  background: rgba(255,255,255,0.85); border: 1px solid #c3d2de; border-radius: 6px;
+  font-size: 12px; color: #33475a; }
+#rotate-control #rotate-label { min-width: 30px; text-align: right; font-variant-numeric: tabular-nums; }
+#rotate-control input[type=range] { width: 120px; }
+#rotate-control #rotate-reset { border: none; background: #24313d; color: #fff;
+  width: 24px; height: 22px; border-radius: 4px; cursor: pointer; }
+#rotate-control #rotate-reset:hover { background: #33475a; }
 #drop-zone { position: absolute; inset: 0; display: flex; align-items: center;
   justify-content: center; font-size: 20px; color: #4a6076; pointer-events: none; }
 #drop-zone.hidden { display: none; }
@@ -29,6 +38,9 @@ main { flex: 1; display: flex; min-height: 0; }
 .track-row, .tag-row { display: flex; align-items: center; gap: 6px; font-size: 13px;
   padding: 3px 0; }
 .swatch { width: 12px; height: 12px; border-radius: 2px; flex: 0 0 auto; }
+.track-name { cursor: text; }
+.rename-input { flex: 1; min-width: 0; font-size: 13px; padding: 1px 4px;
+  border: 1px solid #1c72b8; border-radius: 3px; }
 .track-row button { margin-left: auto; border: none; background: none; cursor: pointer; color: #b23; }
 .track-row.active { background: rgba(230,126,34,0.15); border-radius: 3px; }
 .track-row.active .vid-name { color: #e67e22; font-weight: 600; }
@@ -51,8 +63,9 @@ main { flex: 1; display: flex; min-height: 0; }
 #video-bar button { width: 26px; height: 26px; border: none; border-radius: 4px;
   background: #24313d; color: #fff; font-size: 14px; cursor: pointer; }
 #video-bar button:hover { background: #33475a; }
-#video-delete { margin-left: auto; }
-#video-el { flex: 1; min-height: 0; width: 100%; background: #000; object-fit: contain; }
+#video-rotate { margin-left: auto; }
+#video-stage { flex: 1; min-height: 0; position: relative; overflow: hidden; background: #000; }
+#video-el { position: absolute; top: 50%; left: 50%; background: #000; object-fit: contain; }
 .vid-name { cursor: pointer; text-decoration: underline dotted; }
 
 /* --- 反省ノート --- */
@@ -66,12 +79,11 @@ main { flex: 1; display: flex; min-height: 0; }
 .refl-row button { border: none; background: none; cursor: pointer; color: #b23; }
 
 #reflection-editor { flex: 0 0 auto; background: #eef4f9; border-top: 2px solid #1c72b8;
-  padding: 8px 14px; }
+  padding: 8px 14px; max-height: 60vh; overflow-y: auto; }
 #reflection-editor.hidden { display: none; }
 #refl-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
 #refl-title { color: #0d3b5e; }
 #refl-hint { font-size: 12px; color: #5a6b7b; }
-.refl-wind-field { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
 #refl-wind-speed { width: 62px; }
 #refl-wind-src { font-size: 12px; color: #5a6b7b; }
 #refl-save, #refl-cancel { padding: 4px 12px; border-radius: 4px; border: 1px solid #b7c4d0;
@@ -89,3 +101,20 @@ main { flex: 1; display: flex; min-height: 0; }
 #refl-mention li { padding: 5px 12px; cursor: pointer; font-size: 13px; }
 #refl-mention li.active, #refl-mention li:hover { background: #eaf1f7; }
 #refl-mention li .m-kana { color: #5a6b7b; margin-left: 6px; font-size: 12px; }
+
+/* 折りたたみセクション(艇セッティング / 天候 / 反省内容) */
+.refl-section { margin-top: 8px; border: 1px solid #cdd8e2; border-radius: 4px;
+  background: #fff; }
+.refl-section > summary { cursor: pointer; padding: 6px 10px; font-size: 13px;
+  font-weight: 600; color: #0d3b5e; user-select: none; }
+.refl-section[open] > summary { border-bottom: 1px solid #e2e9f0; }
+.refl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px 12px; padding: 8px 10px; }
+.refl-grid label { display: flex; align-items: center; justify-content: space-between;
+  gap: 6px; font-size: 12px; color: #33475b; }
+.refl-grid input, .refl-grid select { width: 80px; padding: 3px 4px; font-size: 13px;
+  border: 1px solid #b7c4d0; border-radius: 3px; }
+.refl-notes { display: grid; gap: 8px; padding: 8px 10px; }
+.refl-note { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #33475b; }
+.refl-note textarea { resize: vertical; font-family: inherit; font-size: 13px; padding: 5px 6px;
+  border: 1px solid #b7c4d0; border-radius: 4px; }

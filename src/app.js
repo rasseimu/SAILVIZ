@@ -11,11 +11,13 @@ import { scanFolderVideos, collectVideoFiles } from './folderimport.js';
 import { drawScene } from './renderer.js';
 import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
+import { nextRotation, rotatedFitBox } from './videoview.js';
 import { memberList, filterMembers } from './members.js';
 import { DIR_NAMES, fetchWind } from './wind.js';
 import { fetchWindFromCsv } from './windCsv.js';
 import {
   createReflection, loadReflections, saveReflections, windLabel, formatVideoPos,
+  previousRig, RIG_FIELDS, NOTE_FIELDS,
 } from './reflections.js';
 import { serializeProject, deserializeProject } from './project.js';
 import { projectFileName, listProjectFiles, readProject, writeProject } from './projectfs.js';
@@ -54,7 +56,12 @@ function resizeCanvas() {
 const playback = createPlayback({ onTick: () => draw() });
 const timeline = createTimeline($('timeline'), {
   onCropChange: (c) => { state.crop = c; playback.setRange(c); draw(); },
-  onScrub: (t) => playback.seek(t),
+  onScrub: (t) => {
+    // 動画パネル表示中は動画がマスター。バーのスクラブで動画の再生位置を動かす(seekedでplayhead追従)。
+    if (currentVideo) seekVideoToAxisTime(t);
+    else playback.seek(t);
+  },
+  onVideoClick: (id) => { const v = state.videos.find((x) => x.id === id); if (v) openVideoPanel(v); },
   onPinAdd: (axisT) => { state.pins.push(axisT + currentBase()); draw(); },
   onPinRemove: (idx) => { state.pins.splice(idx, 1); draw(); },
 });
@@ -65,9 +72,12 @@ function currentBase() {
   return state.mode === 'elapsed' && refTrack ? refTrack.tRange.start : 0;
 }
 
+let mapRot = 0; // マップ回転角(ラジアン、表示のみ・保存しない)。fitTransform後に再適用。
+
 function recomputeView() {
   const bounds = computeBounds(state.tracks);
   if (bounds) state.transform = fitTransform(bounds, mapCanvas.width, mapCanvas.height);
+  state.transform.rot = mapRot;
   const range = globalRange(state.tracks, state.mode);
   state.crop = { ...range };
   playback.setRange(range);
@@ -84,7 +94,7 @@ function draw() {
   const axisEvents = remapEventsToAxis(state.events, state.mode, base);
   // 動画を [開始, 開始+長さ] の区間としてタイムライン軸に変換(長さ不明なら点)
   const axisVideos = remapEventsToAxis(
-    state.videos.map((v) => ({ t: v.t, tEnd: v.durationMs != null ? v.t + v.durationMs : null })),
+    state.videos.map((v) => ({ id: v.id, t: v.t, tEnd: v.durationMs != null ? v.t + v.durationMs : null })),
     state.mode, base,
   );
   // ピンを軸時刻へ変換(タグ/動画と同様、絶対時刻で保持)
@@ -146,13 +156,13 @@ function placeVideo(file, t, durationMs, src) {
 
 async function addVideo(file) {
   if (!firstVisibleTrack()) { statusEl.textContent = '先にGPS軌跡を読み込んでください'; return; }
-  // 埋め込み撮影時刻(録画開始 = creation − 長さ)を優先。moov だけ部分読みする。
+  // 埋め込み撮影時刻(creation_time=録画開始)を優先。moov だけ部分読みする。
   let meta = null;
   try { meta = await parseMp4TimesFromFile(file); } catch { /* パース失敗はフォールバック */ }
   const embedded = embeddedStartMs(meta);
   const range = globalRange(state.tracks, 'absolute');
   if (embedded != null && embedded >= range.start && embedded <= range.end) {
-    const src = meta.durationMs != null ? '埋め込み撮影時刻(終了−長さ=開始)' : '埋め込み撮影時刻';
+    const src = '埋め込み撮影時刻(録画開始)';
     placeVideo(file, embedded, meta.durationMs ?? null, src);
   } else {
     const src = embedded != null ? '現在位置(撮影時刻は軌跡範囲外)' : '現在の再生位置';
@@ -346,9 +356,12 @@ function renderSidebar() {
     row.innerHTML =
       `<input type="checkbox" ${tr.visible ? 'checked' : ''} data-i="${i}" />` +
       `<span class="swatch" style="background:${tr.color}"></span>` +
-      `<span>${tr.name}</span><button data-del="${i}">×</button>`;
+      `<span class="track-name" data-i="${i}" title="ダブルクリックで名前を変更">${tr.name}</span>` +
+      `<button data-del="${i}">×</button>`;
     tl.appendChild(row);
   });
+  tl.querySelectorAll('.track-name').forEach((s) =>
+    s.addEventListener('dblclick', (e) => startRenameTrack(+e.target.dataset.i, e.target)));
   tl.querySelectorAll('input[type=checkbox]').forEach((cb) =>
     cb.addEventListener('change', (e) => {
       state.tracks[+e.target.dataset.i].visible = e.target.checked;
@@ -402,6 +415,27 @@ function renderSidebar() {
     b.addEventListener('click', (e) => deleteVideo(+e.target.dataset.delvid)));
 
   renderReflectionList();
+}
+
+// トラック名をインライン編集。span を input に置換し、Enter/blur で確定・Escで取消。
+function startRenameTrack(i, spanEl) {
+  const tr = state.tracks[i];
+  if (!tr) return;
+  const input = document.createElement('input');
+  input.type = 'text'; input.className = 'rename-input'; input.value = tr.name;
+  let done = false;
+  const commit = (save) => {
+    if (done) return; done = true;
+    if (save) { const v = input.value.trim(); if (v) tr.name = v; }
+    draw(); renderSidebar();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') commit(true);
+    else if (e.key === 'Escape') commit(false);
+  });
+  input.addEventListener('blur', () => commit(true));
+  spanEl.replaceWith(input);
+  input.focus(); input.select();
 }
 
 // 動画を削除。開いている動画ならパネルを閉じ、ObjectURLを解放。
@@ -483,6 +517,18 @@ mapCanvas.addEventListener('wheel', (e) => {
   draw();
 }, { passive: false });
 
+// マップ回転スライダー(0–360°)。表示のみ・保存しない。
+function setMapRotationDeg(deg) {
+  const d = ((deg % 360) + 360) % 360;
+  mapRot = (d * Math.PI) / 180;
+  state.transform.rot = mapRot;
+  $('rotate-slider').value = String(d);
+  $('rotate-label').textContent = `${d}°`;
+  draw();
+}
+$('rotate-slider').addEventListener('input', (e) => setMapRotationDeg(+e.target.value));
+$('rotate-reset').addEventListener('click', () => setMapRotationDeg(0));
+
 // 区間選択: 軌跡上の点を単クリック→1回目=始点, 2回目=終点でクロップを設定
 let pendingStart = null; // 選択軸上の時刻(絶対 or elapsed)
 const PICK_PX = 8;
@@ -542,9 +588,20 @@ function cancelPending() {
 
 // 左右分割の動画パネル。開閉でキャンバスを左半分に再フィット(クロップは維持)。
 let currentVideo = null; // 再生中の動画(GPS現在位置の同期元)
+let videoRotation = 0; // 動画の表示回転角(度、表示のみ・保存しない)
+// ステージに object-fit:contain で収まるよう動画のボックス寸法を決め、回転を適用。
+function applyVideoRotation() {
+  const stage = $('video-stage'); const vid = $('video-el');
+  if (!stage) return;
+  const box = rotatedFitBox(videoRotation, stage.clientWidth, stage.clientHeight);
+  vid.style.width = `${box.w}px`;
+  vid.style.height = `${box.h}px`;
+  vid.style.transform = `translate(-50%, -50%) rotate(${videoRotation}deg)`;
+}
 function refitTransform() {
   const bounds = computeBounds(state.tracks);
   if (bounds) state.transform = fitTransform(bounds, mapCanvas.width, mapCanvas.height);
+  state.transform.rot = mapRot;
 }
 // 動画の再生位置を絶対時刻に直し、現在モードの軸へ変換して playhead を追従させる。
 function syncFromVideo() {
@@ -552,6 +609,16 @@ function syncFromVideo() {
   const r = firstVisibleTrack();
   const base = state.mode === 'elapsed' && r ? r.tRange.start : 0;
   playback.seek(currentVideo.t + $('video-el').currentTime * 1000 - base);
+}
+// syncFromVideo の逆算。軸時刻 t を動画の currentTime(秒) に直して動画をシーク。
+// seeked イベント → syncFromVideo が playhead を追従させる。
+function seekVideoToAxisTime(t) {
+  if (!currentVideo) return;
+  const vid = $('video-el');
+  const r = firstVisibleTrack();
+  const base = state.mode === 'elapsed' && r ? r.tRange.start : 0;
+  const max = Number.isFinite(vid.duration) ? vid.duration : Infinity;
+  vid.currentTime = Math.max(0, Math.min((t + base - currentVideo.t) / 1000, max));
 }
 function openVideoPanel(v) {
   const vid = $('video-el');
@@ -561,7 +628,9 @@ function openVideoPanel(v) {
   // 動画をmasterにするので app のクロックは止める
   playback.pause(); $('play-btn').textContent = '▶';
   currentVideo = v;
+  videoRotation = 0; // 表示のみ・毎回リセット
   resizeCanvas(); refitTransform(); draw(); renderSidebar();
+  applyVideoRotation(); // パネル表示後にステージ寸法へ合わせる
   vid.play().catch(() => { /* autoplayブロックは手動再生に委ねる */ });
 }
 function closeVideoPanel() {
@@ -598,6 +667,7 @@ markMenu.querySelectorAll('button').forEach((b) =>
 window.addEventListener('pointerdown', (e) => { if (!markMenu.contains(e.target)) hideMenu(); });
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideMenu(); cancelPending(); closeVideoPanel(); } });
 $('video-close').addEventListener('click', closeVideoPanel);
+$('video-rotate').addEventListener('click', () => { videoRotation = nextRotation(videoRotation); applyVideoRotation(); });
 $('video-delete').addEventListener('click', () => { if (currentVideo) deleteVideo(state.videos.indexOf(currentVideo)); });
 // 再生中はrAFで毎フレーム同期(滑らか)。停止/スクラブ時はtimeupdate/seekedで追従。
 function videoTickLoop() {
@@ -626,6 +696,43 @@ const mention = { active: false, atPos: -1, items: [], index: 0 };
   sel.innerHTML = '<option value="">—</option>'
     + DIR_NAMES.map((d) => `<option value="${d}">${d}</option>`).join('');
 })();
+
+// 艇セッティング/反省内容の日本語ラベル(キー順は reflections.js の *_FIELDS に従う)。
+const RIG_LABELS = {
+  boatNo: '船番号', gear: 'ギア', prebend: 'プリベンド', rake: 'レーキ',
+  sideTension: 'サイドテンション', foreTension: 'フォアテンション', puller: 'プラー',
+  peakRope: 'ピークロープ', bridleHeight: 'ブライダル高', jibLeader: 'ジブリーダー',
+  jibPull: 'ジブ引き量', vangPull: 'バング引き量',
+};
+const NOTE_LABELS = {
+  goal: '目標', issue: '感じている課題', discovery: '発見',
+  slowFactor: '遅かった要因', fastFactor: '速かった要因',
+};
+
+// 反省エディタの艇セッティング(数値12項目)と反省内容(テキスト5項目)を動的生成。
+(function buildReflFields() {
+  $('refl-rig').innerHTML = RIG_FIELDS.map((f) =>
+    `<label>${RIG_LABELS[f]}<input id="rig-${f}" type="number" step="any" inputmode="decimal" /></label>`).join('');
+  $('refl-notes').innerHTML = NOTE_FIELDS.map((f) =>
+    `<label class="refl-note">${NOTE_LABELS[f]}<textarea id="note-${f}" rows="2"></textarea></label>`).join('');
+})();
+
+function setRigInputs(rig) {
+  for (const f of RIG_FIELDS) $(`rig-${f}`).value = rig?.[f] ?? '';
+}
+function getRigInputs() {
+  const out = {};
+  for (const f of RIG_FIELDS) out[f] = $(`rig-${f}`).value;
+  return out;
+}
+function setNotesInputs(notes) {
+  for (const f of NOTE_FIELDS) $(`note-${f}`).value = notes?.[f] ?? '';
+}
+function getNotesInputs() {
+  const out = {};
+  for (const f of NOTE_FIELDS) out[f] = $(`note-${f}`).value;
+  return out;
+}
 
 // 練習日時(絶対時刻の全体範囲, JST日付)。トラック未読込なら null。
 function practiceInfo() {
@@ -701,6 +808,18 @@ async function openReflectionEditor(existing = null) {
   $('reflection-editor').classList.remove('hidden');
   hideMention();
   $('refl-text').focus();
+
+  if (existing) {
+    // 編集: 保存済みの艇セッティング/波高/反省内容を復元。
+    setRigInputs(existing.rig);
+    setNotesInputs(existing.notes);
+    $('refl-waveHeight').value = existing.waveHeight ?? '';
+  } else {
+    // 新規: 直前の反省の艇セッティングを初期値にプリフィル(微調整だけで済む)。天候は引き継がない。
+    setRigInputs(previousRig(state.reflections));
+    setNotesInputs(null);
+    $('refl-waveHeight').value = '';
+  }
 
   if (existing) {
     currentWind = existing.wind ?? null;
@@ -807,16 +926,24 @@ function saveReflection() {
   // 本文に残っているメンションだけを構造化して保存(手で消したものは除外)。
   const people = pendingPeople.filter((p) => text.includes(`@${p.given}`)).map((p) => p.fullName);
   const videos = pendingVideos.filter((v) => text.includes(v.token)).map((v) => ({ name: v.name, tMs: v.tMs }));
+  // 数値/テキストの正規化は createReflection に任せる(空欄→null 等)。
+  const fields = {
+    text, people, videos, wind,
+    rig: getRigInputs(), waveHeight: $('refl-waveHeight').value, notes: getNotesInputs(),
+  };
 
   if (editingId) {
     const idx = state.reflections.findIndex((r) => r.id === editingId);
     if (idx >= 0) {
-      state.reflections[idx] = { ...state.reflections[idx], text, people, videos, wind };
+      const prev = state.reflections[idx];
+      state.reflections[idx] = createReflection({
+        id: prev.id, createdAt: prev.createdAt, practice: prev.practice, ...fields,
+      });
     }
   } else {
     state.reflections.push(createReflection({
       id: `refl${Date.now()}_${reflSeq++}`, createdAt: Date.now(),
-      text, people, videos, wind, practice: practiceInfo(),
+      practice: practiceInfo(), ...fields,
     }));
   }
   persistReflections();
@@ -840,7 +967,7 @@ $('refl-text').addEventListener('keydown', (e) => {
   else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); hideMention(); }
 });
 
-window.addEventListener('resize', () => { resizeCanvas(); recomputeView(); draw(); });
+window.addEventListener('resize', () => { resizeCanvas(); recomputeView(); draw(); applyVideoRotation(); });
 resizeCanvas();
 draw();
 renderReflectionList();

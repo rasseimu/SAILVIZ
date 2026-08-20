@@ -45,8 +45,8 @@ const injectedReadTimes = async (file) => file.meta; // getFile が付けた met
 test('範囲内の動画だけを返し、走査数/スキップ数も数える', async () => {
   const dir = fakeDir([
     fileHandle('a.mp4', { creationMs: 1500, durationMs: null }),   // 開始1500 範囲内 → 採用
-    fileHandle('b.mp4', { creationMs: 2500, durationMs: 300 }),    // 開始=2200 範囲外 → 除外
-    fileHandle('c.mov', { creationMs: 1400, durationMs: 400 }),    // 開始=1000 一部重なり → 採用
+    fileHandle('b.mp4', { creationMs: 2500, durationMs: 300 }),    // 開始=2500 範囲外 → 除外
+    fileHandle('c.mov', { creationMs: 1400, durationMs: 400 }),    // 開始=1400 一部重なり → 採用
     fileHandle('d.mp4', null),                                     // moov無し(時刻不明) → 除外
     fileHandle('notes.txt', { creationMs: 1500, durationMs: null }), // 動画以外 → 走査対象外
     { kind: 'directory', name: 'sub' },                            // サブフォルダ → 無視
@@ -55,7 +55,7 @@ test('範囲内の動画だけを返し、走査数/スキップ数も数える'
   assert.equal(res.scanned, 4);   // 動画ファイル4本
   assert.equal(res.skipped, 2);   // b, d
   assert.deepEqual(res.matched.map((m) => m.file.name), ['a.mp4', 'c.mov']);
-  assert.deepEqual(res.matched.map((m) => m.t), [1500, 1000]); // 開始(録画開始=creation−duration)
+  assert.deepEqual(res.matched.map((m) => m.t), [1500, 1400]); // 開始(録画開始=creation_time)
 });
 
 // --- collectVideoFiles: 名前一致の動画 File のみ収集 ---

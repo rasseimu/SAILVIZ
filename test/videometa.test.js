@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMp4CreationTime, parseMp4Times, parseMp4TimesFromFile } from '../src/videometa.js';
+import { parseMp4CreationTime, parseMp4Times, parseMp4TimesFromFile, embeddedStartMs } from '../src/videometa.js';
 
 const MAC_EPOCH_OFFSET = 2082844800; // 1904→1970 の秒差
 
@@ -69,8 +69,19 @@ test('parseMp4Times returns creation and duration (ms)', () => {
   const got = parseMp4Times(moov.buffer);
   assert.equal(got.creationMs, unixSec * 1000);
   assert.equal(got.durationMs, 90 * 1000);
-  // creation_time が「録画終了」の端末では 開始 = creation - duration
-  assert.equal(got.creationMs - got.durationMs, (unixSec - 90) * 1000);
+});
+
+// creation_time は「録画開始時刻」として扱う。duration は減算しない。
+test('embeddedStartMs returns creation_time as start (duration not subtracted)', () => {
+  assert.equal(embeddedStartMs({ creationMs: 1_000_000, durationMs: 59_000 }), 1_000_000);
+});
+
+test('embeddedStartMs ignores duration even when present', () => {
+  assert.equal(embeddedStartMs({ creationMs: 5_000, durationMs: 90_000 }), 5_000);
+});
+
+test('embeddedStartMs returns null for missing meta', () => {
+  assert.equal(embeddedStartMs(null), null);
 });
 
 test('parseMp4Times: durationMs is null when timescale is 0', () => {

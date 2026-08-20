@@ -45,6 +45,11 @@
     </aside>
     <section id="stage">
       <canvas id="map"></canvas>
+      <div id="rotate-control" title="マップを回転">
+        <span id="rotate-label">0°</span>
+        <input type="range" id="rotate-slider" min="0" max="360" step="1" value="0" />
+        <button id="rotate-reset" title="北上に戻す">⟲</button>
+      </div>
       <div id="drop-zone">CSV / 動画をここにドラッグ&ドロップ</div>
       <div id="mark-menu" class="hidden">
         <button data-shape="triangle" data-color="#e02020"><span style="color:#e02020">▲</span> 赤三角</button>
@@ -56,10 +61,11 @@
     <aside id="video-panel" class="hidden">
       <div id="video-bar">
         <span id="video-name"></span>
+        <button id="video-rotate" title="90°回転">⟳</button>
         <button id="video-delete" title="この動画を削除">🗑</button>
         <button id="video-close" title="閉じる (Esc)">×</button>
       </div>
-      <video id="video-el" controls></video>
+      <div id="video-stage"><video id="video-el" controls></video></div>
     </aside>
   </main>
 
@@ -67,19 +73,32 @@
     <div id="refl-bar">
       <strong id="refl-title">反省を記入</strong>
       <span id="refl-hint">＠で部員をメンション・動画リストのクリックで動画をメンション</span>
-      <label class="refl-wind-field">風向
-        <select id="refl-wind-dir"></select>
-      </label>
-      <label class="refl-wind-field">風速
-        <input id="refl-wind-speed" type="number" step="0.1" min="0" /> m/s
-      </label>
-      <span id="refl-wind-src"></span>
       <button id="refl-save">保存</button>
       <button id="refl-cancel">破棄</button>
     </div>
     <div id="refl-input-wrap">
       <textarea id="refl-text" rows="3" placeholder="今日の反省…（@ で部員、動画リストのクリックで動画をメンション）"></textarea>
       <ul id="refl-mention" class="hidden"></ul>
+
+      <details class="refl-section" open>
+        <summary>艇セッティング</summary>
+        <div id="refl-rig" class="refl-grid"></div>
+      </details>
+
+      <details class="refl-section">
+        <summary>天候</summary>
+        <div class="refl-grid">
+          <label>風向 <select id="refl-wind-dir"></select></label>
+          <label>風速 <input id="refl-wind-speed" type="number" step="0.1" min="0" /> m/s</label>
+          <label>波高 <input id="refl-waveHeight" type="number" step="0.1" min="0" /> m</label>
+        </div>
+        <span id="refl-wind-src"></span>
+      </details>
+
+      <details class="refl-section">
+        <summary>反省内容</summary>
+        <div id="refl-notes" class="refl-notes"></div>
+      </details>
     </div>
   </section>
 
