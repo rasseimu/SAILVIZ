@@ -2,6 +2,41 @@
 // localStorage に配列で永続化する(クライアント完結)。純ロジックはテスト可能に分離。
 export const STORAGE_KEY = 'sailviz.reflections';
 
+// 艇セッティング(全て数値)。UI/正規化/引き継ぎで共通に使う順序付きキー。
+export const RIG_FIELDS = [
+  'boatNo', 'gear', 'prebend', 'rake', 'sideTension', 'foreTension',
+  'puller', 'peakRope', 'bridleHeight', 'jibLeader', 'jibPull', 'vangPull',
+];
+// 反省内容(ラベル付きテキスト5欄)。
+export const NOTE_FIELDS = ['goal', 'issue', 'discovery', 'slowFactor', 'fastFactor'];
+
+// 数値入力の正規化: 空欄/非数値→null、それ以外→number(0 は保持)。
+export function toNum(v) {
+  if (v === '' || v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// 入力 rig を RIG_FIELDS 全キー揃いの数値オブジェクトに整える(未指定→null)。
+function normalizeRig(rig = {}) {
+  const out = {};
+  for (const f of RIG_FIELDS) out[f] = toNum(rig?.[f]);
+  return out;
+}
+
+// 入力 notes を NOTE_FIELDS 全キー揃いの文字列オブジェクトに整える(未指定→'')。
+function normalizeNotes(notes = {}) {
+  const out = {};
+  for (const f of NOTE_FIELDS) out[f] = String(notes?.[f] ?? '');
+  return out;
+}
+
+// 新規反省の初期セッティング用に、最新(末尾)の反省の rig を返す。無ければ空 rig。
+export function previousRig(list = []) {
+  const last = Array.isArray(list) && list.length ? list[list.length - 1] : null;
+  return normalizeRig(last?.rig);
+}
+
 // mm:ss 形式(動画メンションの位置表示用)。
 export function formatVideoPos(ms) {
   const total = Math.max(0, Math.floor(Number(ms) / 1000));
@@ -12,7 +47,10 @@ export function formatVideoPos(ms) {
 
 // 反省1件を組み立てる。people/videos は挿入時に構造化して渡す。
 // id/createdAt は呼び出し側(=ブラウザ)で採番して渡す(テストの決定性のため)。
-export function createReflection({ id, createdAt, text = '', people = [], videos = [], wind = null, practice = null }) {
+export function createReflection({
+  id, createdAt, text = '', people = [], videos = [], wind = null, practice = null,
+  rig = null, waveHeight = null, notes = null,
+}) {
   return {
     id,
     createdAt,
@@ -21,6 +59,9 @@ export function createReflection({ id, createdAt, text = '', people = [], videos
     videos: videos.map((v) => ({ name: v.name, tMs: v.tMs ?? 0 })),
     wind: wind ? { ...wind } : null,
     practice: practice ? { ...practice } : null,
+    rig: normalizeRig(rig),
+    waveHeight: toNum(waveHeight),
+    notes: normalizeNotes(notes),
   };
 }
 

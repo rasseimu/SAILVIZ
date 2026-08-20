@@ -6,7 +6,7 @@ import { createTimeline } from '../src/timeline.js';
 // tToX が 1:1 になるよう width=1000, range=[0,1000] を使う。
 const ACTIVE_CROP = 'rgba(230,126,34,0.30)';
 
-function harness() {
+function harness(videos = []) {
   const handlers = {};
   const noop = () => {};
   const fills = []; // renderで設定された fillStyle を記録
@@ -21,14 +21,16 @@ function harness() {
     setPointerCapture: noop, releasePointerCapture: noop,
     addEventListener: (type, fn) => { handlers[type] = fn; },
   };
-  const calls = { crop: [], scrub: [] };
+  const calls = { crop: [], scrub: [], video: [] };
   const tl = createTimeline(canvas, {
     onCropChange: (c) => calls.crop.push(c),
     onScrub: (t) => calls.scrub.push(t),
+    onVideoClick: (id) => calls.video.push(id),
     onPinAdd: () => {}, onPinRemove: () => {},
   });
-  tl.render({ range: { start: 0, end: 1000 }, crop: { start: 200, end: 400 }, now: 300, events: [], videos: [], pins: [] });
-  const fire = (type, x) => handlers[type]({ clientX: x, pointerId: 1, preventDefault: noop });
+  tl.render({ range: { start: 0, end: 1000 }, crop: { start: 200, end: 400 }, now: 300, events: [], videos, pins: [] });
+  // clientY 省略時は中央高さ(=バー以外)を既定にする。
+  const fire = (type, x, y = 20) => handlers[type]({ clientX: x, clientY: y, pointerId: 1, preventDefault: noop });
   const lastRenderFills = () => { const i = fills.lastIndexOf('#c7d3dd'); return fills.slice(i); };
   return { fire, calls, lastRenderFills };
 }
@@ -94,6 +96,53 @@ test('crop color switches to active on long-press establish and reverts on relea
     assert.ok(lastRenderFills().includes(ACTIVE_CROP), '成立で掴み色');
     fire('pointerup', 300); // 解除 → 再描画で元色に戻る
     assert.ok(!lastRenderFills().includes(ACTIVE_CROP), '解除で通常色に戻る');
+  } finally { mock.timers.reset(); }
+});
+
+test('clicking a video bar (top strip) fires onVideoClick, not scrub/crop', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const { fire, calls } = harness([{ id: 'vid0', t: 500, tEnd: 700 }]);
+    fire('pointerdown', 600, 4); // 上端ストリップ内、バーの x 範囲(500..700)
+    fire('pointerup', 600, 4);
+    assert.deepEqual(calls.video, ['vid0']);
+    assert.deepEqual(calls.scrub, []);
+    assert.deepEqual(calls.crop, []);
+  } finally { mock.timers.reset(); }
+});
+
+test('point video (unknown length) is clickable near its x', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const { fire, calls } = harness([{ id: 'vid1', t: 500, tEnd: null }]);
+    fire('pointerdown', 501, 4);
+    fire('pointerup', 501, 4);
+    assert.deepEqual(calls.video, ['vid1']);
+  } finally { mock.timers.reset(); }
+});
+
+test('video bar click below the top strip is treated as scrub, not video', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    // crop=200..400。バー(500..700)は crop 外なので中央高さクリックは scrub 扱い。
+    const { fire, calls } = harness([{ id: 'vid0', t: 500, tEnd: 700 }]);
+    fire('pointerdown', 600, 20); // 中央高さ
+    fire('pointerup', 600, 20);
+    assert.deepEqual(calls.video, []);
+    assert.ok(calls.scrub.length > 0);
+  } finally { mock.timers.reset(); }
+});
+
+test('crop handle takes priority over an overlapping video bar', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    // 左ハンドル(x=200)に重なる位置から始まる動画。上端でもハンドル操作を優先。
+    const { fire, calls } = harness([{ id: 'vid0', t: 200, tEnd: 400 }]);
+    fire('pointerdown', 200, 4);
+    fire('pointermove', 260, 4);
+    fire('pointerup', 260, 4);
+    assert.deepEqual(calls.video, []);
+    assert.ok(calls.crop.length > 0); // ハンドルドラッグでcrop変更
   } finally { mock.timers.reset(); }
 });
 

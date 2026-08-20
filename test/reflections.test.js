@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   createReflection, windLabel, formatVideoPos,
   loadReflections, saveReflections, STORAGE_KEY,
+  previousRig, RIG_FIELDS, NOTE_FIELDS,
 } from '../src/reflections.js';
 
 function memStorage(initial = {}) {
@@ -29,6 +30,47 @@ test('createReflection は入力を正規化しコピーを持つ', () => {
   assert.equal(r.videos[1].tMs, 0); // 既定0
   people.push('X'); // 元配列を変えても反省側は不変
   assert.equal(r.people.length, 1);
+});
+
+test('createReflection: rig 数値は正規化(空欄/非数値→null、文字列数値→number)', () => {
+  const r = createReflection({
+    id: 'r1', createdAt: 1,
+    rig: { boatNo: '12', prebend: '3.5', rake: '', gear: 'x', vangPull: 0 },
+  });
+  // 全 RIG_FIELDS がキーとして存在する
+  for (const f of RIG_FIELDS) assert.ok(f in r.rig, `rig.${f} が無い`);
+  assert.equal(r.rig.boatNo, 12);
+  assert.equal(r.rig.prebend, 3.5);
+  assert.equal(r.rig.rake, null);   // 空欄→null
+  assert.equal(r.rig.gear, null);   // 非数値→null
+  assert.equal(r.rig.vangPull, 0);  // 0 は保持
+  assert.equal(r.rig.puller, null); // 未指定→null
+});
+
+test('createReflection: waveHeight を数値正規化', () => {
+  assert.equal(createReflection({ id: 'a', createdAt: 1, waveHeight: '0.5' }).waveHeight, 0.5);
+  assert.equal(createReflection({ id: 'b', createdAt: 1, waveHeight: '' }).waveHeight, null);
+  assert.equal(createReflection({ id: 'c', createdAt: 1 }).waveHeight, null);
+});
+
+test('createReflection: notes は5項目を文字列で保持', () => {
+  const r = createReflection({
+    id: 'r1', createdAt: 1,
+    notes: { goal: '上らせる', slowFactor: 'ヒール過多', extra: '無視' },
+  });
+  for (const f of NOTE_FIELDS) assert.ok(f in r.notes, `notes.${f} が無い`);
+  assert.equal(r.notes.goal, '上らせる');
+  assert.equal(r.notes.slowFactor, 'ヒール過多');
+  assert.equal(r.notes.discovery, ''); // 未指定→空文字
+  assert.equal('extra' in r.notes, false); // 未知キーは持たない
+});
+
+test('previousRig: 最新(末尾)の反省の rig を返す。無ければ空 rig', () => {
+  assert.deepEqual(previousRig([]), createReflection({ id: '_', createdAt: 0 }).rig);
+  const a = createReflection({ id: 'a', createdAt: 1, rig: { boatNo: 1 } });
+  const b = createReflection({ id: 'b', createdAt: 2, rig: { boatNo: 2, rake: 7 } });
+  assert.equal(previousRig([a, b]).boatNo, 2);
+  assert.equal(previousRig([a, b]).rake, 7);
 });
 
 test('windLabel: アメダス風', () => {

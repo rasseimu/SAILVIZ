@@ -1,6 +1,6 @@
 import { worldToScreen } from './viewport.js';
 import { project } from './projection.js';
-import { positionAt } from './interpolate.js';
+import { positionAt, speedAt } from './interpolate.js';
 import { trackLookupTime } from './timeaxis.js';
 
 function toScreen(lat, lon, T) {
@@ -72,6 +72,20 @@ function drawVideoBadge(ctx, s, active = false) {
   ctx.fill();
 }
 
+// 現在地マーカー横の速度ラベル。白縁取り＋トラック色で明暗どちらの水面でも読める。
+function drawSpeedLabel(ctx, s, text, color) {
+  ctx.font = '600 12px system-ui, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  const x = s.px + 13, y = s.py - 11;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#fff';
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = color;
+  ctx.fillText(text, x, y);
+}
+
 export function drawScene(ctx, state) {
   const { transform: T, tracks, events, now, mode, crop, referenceTrack, marks = [], videos = [], activeVideoId = null } = state;
   ctx.clearRect(0, 0, T.w, T.h);
@@ -117,6 +131,9 @@ export function drawScene(ctx, state) {
     ctx.lineWidth = 2;
     ctx.strokeStyle = '#000';
     ctx.stroke();
+    // 現在の移動速度(m/s)をマーカー右上に表示。GPS(playhead)に同期。
+    const speed = speedAt(tr.points, lookup);
+    if (speed != null) drawSpeedLabel(ctx, s, `${speed.toFixed(1)} m/s`, tr.color);
   }
 
   // タグピン。lat/lon があればその座標に、無ければ基準トラックの絶対時刻位置を補間して配置。

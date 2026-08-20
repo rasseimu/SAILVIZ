@@ -2,6 +2,7 @@ import { clamp } from './timeaxis.js';
 
 const HANDLE_PX = 8;
 const LONG_PRESS_MS = 400;
+const VIDEO_STRIP_H = 12; // 上端の動画バーをクリック判定するストリップ高さ(px)
 
 // crop全体をdeltaTだけ平行移動。幅を保持し、range内にクランプ。
 export function moveCropRange(crop, deltaT, range) {
@@ -27,7 +28,7 @@ export function pinHitIndex(pinXs, x, tol) {
   return best;
 }
 
-export function createTimeline(canvas, { onCropChange, onScrub, onPinAdd, onPinRemove }) {
+export function createTimeline(canvas, { onCropChange, onScrub, onVideoClick, onPinAdd, onPinRemove }) {
   const ctx = canvas.getContext('2d');
   let state = { range: { start: 0, end: 0 }, crop: { start: 0, end: 0 }, now: 0, events: [], pins: [] };
   let drag = null; // 'left' | 'right' | 'scrub' | 'inside'
@@ -121,6 +122,20 @@ export function createTimeline(canvas, { onCropChange, onScrub, onPinAdd, onPinR
     const rect = canvas.getBoundingClientRect();
     return ((e.clientX - rect.left) / rect.width) * canvas.width;
   }
+  function localY(e) {
+    const rect = canvas.getBoundingClientRect();
+    return ((e.clientY - rect.top) / rect.height) * canvas.height;
+  }
+  // 上端ストリップ内で動画バー(render と同じ x 範囲)に当たれば動画idを返す。無ければnull。
+  function videoHitId(x, y) {
+    if (y > VIDEO_STRIP_H) return null;
+    for (const v of state.videos || []) {
+      const x0 = tToX(v.t);
+      const x1 = v.tEnd != null ? Math.max(x0 + 2, tToX(v.tEnd)) : x0 + 4;
+      if (x >= x0 - 4 && x <= x1 + 4) return v.id;
+    }
+    return null;
+  }
   function clearLongPress() {
     if (longPressTimer != null) { clearTimeout(longPressTimer); longPressTimer = null; }
   }
@@ -128,6 +143,11 @@ export function createTimeline(canvas, { onCropChange, onScrub, onPinAdd, onPinR
   canvas.addEventListener('pointerdown', (e) => {
     const x = lastX = localX(e);
     const target = pickTarget(x);
+    // 動画バー(上端)クリック → 該当動画を再生。crop ハンドル操作は優先。
+    if (target !== 'left' && target !== 'right') {
+      const vid = videoHitId(x, localY(e));
+      if (vid != null) { onVideoClick?.(vid); drag = null; return; }
+    }
     try { canvas.setPointerCapture(e.pointerId); } catch { /* stale pointer */ }
     if (target === 'pin') {
       // ピンをクリック → crop開始をそのピンへ(幅は保持)
@@ -157,7 +177,11 @@ export function createTimeline(canvas, { onCropChange, onScrub, onPinAdd, onPinR
     handleDrag(e);
   });
   canvas.addEventListener('pointermove', (e) => {
-    if (!drag) return;
+    if (!drag) {
+      // 動画バー上はクリック可能を示す(掴み操作中は上書きしない)
+      canvas.style.cursor = videoHitId(localX(e), localY(e)) != null ? 'pointer' : '';
+      return;
+    }
     const x = lastX = localX(e);
     if (drag === 'inside') {
       const t = xToT(x);
