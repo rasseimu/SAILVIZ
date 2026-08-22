@@ -23,7 +23,7 @@ export async function scanFolderVideos(dirHandle, range, readTimes = parseMp4Tim
     const file = await entry.getFile();
     let meta = null;
     try { meta = await readTimes(file); } catch { /* パース失敗は時刻不明扱い */ }
-    const t = embeddedStartMs(meta);
+    const t = embeddedStartMs(meta, file.name);
     if (videoOverlapsRange(t, meta?.durationMs ?? null, range)) {
       matched.push({ file, t, durationMs: meta?.durationMs ?? null });
     }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMp4CreationTime, parseMp4Times, parseMp4TimesFromFile, embeddedStartMs } from '../src/videometa.js';
+import { parseMp4CreationTime, parseMp4Times, parseMp4TimesFromFile, embeddedStartMs, isEndTimeDevice } from '../src/videometa.js';
 
 const MAC_EPOCH_OFFSET = 2082844800; // 1904→1970 の秒差
 
@@ -82,6 +82,39 @@ test('embeddedStartMs ignores duration even when present', () => {
 
 test('embeddedStartMs returns null for missing meta', () => {
   assert.equal(embeddedStartMs(null), null);
+});
+
+// --- 端末判定: Pixel は creation_time が録画終了なので 開始 = 終了 − 長さ ---
+test('isEndTimeDevice: PXL_ 名は終了時刻端末とみなす', () => {
+  assert.equal(isEndTimeDevice('PXL_20260820_001827685.mp4'), true);
+  assert.equal(isEndTimeDevice('pxl_20260820_001827685.mp4'), true); // 大小無視
+});
+
+test('isEndTimeDevice: iPhone等の名前は false', () => {
+  assert.equal(isEndTimeDevice('IMG_1234.mov'), false);
+  assert.equal(isEndTimeDevice('video.mp4'), false);
+  assert.equal(isEndTimeDevice(undefined), false);
+});
+
+test('embeddedStartMs: Pixel名+長さあり → creation − duration', () => {
+  assert.equal(
+    embeddedStartMs({ creationMs: 1_000_000, durationMs: 59_000 }, 'PXL_20260820_001827685.mp4'),
+    941_000,
+  );
+});
+
+test('embeddedStartMs: Pixel名+長さなし → creation のまま(減算しない)', () => {
+  assert.equal(
+    embeddedStartMs({ creationMs: 1_000_000, durationMs: null }, 'PXL_20260820_001827685.mp4'),
+    1_000_000,
+  );
+});
+
+test('embeddedStartMs: iPhone名は長さがあっても creation のまま(9324dd8回帰防止)', () => {
+  assert.equal(
+    embeddedStartMs({ creationMs: 1_000_000, durationMs: 59_000 }, 'IMG_1234.mov'),
+    1_000_000,
+  );
 });
 
 test('parseMp4Times: durationMs is null when timescale is 0', () => {

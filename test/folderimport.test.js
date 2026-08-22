@@ -58,6 +58,21 @@ test('範囲内の動画だけを返し、走査数/スキップ数も数える'
   assert.deepEqual(res.matched.map((m) => m.t), [1500, 1400]); // 開始(録画開始=creation_time)
 });
 
+test('Pixel(PXL_)動画は creation_time を終了とみなし 開始=終了−長さ で判定する', async () => {
+  const dir = fakeDir([
+    // creation(終了)=2300, 長さ400 → 開始=1900 範囲内 → 採用(t=1900)
+    fileHandle('PXL_20260820_001827685.mp4', { creationMs: 2300, durationMs: 400 }),
+    // creation(終了)=1200, 長さ400 → 開始=800 範囲手前で終了1200は範囲内 → 採用(t=800)
+    fileHandle('PXL_20260820_002000000.mp4', { creationMs: 1200, durationMs: 400 }),
+  ]);
+  const res = await scanFolderVideos(dir, { start: 1000, end: 2000 }, injectedReadTimes);
+  assert.deepEqual(res.matched.map((m) => m.file.name), [
+    'PXL_20260820_001827685.mp4',
+    'PXL_20260820_002000000.mp4',
+  ]);
+  assert.deepEqual(res.matched.map((m) => m.t), [1900, 800]); // 開始=終了−長さ
+});
+
 // --- collectVideoFiles: 名前一致の動画 File のみ収集 ---
 test('collectVideoFiles は nameSet に含まれる名前の File だけ返す', async () => {
   const dir = fakeDir([
