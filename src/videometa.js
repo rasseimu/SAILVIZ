@@ -68,12 +68,22 @@ export function parseMp4CreationTime(arrayBuffer) {
   return parseMp4Times(arrayBuffer)?.creationMs ?? null;
 }
 
-// 埋め込みメタ({creationMs,durationMs}|null) から録画開始(絶対ms)を求める。
-// creation_time は「録画開始時刻」として扱う(端末により終了時刻で書かれ得るが、
-// 実機動画で確認した結果ずれの主因が duration の二重減算だったため減算しない)。
+// creation_time を「録画終了時刻」で書く端末か、ファイル名で判定する。
+// iPhone は録画開始、Google Pixel(PXL_プレフィックス) は録画終了で書く実機確認済み。
+export function isEndTimeDevice(name) {
+  return /^PXL_/i.test(name || '');
+}
+
+// 埋め込みメタ({creationMs,durationMs}|null) とファイル名から録画開始(絶対ms)を求める。
+// 端末で creation_time の意味が違うため name で分岐する:
+//   - 終了時刻端末(Pixel): 開始 = 終了 − 長さ (長さ不明なら減算せず creation のまま)
+//   - それ以外(iPhone等): creation_time がそのまま録画開始
 // meta 無しは null。
-export function embeddedStartMs(meta) {
+export function embeddedStartMs(meta, name) {
   if (!meta) return null;
+  if (isEndTimeDevice(name) && meta.durationMs != null) {
+    return meta.creationMs - meta.durationMs;
+  }
   return meta.creationMs;
 }
 
