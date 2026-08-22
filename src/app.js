@@ -806,6 +806,8 @@ async function openReflectionEditor(existing = null) {
   }));
   $('refl-title').textContent = existing ? '反省を編集' : '反省を記入';
   $('reflection-editor').classList.remove('hidden');
+  // エディタ表示でステージが縮む → canvasバッファを再計算しないと地図が潰れる(動画パネルと同様)
+  resizeCanvas(); refitTransform(); draw();
   hideMention();
   $('refl-text').focus();
 
@@ -844,6 +846,8 @@ function closeReflectionEditor() {
   editorOpen = false; editingId = null;
   hideMention();
   $('reflection-editor').classList.add('hidden');
+  // エディタを閉じるとステージが元の高さに戻る → canvasバッファを再計算
+  resizeCanvas(); refitTransform(); draw();
 }
 
 function videoToken(name, tMs) { return `[動画:${name}@${formatVideoPos(tMs)}]`; }
@@ -955,6 +959,10 @@ function saveReflection() {
 $('reflection-add').addEventListener('click', () => openReflectionEditor(null));
 $('refl-cancel').addEventListener('click', closeReflectionEditor);
 $('refl-save').addEventListener('click', saveReflection);
+// 反省内の各セクション(details)を展開/折りたたむとエディタ高さが変わりステージが伸縮する
+// → canvasバッファを再計算しないと地図が潰れる/伸びる
+document.querySelectorAll('#reflection-editor .refl-section').forEach((d) =>
+  d.addEventListener('toggle', () => { resizeCanvas(); refitTransform(); draw(); }));
 $('refl-wind-dir').addEventListener('change', () => { windEdited = true; });
 $('refl-wind-speed').addEventListener('input', () => { windEdited = true; });
 $('refl-text').addEventListener('input', updateMention);
