@@ -23,7 +23,7 @@
 | ユーザー | 分析者（1人・PC） | 各部員（多人数・スマホ） |
 | 実行環境 | Chrome + FileSystem Access API | モバイルブラウザ / PWA |
 | 配信 | ローカル静的配信（`serve.py`） | オンラインにホスティング |
-| スタック | 素の ESM・ビルド無し | Vite + Svelte・PWA・Supabase SDK |
+| スタック | 素の ESM・ビルド無し | 素の ESM・ビルド無し・PWA・Supabase(CDN ESM) |
 | データ | ローカル `.sailviz.json` | Supabase（クラウド） |
 
 スマホ入力を自然にする必要が **FileSystem Access API を使えなくする**（iOS Safari 非対応）。
@@ -70,17 +70,19 @@
 
 ## フロントエンド構成（`sailviz-reflect`）
 
-**Vite + Svelte、PWA（インストール可・オフラインファースト）** を採用。
-理由: #16 の反省フォームは **リグ12項目＋反省5欄＋風＋波高** と重く、履歴表示・
-オフラインキュー・ルーティングを持つため、素の DOM 操作より軽フレームワークが効く。
-（SailViz の「ビルド無し」流儀を新リポでも守るなら素の JS も可。spec レビューで確認。）
+**素の ESM・ビルド無し、PWA（インストール可・オフラインファースト）** を採用。
+SailViz と同じ「手書き ESM ＋ `node --test` ＋ DI で純ロジックをテスト」流儀を踏襲し、
+ツールチェーンを増やさない。Supabase は CDN の ESM (`@supabase/supabase-js`) を
+`import` し、ルーティングは小さなハッシュルーターを自作、PWA は手書き Service Worker。
+重い #16 フォームは手書きになるが、SailViz の反省エディタ（`app.js`）と同じ流儀で書ける。
 
-- `src/lib/schema/`（共有スキーマ・下記）
-- `src/lib/supabase.js`（Supabase クライアント初期化・anon key は env）
-- `src/lib/syncQueue.js`（オフラインキュー・純ロジック・DI 可能）
-- `src/lib/identity.js`（名簿選択・合言葉・localStorage 保持）
-- `src/routes/`（Home / NewReflection / History / ReflectionDetail）
-- PWA: manifest ＋ Service Worker（アプリシェルのキャッシュ）
+- `src/schema.js`（共有スキーマ・下記。DOM 非依存・テスト対象）
+- `src/supabase.js`（Supabase クライアント初期化・anon key は `config.js` 経由）
+- `src/syncQueue.js`（オフラインキュー・純ロジック・DI 可能・テスト対象）
+- `src/identity.js`（名簿選択・合言葉・localStorage 保持・純ロジック・テスト対象）
+- `src/router.js`（ハッシュルーター・純ロジック・テスト対象）
+- `src/views/`（home.js / newReflection.js / history.js / detail.js — DOM 描画）
+- `index.html` / `styles.css` / `sw.js`（Service Worker）/ `manifest.webmanifest`
 
 ## 共有スキーマ（両リポの唯一の結合点）
 
@@ -188,7 +190,7 @@ SailViz 側（本 spec 範囲では契約のみ）:
 ## 実装順序（概略）
 
 1. 共有スキーマ切り出し（SailViz `reflections.js` から）＋契約テスト（両リポ）。
-2. `sailviz-reflect` リポ初期化（Vite + Svelte + PWA 雛形）、Supabase プロジェクト作成・DDL 適用。
+2. `sailviz-reflect` リポ初期化（素 ESM ＋ PWA 雛形：index.html/sw.js/manifest）、Supabase プロジェクト作成・DDL 適用。
 3. `identity.js`（名簿選択・合言葉）＋テスト。
 4. `syncQueue.js`（オフラインキュー）＋テスト。
 5. 新規反省フォーム（#16 レイアウト・リグ前回値プリフィル）。
