@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMp4CreationTime, parseMp4Times, parseMp4TimesFromFile, embeddedStartMs, isEndTimeDevice } from '../src/videometa.js';
+import { parseMp4CreationTime, parseMp4Times, parseMp4TimesFromFile, embeddedStartMs, isEndTimeDevice, findAppleCreationMs } from '../src/videometa.js';
 
 const MAC_EPOCH_OFFSET = 2082844800; // 1904→1970 の秒差
 
@@ -131,6 +131,62 @@ test('returns null when moov/mvhd absent', () => {
 test('returns null when creation_time is 0 (未設定)', () => {
   const moov = box('moov', box('mvhd', mvhdV0(0)));
   assert.equal(parseMp4CreationTime(moov.buffer), null);
+});
+
+// --- findAppleCreationMs: 書き出しで mvhd が化けても元の撮影日時を moov メタから拾う ---
+function asciiBytes(str) { return new Uint8Array([...str].map((c) => c.charCodeAt(0))); }
+
+test('findAppleCreationMs: creationdate キー近傍の ISO 日時(TZ付き)を ms で返す', () => {
+  // keys(キー名) → ilst(値) の並びを模した最小バイト列
+  const blob = asciiBytes('....keys....com.apple.quicktime.creationdate....ilst....2026-08-23T09:27:01+0900....');
+  const ms = findAppleCreationMs(blob.buffer);
+  assert.equal(ms, Date.parse('2026-08-23T09:27:01+0900'));
+});
+
+test('findAppleCreationMs: creationdate キーが無ければ null(誤検出しない)', () => {
+  const blob = asciiBytes('mvhd....2026-08-23T09:27:01+0900....'); // キー無しの裸の日付は拾わない
+  assert.equal(findAppleCreationMs(blob.buffer), null);
+});
+
+test('findAppleCreationMs: Z(UTC)表記も解釈する', () => {
+  const blob = asciiBytes('creationdate....2026-08-23T00:27:01Z');
+  assert.equal(findAppleCreationMs(blob.buffer), Date.parse('2026-08-23T00:27:01Z'));
+});
+
+// 一部端末/書き出しは creationdate ではなく QuickTime udta の `date` アトム
+// (ASCII "date" の直後に ISO8601)へ録画時刻を残す。mvhd は書き出し時刻に化ける。
+test('findAppleCreationMs: udta date アトム("date"直後のISO)を拾う', () => {
+  // box: [size][type "date"][payload=ISO文字列そのまま]（実ファイルの構造）
+  const dateAtom = box('date', asciiBytes('2026-08-23T15:47:35+0900'));
+  const blob = concat(asciiBytes('....udta....loci....'), dateAtom, asciiBytes('....'));
+  assert.equal(findAppleCreationMs(blob.buffer), Date.parse('2026-08-23T15:47:35+0900'));
+});
+
+test('findAppleCreationMs: "date"の直後にISOが無ければ拾わない(誤検出防止)', () => {
+  // "update" は "date" を部分文字列に含むが、直後にISOが無いので採用しない
+  const blob = asciiBytes('....update....something else....2026-08-23T09:27:01+0900....');
+  assert.equal(findAppleCreationMs(blob.buffer), null);
+});
+
+test('findAppleCreationMs: creationdate は date アトムより優先', () => {
+  const dateAtom = box('date', asciiBytes('2026-08-23T15:47:35+0900'));
+  const blob = concat(asciiBytes('creationdate....2026-08-23T09:27:01+0900....'), dateAtom);
+  assert.equal(findAppleCreationMs(blob.buffer), Date.parse('2026-08-23T09:27:01+0900'));
+});
+
+// mvhd が書き出し時刻に化けても、Apple の元撮影日時があれば最優先で録画開始に使う
+test('embeddedStartMs: appleCreationMs があれば mvhd より優先', () => {
+  assert.equal(
+    embeddedStartMs({ creationMs: 9_999_000, durationMs: 60_000, appleCreationMs: 1_000_000 }, 'X.MP4'),
+    1_000_000,
+  );
+});
+
+test('embeddedStartMs: appleCreationMs は Pixel の終了時刻ロジックより優先', () => {
+  assert.equal(
+    embeddedStartMs({ creationMs: 9_999_000, durationMs: 60_000, appleCreationMs: 1_000_000 }, 'PXL_x.mp4'),
+    1_000_000,
+  );
 });
 
 // --- parseMp4TimesFromFile: Blob を部分読みして moov を探す（大容量動画で全読みしない）---
