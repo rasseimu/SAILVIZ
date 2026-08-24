@@ -6,9 +6,23 @@
   <title>SailViz — GPS軌跡ビューア</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
+<body class="view-home">
+  <section id="home-screen">
+    <header id="home-bar">
+      <strong>SailViz</strong>
+      <span id="home-folder"></span>
+    </header>
+    <div id="home-body">
+      <div id="home-toolbar">
+        <button id="home-new" class="gd-new"><span class="gd-plus">＋</span> 新規練習</button>
+        <span id="home-section-title">練習データ</span>
+      </div>
+      <div id="home-cards"></div>
+    </div>
+  </section>
+
   <header id="topbar">
-    <strong>SailViz</strong>
+    <strong id="app-title" title="ホームへ戻る">SailViz</strong>
     <label class="btn">CSV読込
       <input type="file" id="file-input" accept=".csv" multiple hidden />
     </label>
@@ -103,6 +117,8 @@
       </details>
     </div>
   </section>
+
+  <div id="color-menu" class="hidden"></div>
 
   <footer id="transport">
     <button id="play-btn">▶</button>
