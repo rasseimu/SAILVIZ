@@ -11,9 +11,7 @@ export function xToMs(x, { min, max, width }) {
 }
 
 export function clampRange({ from, to }, { min, max }) {
-  let lo = Math.max(min, Math.min(from, to));
-  let hi = Math.min(max, Math.max(from, to));
-  if (lo < min) lo = min;
-  if (hi > max) hi = max;
+  const lo = Math.max(min, Math.min(from, to));
+  const hi = Math.min(max, Math.max(from, to));
   return { from: lo, to: hi };
 }
