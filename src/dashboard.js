@@ -50,12 +50,13 @@ export function createDashboard({ loadEntries, rigLabels }) {
     charts.innerHTML = '';
     const leaders = ensureStage();
     leaders.innerHTML = '';
+    if (!data.domain) return;
     const rect = boatRect();
     leaders.setAttribute('viewBox', `0 0 ${rect.stageW} ${rect.stageH}`);
     leaders.setAttribute('width', rect.stageW);
     leaders.setAttribute('height', rect.stageH);
 
-    TUNING_PARAMS.forEach((param, i) => {
+    TUNING_PARAMS.forEach((param) => {
       const a = anchorFor(param);
       if (!a) return;
       // アンカー(画像正規化)→ stage 座標
@@ -152,7 +153,11 @@ export function createDashboard({ loadEntries, rigLabels }) {
     const img = $('dashboard-boat');
     ensureStage();
     if (img.complete && img.naturalWidth) { renderCharts(); }
-    else { img.onload = () => renderCharts(); }
+    else {
+      if (img._onloadHandler) img.removeEventListener('load', img._onloadHandler);
+      img._onloadHandler = () => renderCharts();
+      img.addEventListener('load', img._onloadHandler);
+    }
     renderTimebar();
     wireTimebar();
   }
