@@ -278,7 +278,7 @@ async function loadPractice(name) {
 }
 
 // ================= ホーム画面(カード型ランチャー) =================
-const SUMMARY_KEY = 'sailviz.summaries';
+const SUMMARY_KEY = 'sailviz.summaries.v3'; // v3: 練習日をトラック＋動画の最古時刻に変更(旧キャッシュ破棄)
 // 要約キャッシュ: { ファイル名: 要約 }。ファイル名はタイムスタンプで不変なので陳腐化しない。
 function loadSummaryCache() {
   try { return JSON.parse(localStorage.getItem(SUMMARY_KEY)) || {}; } catch { return {}; }
@@ -319,13 +319,15 @@ async function openPractice(name) {
 
 // カードの中身(ラベル＋要約 or 読込中プレースホルダ)を描画。
 function renderCard(card, item, summary) {
+  // タイトルは練習日(要約のトラッキング日)を優先。未読込中はファイル名ラベルを仮表示。
+  const title = summary?.label || item.label;
   const meta = summary
     ? `<div class="hc-meta"><span>トラック${summary.trackCount}</span>`
       + `<span>反省${summary.reflectionCount}</span>`
       + `<span>動画${summary.videoCount}</span></div>`
       + (summary.wind ? `<div class="hc-wind">💨 ${escapeHtml(summary.wind)}</div>` : '')
     : '<div class="hc-meta">読込中…</div>';
-  card.innerHTML = `<div class="hc-title">${escapeHtml(item.label)}</div>${meta}`;
+  card.innerHTML = `<div class="hc-title">${escapeHtml(title)}</div>${meta}`;
 }
 
 async function renderHome() {
