@@ -244,16 +244,15 @@ body.view-dashboard #transport { display: none; }
 
 .home-link { cursor: pointer; color: #1558d6; text-decoration: underline; font-size: 13px; }
 
-#dashboard-stage { position: relative; flex: 1; overflow: hidden; }
-#dashboard-boat { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  max-height: 80%; max-width: 40%; object-fit: contain; }
-#dashboard-charts { position: absolute; inset: 0; }
-.tuning-chart { position: absolute; width: 190px; background: rgba(255,255,255,0.92);
+#dashboard-stage { position: relative; flex: 1; overflow: auto; }
+/* 11パラメータのミニグラフを 4列×3行のグリッドに整列 */
+#dashboard-charts { display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 8px; padding: 8px; align-content: start; }
+.tuning-chart { background: rgba(255,255,255,0.92);
   border: 1px solid #ddd; border-radius: 4px; padding: 2px 4px; font-size: 11px; cursor: pointer; }
 .tuning-chart:hover { border-color: #1558d6; box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
 .tuning-chart .tc-title { color: #333; }
-.tuning-chart .tc-canvas-wrap { position: relative; height: 88px; }
-#dashboard-leaders { position: absolute; inset: 0; pointer-events: none; }
+.tuning-chart .tc-canvas-wrap { position: relative; height: 130px; }
 
 /* ミニグラフをクリックで拡大する対話グラフ(オーバレイ) */
 #dashboard-chart-modal { position: absolute; inset: 0; z-index: 10; background: rgba(0,0,0,0.35);

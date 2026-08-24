@@ -1,16 +1,13 @@
 // src/dashboard.js
-// 集計(tuning)・Chart.js描画(chartview)・アンカー(boatlayout)・ブラシ(timebrush)・表(tuningtable)を束ね、
-// #dashboard-screen に「470を囲む推移グラフ＋数値表＋期間バー」を描画するDOMコントローラ。
+// 集計(tuning)・Chart.js描画(chartview)・ブラシ(timebrush)・表(tuningtable)を束ね、
+// #dashboard-screen に「4×3グリッドの推移グラフ＋数値表＋期間バー」を描画するDOMコントローラ。
 // ミニグラフはクリックで拡大(対話グラフ)。ブラシは各チャートのx範囲を更新して連動。
 import { collectTuning, collectTuningRows, TUNING_PARAMS, FOCUS_BOATS, BOAT_COLORS } from './tuning.js';
 import { buildChartDatasets, renderChart } from './chartview.js';
 import { buildTuningTable } from './tuningtable.js';
-import { anchorFor, BOAT_IMAGE } from './boatlayout.js';
 import { msToX, xToMs, clampRange } from './timebrush.js';
 
 const $ = (id) => document.getElementById(id);
-const CHART_W = 190;
-const CHART_H = 96;
 
 export function createDashboard({ loadEntries, rigLabels }) {
   let data = null;       // collectTuning の結果
@@ -26,66 +23,22 @@ export function createDashboard({ loadEntries, rigLabels }) {
     ).join('');
   }
 
-  // 中央画像とリーダー線オーバレイを用意。
-  function ensureStage() {
-    const img = $('dashboard-boat');
-    if (img.getAttribute('src') !== BOAT_IMAGE) img.setAttribute('src', BOAT_IMAGE);
-    let leaders = $('dashboard-leaders');
-    if (!leaders) {
-      leaders = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      leaders.id = 'dashboard-leaders';
-      $('dashboard-stage').appendChild(leaders);
-    }
-    return leaders;
-  }
-
-  // 画像の実表示矩形(contain)を stage 座標で得る。未ロード時は概算。
-  function boatRect() {
-    const stage = $('dashboard-stage').getBoundingClientRect();
-    const img = $('dashboard-boat').getBoundingClientRect();
-    return {
-      left: img.left - stage.left, top: img.top - stage.top,
-      width: img.width, height: img.height,
-      stageW: stage.width, stageH: stage.height,
-    };
-  }
-
   // 既存のミニ Chart.js を全て破棄(再描画・画面離脱時のリーク防止)。
   function destroyMiniCharts() {
     for (const c of miniCharts) { try { c.destroy(); } catch { /* 破棄済みは無視 */ } }
     miniCharts = [];
   }
 
+  // 11パラメータのミニグラフを 4列×3行のグリッドに並べる。クリックで拡大。
   function renderCharts() {
     const charts = $('dashboard-charts');
     destroyMiniCharts();
     charts.innerHTML = '';
-    const leaders = ensureStage();
-    leaders.innerHTML = '';
     if (!data.domain) return;
-    const rect = boatRect();
-    leaders.setAttribute('viewBox', `0 0 ${rect.stageW} ${rect.stageH}`);
-    leaders.setAttribute('width', rect.stageW);
-    leaders.setAttribute('height', rect.stageH);
 
     TUNING_PARAMS.forEach((param) => {
-      const a = anchorFor(param);
-      if (!a) return;
-      // アンカー(画像正規化)→ stage 座標
-      const ax = rect.left + a.x * rect.width;
-      const ay = rect.top + a.y * rect.height;
-      // グラフ位置: side に応じて画像の左右へ、縦は順番で散らす
-      const col = a.side === 'left';
-      const sideItems = TUNING_PARAMS.filter((p) => (anchorFor(p)?.side === a.side));
-      const idx = sideItems.indexOf(param);
-      const cx = col ? rect.left * 0.15 : rect.left + rect.width + (rect.stageW - rect.left - rect.width) * 0.15;
-      const cy = 20 + idx * (rect.stageH - 60) / Math.max(1, sideItems.length - 1);
-
       const box = document.createElement('div');
       box.className = 'tuning-chart';
-      box.style.left = `${cx}px`;
-      box.style.top = `${cy}px`;
-      box.style.width = `${CHART_W}px`;
       box.title = `${rigLabels[param] || param}（クリックで拡大）`;
       const wrap = document.createElement('div');
       wrap.className = 'tc-canvas-wrap';
@@ -100,16 +53,7 @@ export function createDashboard({ loadEntries, rigLabels }) {
         datasets: buildChartDatasets({ series: data.series[param], boats: data.boats, colors: BOAT_COLORS }),
         from: view.from, to: view.to, mini: true, fmtX: fmtDate,
       });
-      chart._param = param;
       miniCharts.push(chart);
-
-      // リーダー線: グラフ端 → アンカー
-      const lx = col ? cx + CHART_W : cx;
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('x1', lx); line.setAttribute('y1', cy + CHART_H / 2);
-      line.setAttribute('x2', ax); line.setAttribute('y2', ay);
-      line.setAttribute('stroke', '#bbb'); line.setAttribute('stroke-width', '1');
-      leaders.appendChild(line);
     });
   }
 
@@ -235,15 +179,7 @@ export function createDashboard({ loadEntries, rigLabels }) {
     data = collectTuning(entries);
     rows = collectTuningRows(entries);
     view = data.domain ? { from: data.domain.min, to: data.domain.max } : { from: 0, to: 1 };
-    // 画像ロード後にレイアウトが確定するので load を待つ
-    const img = $('dashboard-boat');
-    ensureStage();
-    if (img.complete && img.naturalWidth) { renderCharts(); }
-    else {
-      if (img._onloadHandler) img.removeEventListener('load', img._onloadHandler);
-      img._onloadHandler = () => renderCharts();
-      img.addEventListener('load', img._onloadHandler);
-    }
+    renderCharts();
     renderTimebar();
     renderTable();
     wireTimebar();
