@@ -1,0 +1,34 @@
+{
+  "input": {
+    "id": "r1",
+    "createdAt": "2026-08-24T09:00:00.000Z",
+    "text": "テスト本文",
+    "people": [{ "id": "m0", "name": "村瀬 礼" }],
+    "videos": [{ "name": "PXL_1.mp4", "tMs": 65000 }],
+    "wind": { "dir": "南南西", "speed": 3.2, "source": "manual" },
+    "practice": { "date": "2026-08-24" },
+    "rig": { "boatNo": "12", "prebend": 30 },
+    "waveHeight": "0.5",
+    "notes": { "goal": "目標X", "issue": "課題Y" }
+  },
+  "expected": {
+    "id": "r1",
+    "createdAt": "2026-08-24T09:00:00.000Z",
+    "text": "テスト本文",
+    "people": [{ "id": "m0", "name": "村瀬 礼" }],
+    "videos": [{ "name": "PXL_1.mp4", "tMs": 65000 }],
+    "wind": { "dir": "南南西", "speed": 3.2, "source": "manual" },
+    "practice": { "date": "2026-08-24" },
+    "rig": {
+      "boatNo": 12, "gear": null, "prebend": 30, "rake": null,
+      "sideTension": null, "foreTension": null, "puller": null,
+      "peakRope": null, "bridleHeight": null, "jibLeader": null,
+      "jibPull": null, "vangPull": null
+    },
+    "waveHeight": 0.5,
+    "notes": {
+      "goal": "目標X", "issue": "課題Y",
+      "discovery": "", "slowFactor": "", "fastFactor": ""
+    }
+  }
+}
