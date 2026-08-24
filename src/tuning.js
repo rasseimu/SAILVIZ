@@ -61,3 +61,21 @@ export function collectTuning(entries) {
   const boats = FOCUS_BOATS.filter((b) => boatsSeen.includes(b));
   return { boats, series, domain: min == null ? null : { min, max } };
 }
+
+// 表(行=練習日×艇)用に、反省を平坦な行リストへ。6艇のみ・tMs昇順(同時刻は艇番号順)。
+// 各行: { tMs, boat, rig }。rig は反省の rig をそのまま(値は null 含む)。
+export function collectTuningRows(entries) {
+  const rows = [];
+  for (const { project } of entries || []) {
+    const reflections = Array.isArray(project?.reflections) ? project.reflections : [];
+    for (const r of reflections) {
+      const boat = Number(r?.rig?.boatNo);
+      if (!FOCUS_BOATS.includes(boat)) continue;
+      const tMs = reflectionTimeMs(r, project);
+      if (tMs == null) continue;
+      rows.push({ tMs, boat, rig: r.rig || {} });
+    }
+  }
+  rows.sort((a, b) => (a.tMs - b.tMs) || (a.boat - b.boat));
+  return rows;
+}

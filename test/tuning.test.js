@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { collectTuning, reflectionTimeMs, FOCUS_BOATS, TUNING_PARAMS } from '../src/tuning.js';
+import { collectTuning, collectTuningRows, reflectionTimeMs, FOCUS_BOATS, TUNING_PARAMS } from '../src/tuning.js';
 
 test('TUNING_PARAMS は RIG_FIELDS から boatNo を除いた11項目', () => {
   assert.ok(!TUNING_PARAMS.includes('boatNo'));
@@ -42,4 +42,23 @@ test('collectTuning: 空入力は domain=null', () => {
   const out = collectTuning([]);
   assert.equal(out.domain, null);
   assert.deepEqual(out.boats, []);
+});
+
+test('collectTuningRows: 6艇のみ・tMs昇順(同時刻は艇番号順)・rig保持', () => {
+  const entries = [
+    { project: { reflections: [
+      { practice: { startMs: 200 }, rig: { boatNo: 4859, rake: 9 } },
+      { practice: { startMs: 200 }, rig: { boatNo: 4304, rake: 12 } },
+      { practice: { startMs: 100 }, rig: { boatNo: 4899, rake: 8 } },
+      { practice: { startMs: 150 }, rig: { boatNo: 9999, rake: 5 } }, // 対象外
+    ] } },
+  ];
+  const rows = collectTuningRows(entries);
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows.map((r) => [r.tMs, r.boat]), [[100, 4899], [200, 4304], [200, 4859]]);
+  assert.equal(rows[0].rig.rake, 8);
+});
+
+test('collectTuningRows: 空入力は空配列', () => {
+  assert.deepEqual(collectTuningRows([]), []);
 });

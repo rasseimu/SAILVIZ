@@ -33,3 +33,36 @@ test('buildLineChart: 空系列でも <svg> を返す(polylineなし)', () => {
   assert.ok(svg.startsWith('<svg'));
   assert.ok(!svg.includes('polyline'));
 });
+
+test('buildLineChart: axis 有効で Y最大/最小と X端ラベルを描く', () => {
+  const svg = buildLineChart({
+    series: { 4899: [{ tMs: 0, value: 6740 }, { tMs: 10, value: 6750 }] },
+    boats: [4899], colors: { 4899: '#f00' },
+    from: 0, to: 10, width: 190, height: 96, pad: 2,
+    axis: { xFrom: '06-15', xTo: '08-10' },
+  });
+  assert.ok(svg.includes('<text'));       // 軸ラベルが出る
+  assert.ok(svg.includes('6750'));        // Y最大(整数はそのまま)
+  assert.ok(svg.includes('6740'));        // Y最小
+  assert.ok(svg.includes('06-15'));       // X開始
+  assert.ok(svg.includes('08-10'));       // X終了
+  assert.ok(svg.includes('polyline'));    // 折れ線も残る
+});
+
+test('buildLineChart: Y小数は1桁に整形', () => {
+  const svg = buildLineChart({
+    series: { 4899: [{ tMs: 0, value: 1.5 }, { tMs: 10, value: 3.25 }] },
+    boats: [4899], colors: { 4899: '#f00' },
+    from: 0, to: 10, width: 190, height: 96, axis: { xFrom: 'a', xTo: 'b' },
+  });
+  assert.ok(svg.includes('3.3'));  // 3.25 → 3.3
+  assert.ok(svg.includes('1.5'));
+});
+
+test('buildLineChart: axis 無しなら <text> を出さない(後方互換)', () => {
+  const svg = buildLineChart({
+    series: { 4899: [{ tMs: 0, value: 1 }, { tMs: 10, value: 3 }] },
+    boats: [4899], colors: { 4899: '#f00' }, from: 0, to: 10, width: 100, height: 40,
+  });
+  assert.ok(!svg.includes('<text'));
+});

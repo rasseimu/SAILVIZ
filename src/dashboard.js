@@ -1,17 +1,19 @@
 // src/dashboard.js
 // 集計(tuning)・折れ線(linechart)・アンカー(boatlayout)・ブラシ(timebrush)を束ね、
 // #dashboard-screen に「470を囲む推移グラフ＋期間バー」を描画するDOMコントローラ。
-import { collectTuning, TUNING_PARAMS, FOCUS_BOATS, BOAT_COLORS } from './tuning.js';
+import { collectTuning, collectTuningRows, TUNING_PARAMS, FOCUS_BOATS, BOAT_COLORS } from './tuning.js';
 import { buildLineChart } from './linechart.js';
+import { buildTuningTable } from './tuningtable.js';
 import { anchorFor, BOAT_IMAGE } from './boatlayout.js';
 import { msToX, xToMs, clampRange } from './timebrush.js';
 
 const $ = (id) => document.getElementById(id);
-const CHART_W = 160;
-const CHART_H = 60;
+const CHART_W = 190;
+const CHART_H = 96;
 
 export function createDashboard({ loadEntries, rigLabels }) {
   let data = null;       // collectTuning の結果
+  let rows = [];         // collectTuningRows の結果(表用の平坦行)
   let view = null;       // { from, to } 現在の表示域
   let drag = null;       // ブラシのドラッグ状態
 
@@ -77,6 +79,7 @@ export function createDashboard({ loadEntries, rigLabels }) {
         + buildLineChart({
           series: data.series[param], boats: data.boats, colors: BOAT_COLORS,
           from: view.from, to: view.to, width: CHART_W, height: CHART_H, pad: 3,
+          axis: { xFrom: fmtDate(view.from), xTo: fmtDate(view.to) },
         });
       charts.appendChild(box);
 
@@ -87,6 +90,17 @@ export function createDashboard({ loadEntries, rigLabels }) {
       line.setAttribute('x2', ax); line.setAttribute('y2', ay);
       line.setAttribute('stroke', '#bbb'); line.setAttribute('stroke-width', '1');
       leaders.appendChild(line);
+    });
+  }
+
+  // グラフ下の数値まとめ表を、現在の期間 [view] で描画。
+  function renderTable() {
+    const el = $('dashboard-table');
+    if (!el) return;
+    if (!data || !data.domain) { el.innerHTML = ''; return; }
+    el.innerHTML = buildTuningTable({
+      rows, params: TUNING_PARAMS, labels: rigLabels, colors: BOAT_COLORS,
+      from: view.from, to: view.to, fmtDate: fmtDateTime,
     });
   }
 
@@ -113,9 +127,16 @@ export function createDashboard({ loadEntries, rigLabels }) {
     ctx.textAlign = 'right'; ctx.fillText(fmtDate(data.domain.max), w - 2, 12); ctx.textAlign = 'left';
   }
 
+  // MM-DD(JST)。sv-SE の月日単独は "DD/MM" になり紛らわしいので YYYY-MM-DD から切り出す。
   function fmtDate(ms) {
-    return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo', month: '2-digit', day: '2-digit' })
-      .format(new Date(ms));
+    return fmtDateTime(ms).slice(5); // "2026-06-15" → "06-15"
+  }
+
+  // 表の行用: 年月日(JST)。練習日を一意に示す。
+  function fmtDateTime(ms) {
+    return new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date(ms));
   }
 
   function wireTimebar() {
@@ -138,7 +159,7 @@ export function createDashboard({ loadEntries, rigLabels }) {
       const r = canvas.getBoundingClientRect();
       const ms = xToMs(e.clientX - r.left, scaleOf());
       view = clampRange({ ...view, [drag]: ms }, data.domain);
-      renderTimebar(); renderCharts();
+      renderTimebar(); renderCharts(); renderTable();
     };
     canvas.addEventListener('pointermove', onMove);
     canvas.addEventListener('pointerup', () => { drag = null; });
@@ -148,6 +169,7 @@ export function createDashboard({ loadEntries, rigLabels }) {
     renderLegend();
     const entries = await loadEntries();
     data = collectTuning(entries);
+    rows = collectTuningRows(entries);
     view = data.domain ? { from: data.domain.min, to: data.domain.max } : { from: 0, to: 1 };
     // 画像ロード後にレイアウトが確定するので load を待つ
     const img = $('dashboard-boat');
@@ -159,6 +181,7 @@ export function createDashboard({ loadEntries, rigLabels }) {
       img.addEventListener('load', img._onloadHandler);
     }
     renderTimebar();
+    renderTable();
     wireTimebar();
   }
 
