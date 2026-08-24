@@ -198,3 +198,21 @@ SailViz 側（本 spec 範囲では契約のみ）:
 7. Drive アップ導線（ディープリンクボタン）。
 8. デプロイ（ホスティング）・実機スマホで手動確認（オフライン保存→復帰同期）。
 9. （後続）SailViz 側「クラウド反省取込」。
+
+## 実装状況 / バックログ
+
+プラン1「オフライン完結コア」実装完了（新リポ `~/Documents/sailviz-reflect`、8コミット、20テスト通過、最終レビュー APPROVED）。
+プラン: `docs/superpowers/plans/2026-08-24-sailviz-reflect-core.md`。
+
+### 実機（ブラウザ）で要確認（プラン1では未検証）
+- Service Worker 登録・PWA インストール・SHELL 15ファイルのキャッシュ成否（DevTools > Application）。
+- `crypto.randomUUID()` は secure context 必須（`https://` か `localhost`。素の `http://` 非localhostでは失敗）。
+- iOS 実機での `env(safe-area-inset-top)` とモバイル幅レイアウト・identity ゲートのUX。
+- オフライン保存→オンライン復帰での挙動（現状 `send` は throw なので常に pending 保持が正）。
+
+### 繰延 minor（プラン2 or バックログ）
+- `escHtml` が home/history/detail で重複 → `src/views/utils.js` に集約。
+- `newReflection` の `waveHeight` を文字列で `createReflection` に渡す（`toNum` が吸収＝バグ無、`windSpeed` は `Number()` 済で書式不揃いのみ）。
+- `PASSPHRASE=''`（誰でも任意部員でログイン可）→ プラン2で合言葉/認証を確定。
+- 復元時に `memberId` を名簿照合しない（名簿編集時に履歴空表示の可能性・低リスク）→ 照合＆再ゲート。
+- app.js の `online`/`hashchange` リスナが `ctx.storage` でなくモジュール捕捉 `localStorage` を直参照（実害なし・DI 統一の観点のみ）。
