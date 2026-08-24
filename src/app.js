@@ -23,6 +23,7 @@ import { serializeProject, deserializeProject } from './project.js';
 import { projectFileName, listProjectFiles, readProject, writeProject } from './projectfs.js';
 import { practiceSummary } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
+import { createDashboard } from './dashboard.js';
 
 // トラック自動割当＆色変更メニューの共通パレット(識別しやすい12色)。
 const PALETTE = [
@@ -290,6 +291,16 @@ function cacheSummary(name, summary) {
 }
 
 function showHome() { document.body.classList.add('view-home'); renderHome(); }
+async function showDashboard() {
+  if (!projectDir && !(await ensureProjectDir())) return;
+  document.body.classList.remove('view-home');
+  document.body.classList.add('view-dashboard');
+  await dashboard.render();
+}
+function backToHomeFromDashboard() {
+  document.body.classList.remove('view-dashboard');
+  showHome();
+}
 function showTrack() {
   document.body.classList.remove('view-home');
   // ホーム中は stage が display:none だった → canvas バッファを再計算しないと潰れる
@@ -590,6 +601,8 @@ $('practice-select').addEventListener('change', async (e) => {
 })();
 
 $('app-title').addEventListener('click', showHome); // タイトルクリックでホームへ
+$('home-dashboard-link').addEventListener('click', showDashboard);
+$('dashboard-home-link').addEventListener('click', backToHomeFromDashboard);
 $('home-new').addEventListener('click', startNewPractice);
 
 $('play-btn').addEventListener('click', () => {
@@ -856,6 +869,21 @@ const NOTE_LABELS = {
   goal: '目標', issue: '感じている課題', discovery: '発見',
   slowFactor: '遅かった要因', fastFactor: '速かった要因',
 };
+
+// 全練習を deserialize して渡す(projectDir 前提)。
+const dashboard = createDashboard({
+  rigLabels: RIG_LABELS,
+  loadEntries: async () => {
+    if (!projectDir) return [];
+    const files = await listProjectFiles(projectDir);
+    const entries = [];
+    for (const f of files) {
+      try { entries.push({ name: f.name, project: deserializeProject(await readProject(projectDir, f.name)) }); }
+      catch { /* 壊れたファイルはスキップ */ }
+    }
+    return entries;
+  },
+});
 
 // 反省エディタの艇セッティング(数値12項目)と反省内容(テキスト5項目)を動的生成。
 (function buildReflFields() {
