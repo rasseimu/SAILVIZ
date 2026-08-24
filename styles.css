@@ -249,9 +249,22 @@ body.view-dashboard #transport { display: none; }
   max-height: 80%; max-width: 40%; object-fit: contain; }
 #dashboard-charts { position: absolute; inset: 0; }
 .tuning-chart { position: absolute; width: 190px; background: rgba(255,255,255,0.92);
-  border: 1px solid #ddd; border-radius: 4px; padding: 2px 4px; font-size: 11px; }
+  border: 1px solid #ddd; border-radius: 4px; padding: 2px 4px; font-size: 11px; cursor: pointer; }
+.tuning-chart:hover { border-color: #1558d6; box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
 .tuning-chart .tc-title { color: #333; }
+.tuning-chart .tc-canvas-wrap { position: relative; height: 88px; }
 #dashboard-leaders { position: absolute; inset: 0; pointer-events: none; }
+
+/* ミニグラフをクリックで拡大する対話グラフ(オーバレイ) */
+#dashboard-chart-modal { position: absolute; inset: 0; z-index: 10; background: rgba(0,0,0,0.35);
+  display: flex; align-items: center; justify-content: center; }
+#dashboard-chart-modal.hidden { display: none; }
+.dcm-inner { background: #fff; border-radius: 6px; width: 80%; max-width: 900px; height: 70%;
+  display: flex; flex-direction: column; box-shadow: 0 6px 24px rgba(0,0,0,0.3); }
+#dcm-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #eee; }
+#dashboard-modal-close { margin-left: auto; font-size: 18px; border: none; background: none; cursor: pointer; line-height: 1; }
+#dcm-body { flex: 1; position: relative; padding: 8px; min-height: 0; }
+#dashboard-modal-canvas { width: 100%; height: 100%; }
 
 /* グラフ下の数値まとめ表(行=練習日×艇)。スクロール可・ヘッダ固定。 */
 #dashboard-table { flex: 0 0 auto; max-height: 30vh; overflow: auto; border-top: 1px solid #ccc; }
