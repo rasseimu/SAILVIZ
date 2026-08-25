@@ -2,7 +2,7 @@
 // 集計(tuning)・Chart.js描画(chartview)・ブラシ(timebrush)・表(tuningtable)を束ね、
 // #dashboard-screen に「4×3グリッドの推移グラフ＋数値表＋期間バー」を描画するDOMコントローラ。
 // ミニグラフはクリックで拡大(対話グラフ)。ブラシは各チャートのx範囲を更新して連動。
-import { collectTuning, collectTuningRows, TUNING_PARAMS, FOCUS_BOATS, BOAT_COLORS } from './tuning.js';
+import { collectTuning, collectTuningRows, activeBoats, TUNING_PARAMS, FOCUS_BOATS, BOAT_COLORS } from './tuning.js';
 import { buildChartDatasets, renderChart } from './chartview.js';
 import { buildTuningTable } from './tuningtable.js';
 import { msToX, xToMs, clampRange } from './timebrush.js';
@@ -16,9 +16,35 @@ export function createDashboard({ loadEntries, rigLabels }) {
   let drag = null;       // ブラシのドラッグ状態
   let miniCharts = [];   // ミニ Chart.js インスタンス群(再描画時に destroy)
   let modalChart = null; // 拡大表示中の Chart.js インスタンス
+  let selected = 'all';  // サイドメニューの選択('all' | 艇番号)
+
+  // 現在の選択で実際に描画する艇。データ集計後の boats を基準に絞る。
+  function boatsToShow() {
+    return activeBoats(selected, data?.boats || []);
+  }
+
+  // サイドメニュー(全て + 6艇)を描画。クリックで選択を切替え再描画。
+  function renderNav() {
+    const nav = $('dashboard-nav');
+    if (!nav) return;
+    const items = [{ key: 'all', label: '全て' }, ...FOCUS_BOATS.map((b) => ({ key: String(b), label: String(b) }))];
+    nav.innerHTML = items.map((it) =>
+      `<button type="button" class="dashboard-nav-item${it.key === selected ? ' active' : ''}" data-key="${it.key}">${it.label}</button>`
+    ).join('');
+    nav.querySelectorAll('.dashboard-nav-item').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (selected === btn.dataset.key) return;
+        selected = btn.dataset.key;
+        renderNav();
+        renderLegend();
+        renderCharts();
+        renderTable();
+      });
+    });
+  }
 
   function renderLegend() {
-    $('dashboard-legend').innerHTML = FOCUS_BOATS.map((b) =>
+    $('dashboard-legend').innerHTML = boatsToShow().map((b) =>
       `<span class="legend-item"><span class="legend-swatch" style="background:${BOAT_COLORS[b]}"></span>${b}</span>`
     ).join('');
   }
@@ -50,7 +76,7 @@ export function createDashboard({ loadEntries, rigLabels }) {
       charts.appendChild(box);
 
       const chart = renderChart(canvas, {
-        datasets: buildChartDatasets({ series: data.series[param], boats: data.boats, colors: BOAT_COLORS }),
+        datasets: buildChartDatasets({ series: data.series[param], boats: boatsToShow(), colors: BOAT_COLORS }),
         from: view.from, to: view.to, mini: true, fmtX: fmtDate,
       });
       miniCharts.push(chart);
@@ -78,7 +104,7 @@ export function createDashboard({ loadEntries, rigLabels }) {
     $('dashboard-chart-modal').classList.remove('hidden');
     if (modalChart) { try { modalChart.destroy(); } catch { /* noop */ } modalChart = null; }
     modalChart = renderChart($('dashboard-modal-canvas'), {
-      datasets: buildChartDatasets({ series: data.series[param], boats: data.boats, colors: BOAT_COLORS }),
+      datasets: buildChartDatasets({ series: data.series[param], boats: boatsToShow(), colors: BOAT_COLORS }),
       from: view.from, to: view.to, mini: false, fmtX: fmtDate,
     });
   }
@@ -93,8 +119,10 @@ export function createDashboard({ loadEntries, rigLabels }) {
     const el = $('dashboard-table');
     if (!el) return;
     if (!data || !data.domain) { el.innerHTML = ''; return; }
+    const show = boatsToShow();
+    const visibleRows = rows.filter((r) => show.includes(r.boat));
     el.innerHTML = buildTuningTable({
-      rows, params: TUNING_PARAMS, labels: rigLabels, colors: BOAT_COLORS,
+      rows: visibleRows, params: TUNING_PARAMS, labels: rigLabels, colors: BOAT_COLORS,
       from: view.from, to: view.to, fmtDate: fmtDateTime,
     });
   }
@@ -174,11 +202,12 @@ export function createDashboard({ loadEntries, rigLabels }) {
   }
 
   async function render() {
-    renderLegend();
     const entries = await loadEntries();
     data = collectTuning(entries);
     rows = collectTuningRows(entries);
     view = data.domain ? { from: data.domain.min, to: data.domain.max } : { from: 0, to: 1 };
+    renderNav();
+    renderLegend();
     renderCharts();
     renderTimebar();
     renderTable();

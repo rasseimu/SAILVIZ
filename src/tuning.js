@@ -8,6 +8,14 @@ export const BOAT_COLORS = {
 };
 export const TUNING_PARAMS = RIG_FIELDS.filter((f) => f !== 'boatNo');
 
+// サイドメニューの選択(selected)から、実際に描画する艇の配列を返す純関数。
+// 'all' は全艇(boats そのまま)、艇番号なら該当艇のみ(データが無ければ空)。
+export function activeBoats(selected, boats) {
+  if (selected == null || selected === 'all') return boats;
+  const n = Number(selected);
+  return boats.filter((b) => b === n);
+}
+
 // project の最古実データ時刻(トラックGPS開始/動画配置時刻の最小)。無ければ null。
 function earliestContentMs(project) {
   let min = null;

@@ -238,17 +238,34 @@ body.view-dashboard main,
 body.view-dashboard #transport { display: none; }
 
 #dashboard-bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid #ccc; }
+#dashboard-icon { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; }
+#dashboard-title { font-size: 26px; font-weight: 700; letter-spacing: 0.02em; }
 #dashboard-legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; margin-left: auto; }
 .legend-item { display: inline-flex; align-items: center; gap: 4px; }
 .legend-swatch { width: 12px; height: 3px; display: inline-block; }
 
 .home-link { cursor: pointer; color: #1558d6; text-decoration: underline; font-size: 13px; }
 
+/* ヘッダ下: 左サイドメニュー + 右コンテンツ(グラフ/表/期間バー) */
+#dashboard-body { display: flex; flex: 1; min-height: 0; }
+/* グラフ/表/期間バーが画面端に張り付かないよう左右＋下に余白を確保 */
+#dashboard-content { display: flex; flex-direction: column; flex: 1; min-width: 0; padding: 0 16px 16px; }
+
+/* サイドメニュー: 全て + 6艇の縦並び。選択中をハイライト。 */
+#dashboard-nav { flex: 0 0 auto; width: 120px; border-right: 1px solid #ccc;
+  padding: 8px; display: flex; flex-direction: column; gap: 4px; overflow: auto; }
+.dashboard-nav-item { text-align: left; padding: 8px 10px; border: 1px solid transparent;
+  border-radius: 4px; background: none; cursor: pointer; font-size: 13px; color: #333; }
+.dashboard-nav-item:hover { background: #f0f4fd; }
+.dashboard-nav-item.active { background: #1558d6; color: #fff; font-weight: 600; }
+
 #dashboard-stage { position: relative; flex: 1; overflow: auto; }
 /* 11パラメータのミニグラフを 4列×3行のグリッドに整列 */
 #dashboard-charts { display: grid; grid-template-columns: repeat(4, 1fr);
   gap: 8px; padding: 8px; align-content: start; }
-.tuning-chart { background: rgba(255,255,255,0.92);
+/* min-width:0 が無いとグリッドアイテムの min-content(=canvas幅)が下限になり
+   1fr が縮まず横オーバーフロー→右端グラフが切れる。0 にして確実に収める。 */
+.tuning-chart { background: rgba(255,255,255,0.92); min-width: 0;
   border: 1px solid #ddd; border-radius: 4px; padding: 2px 4px; font-size: 11px; cursor: pointer; }
 .tuning-chart:hover { border-color: #1558d6; box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
 .tuning-chart .tc-title { color: #333; }

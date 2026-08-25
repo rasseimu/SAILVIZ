@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { collectTuning, collectTuningRows, reflectionTimeMs, FOCUS_BOATS, TUNING_PARAMS } from '../src/tuning.js';
+import { collectTuning, collectTuningRows, reflectionTimeMs, activeBoats, FOCUS_BOATS, TUNING_PARAMS } from '../src/tuning.js';
 
 test('TUNING_PARAMS は RIG_FIELDS から boatNo を除いた11項目', () => {
   assert.ok(!TUNING_PARAMS.includes('boatNo'));
@@ -61,4 +61,16 @@ test('collectTuningRows: 6艇のみ・tMs昇順(同時刻は艇番号順)・rig�
 
 test('collectTuningRows: 空入力は空配列', () => {
   assert.deepEqual(collectTuningRows([]), []);
+});
+
+test('activeBoats: all は全艇、艇番号は該当艇のみ', () => {
+  const boats = [4899, 4859, 4304];
+  assert.deepEqual(activeBoats('all', boats), boats);
+  assert.deepEqual(activeBoats(null, boats), boats);
+  assert.deepEqual(activeBoats('4859', boats), [4859]);
+  assert.deepEqual(activeBoats(4859, boats), [4859]);
+});
+
+test('activeBoats: データの無い艇を選ぶと空', () => {
+  assert.deepEqual(activeBoats('4677', [4899, 4304]), []);
 });

@@ -25,14 +25,20 @@
   <section id="dashboard-screen">
     <header id="dashboard-bar">
       <a id="dashboard-home-link" class="home-link" title="ホームへ戻る">← ホーム</a>
-      <strong>全艇チューニングダッシュボード</strong>
+      <img id="dashboard-icon" src="src/Component 2.png" alt="" />
+      <strong id="dashboard-title">全艇チューニングダッシュボード</strong>
       <div id="dashboard-legend"></div>
     </header>
-    <div id="dashboard-stage">
-      <div id="dashboard-charts"></div>
+    <div id="dashboard-body">
+      <nav id="dashboard-nav"></nav>
+      <div id="dashboard-content">
+        <div id="dashboard-stage">
+          <div id="dashboard-charts"></div>
+        </div>
+        <div id="dashboard-table"></div>
+        <canvas id="dashboard-timebar"></canvas>
+      </div>
     </div>
-    <div id="dashboard-table"></div>
-    <canvas id="dashboard-timebar"></canvas>
     <div id="dashboard-chart-modal" class="hidden">
       <div class="dcm-inner">
         <div id="dcm-bar">
