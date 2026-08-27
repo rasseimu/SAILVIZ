@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   normalizeDeg, circDiffDeg, circMeanDeg, circMedianDeg, bisectorDeg, bearingDeg, computeCog,
+  segmentLegs,
 } from '../src/windaxis.js';
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -68,4 +69,39 @@ test('computeCog: 低速点を除外する', () => {
   const pts = eastwardTrack(10, 200, 0.5); // すべて低速
   const samples = computeCog(pts, { minSpeedMps: 1.5 });
   assert.equal(samples.length, 0);
+});
+
+// 指定方位・速度で一定時間直進するサンプル列を生成（cog付きSampleを直接作る）
+function straightSamples(t0, headingDeg, seconds, speed = 3, dtMs = 500, startLL = null) {
+  const out = [];
+  let lat = startLL ? startLL.lat : 35.30;
+  let lon = startLL ? startLL.lon : 139.48;
+  const rad = headingDeg * Math.PI / 180;
+  const mLat = 111_320, mLon = 111_320 * Math.cos(lat * Math.PI / 180);
+  const n = Math.floor((seconds * 1000) / dtMs);
+  for (let i = 0; i < n; i++) {
+    const t = t0 + i * dtMs;
+    out.push({ t, lat, lon, cog: headingDeg, speed });
+    lat += (Math.cos(rad) * speed * (dtMs / 1000)) / mLat;
+    lon += (Math.sin(rad) * speed * (dtMs / 1000)) / mLon;
+  }
+  return out;
+}
+
+// スタボ45° 30s → ポート315° 30s（間に1点だけ低速の旋回を挟む形は簡略化し連結）
+function beatTwoLegs() {
+  const t0 = 1_787_000_000_000;
+  const leg1 = straightSamples(t0, 45, 30);
+  const last = leg1[leg1.length - 1];
+  const leg2 = straightSamples(last.t + 500, 315, 30, 3, 500, { lat: last.lat, lon: last.lon });
+  return [...leg1, ...leg2];
+}
+
+test('segmentLegs: 2レグと1マニューバを検出し代表方位を復元', () => {
+  const { legs, maneuvers } = segmentLegs(beatTwoLegs(), { minLegSec: 5, settleSec: 4 });
+  assert.equal(legs.length, 2);
+  assert.equal(maneuvers.length, 1);
+  assert.ok(Math.abs(circDiffDeg(legs[0].headingDeg, 45)) < 3);
+  assert.ok(Math.abs(circDiffDeg(legs[1].headingDeg, 315)) < 3);
+  assert.ok(Math.abs(circDiffDeg(maneuvers[0].turnDeg, 90)) < 5 || Math.abs(maneuvers[0].turnDeg - 90) < 5);
 });
