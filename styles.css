@@ -296,3 +296,43 @@ table.tuning-table .tt-boat { font-weight: 600; }
 table.tuning-table tbody tr:nth-child(even) { background: #fafafa; }
 
 #dashboard-timebar { width: 100%; height: 44px; border-top: 1px solid #ccc; display: block; }
+
+/* ===== 練習進捗管理画面 ===== */
+#progress-screen { display: none; }
+body.view-progress #progress-screen { display: flex; flex-direction: column; position: fixed; inset: 0; background: #fff; z-index: 50; }
+body.view-progress #home-screen,
+body.view-progress #dashboard-screen,
+body.view-progress #topbar,
+body.view-progress main,
+body.view-progress #transport { display: none; }
+#progress-bar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid #e5e5e5; }
+#progress-nav { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; border-bottom: 1px solid #eee; overflow-x: auto; }
+#progress-content { flex: 1; overflow: auto; padding: 16px; }
+.progress-section { margin-bottom: 24px; }
+.progress-section > h3 { margin: 0 0 8px; font-size: 15px; }
+.issue-card { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid #eee; border-radius: 6px; margin-bottom: 6px; }
+.issue-card .ic-text { flex: 1; }
+.issue-card .ic-date { color: #888; font-size: 12px; }
+.stage-toggle { display: inline-flex; border: 1px solid #ccc; border-radius: 6px; overflow: hidden; }
+.stage-toggle button { border: none; background: #fff; padding: 4px 8px; cursor: pointer; font-size: 12px; }
+.stage-toggle button.active { background: #1558d6; color: #fff; }
+.wind-bin { margin-bottom: 10px; }
+.wind-bin > strong { display: block; margin-bottom: 4px; color: #555; }
+.goal-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.goal-row .gr-date { color: #888; font-size: 12px; min-width: 84px; }
+#progress-chart-wrap { max-width: 720px; height: 260px; }
+
+/* 議事録インポートモーダル */
+#import-modal { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 60; display: flex; align-items: center; justify-content: center; }
+#import-modal.hidden { display: none; }
+.im-inner { background: #fff; border-radius: 8px; width: min(760px, 92vw); max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; }
+#im-bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #eee; }
+#im-bar strong { flex: 1; }
+.im-input { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.im-input textarea { width: 100%; font: inherit; }
+.im-or { color: #888; font-size: 12px; }
+#import-preview { padding: 0 14px 14px; overflow: auto; }
+.import-row { border: 1px solid #eee; border-radius: 6px; padding: 8px; margin-bottom: 6px; }
+.import-row.unmatched { border-color: #e0a030; background: #fff8ec; }
+.import-row .ir-head { margin: 0 6px; font-weight: 600; }
+.import-row .ir-notes { color: #555; font-size: 12px; margin-top: 4px; }

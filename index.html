@@ -11,6 +11,7 @@
     <header id="home-bar">
       <strong>SailViz</strong>
       <a id="home-dashboard-link" class="home-link" title="全艇チューニングを見比べる">🔧 チューニングダッシュボード</a>
+      <a id="home-progress-link" class="home-link" title="部員ごとの練習進捗を見る">📈 練習進捗管理</a>
       <span id="home-folder"></span>
     </header>
     <div id="home-body">
@@ -57,6 +58,34 @@
     </div>
   </section>
 
+  <section id="progress-screen">
+    <header id="progress-bar">
+      <a id="progress-home-link" class="home-link" title="ホームへ戻る">← ホーム</a>
+      <strong id="progress-title">練習進捗管理</strong>
+    </header>
+    <nav id="progress-nav"></nav>
+    <div id="progress-content"></div>
+  </section>
+
+  <section id="import-modal" class="hidden">
+    <div class="im-inner">
+      <div id="im-bar">
+        <strong>議事録から一括取込</strong>
+        <span id="import-wind"></span>
+        <button id="import-run">取込</button>
+        <button id="import-cancel">閉じる</button>
+      </div>
+      <div class="im-input">
+        <label class="btn">議事録ファイルを選択
+          <input type="file" id="import-file" accept=".md,.txt" hidden />
+        </label>
+        <span class="im-or">または貼り付け ↓</span>
+        <textarea id="import-text" rows="6" placeholder="## 名前（フルネーム）&#10;- **今日の目標**：…&#10;- **課題**：…&#10;- **発見**：…"></textarea>
+      </div>
+      <div id="import-preview"></div>
+    </div>
+  </section>
+
   <header id="topbar">
     <strong id="app-title" title="ホームへ戻る">SailViz</strong>
     <label class="btn">CSV読込
@@ -93,6 +122,7 @@
       </div>
       <h2>反省</h2>
       <button id="reflection-add" class="side-add">＋ 反省を追加</button>
+      <button id="reflection-import" class="side-add" title="振り返り議事録を部員別に一括取込">📋 議事録から一括取込</button>
       <div id="reflection-list"></div>
     </aside>
     <section id="stage">
