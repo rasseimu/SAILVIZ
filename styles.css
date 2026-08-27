@@ -300,6 +300,7 @@ table.tuning-table tbody tr:nth-child(even) { background: #fafafa; }
 /* VMG比較パネル */
 #vmg-section { padding: 8px 0 4px; border-top: 1px solid #eee; }
 #vmg-section h3 { font-size: 13px; font-weight: 600; margin: 0 0 6px; color: #333; }
+#vmg-section.hidden { display: none; }
 .vmg-toggle { display: flex; gap: 4px; margin-bottom: 6px; }
 .vmg-toggle button { padding: 2px 10px; font: inherit; font-size: 12px; border: 1px solid #ccc; border-radius: 3px; background: #f5f5f5; cursor: pointer; }
 .vmg-toggle button.active { background: #1558d6; color: #fff; border-color: #1558d6; }

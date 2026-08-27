@@ -916,7 +916,7 @@ function invalidateVmgCache() {
 }
 
 // ================= VMG比較 =================
-// VMGパネル: #vmg-panel が存在しない環境(ダッシュボード画面以外)では null になる。
+// VMGパネル: DOM-less なテスト環境等で要素が無い場合に備え null ガード。
 const vmgPanelEl = $('vmg-panel');
 const vmgPanel = vmgPanelEl ? createVmgPanel({ mount: vmgPanelEl }) : null;
 
