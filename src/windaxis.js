@@ -301,8 +301,9 @@ export function estimateWindAxisSeries(track, options = {}) {
 }
 
 // 円周量の移動中央値＋MADで外れ値を除去し平滑化
+// opts.smoothWindowMs: 平滑化半窓(ms)。computeCog の windowMs とは別オプション(spec §7)。
 export function smoothWindSeries(series, opts = {}) {
-  const windowMs = opts.windowMs ?? 120000;
+  const windowMs = opts.smoothWindowMs ?? 120000;
   const madK = opts.madK ?? 3;
   const minMadDeg = opts.minMadDeg ?? 25;
   const half = windowMs / 2;

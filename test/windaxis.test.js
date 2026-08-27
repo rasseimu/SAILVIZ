@@ -232,7 +232,7 @@ test('smoothWindSeries: 飛び値を除去し局所中央値に平滑化', () =>
     { tMs: 3000, windFromDeg: 11, confidence: 1, source: 'anchor', type: 'tack' },
     { tMs: 4000, windFromDeg: 13, confidence: 1, source: 'anchor', type: 'tack' },
   ];
-  const out = smoothWindSeries(series, { windowMs: 10000, madK: 3, minMadDeg: 20 });
+  const out = smoothWindSeries(series, { smoothWindowMs: 10000, madK: 3, minMadDeg: 20 });
   assert.ok(out.every((p) => Math.abs(circDiffDeg(p.windFromDeg, 11)) < 10));
   assert.ok(out.length < series.length); // 飛び値が落ちる
 });
@@ -303,6 +303,9 @@ test('estimateWindAxisSeries: ビートから風向≈0°(北)を復元', () => 
   // そのタックアンカーの風向が北付近（±8°以内）
   assert.ok(Math.abs(circDiffDeg(tackAnchor.windFromDeg, 0)) < 8,
     `tackAnchor.windFromDeg=${tackAnchor.windFromDeg} (expected ≈0°)`);
+  // レグ充填が動いていること: beat レグからの推定点が少なくとも1点存在する
+  const legPoint = series.find((p) => p.source === 'leg');
+  assert.ok(legPoint, `leg estimate not found; series has ${series.length} points, sources=${JSON.stringify([...new Set(series.map(p=>p.source))])}`);
 });
 
 test('estimateWindAxisSeries: アンカー無しなら空配列', () => {

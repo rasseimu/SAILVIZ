@@ -14,7 +14,8 @@ const $ = (id) => document.getElementById(id);
 
 // getTrack: () => track|null — 現在読込中の最初の可視GPSトラック(app.js の state 参照)
 // getMarks: () => mark[]   — 現在のマーク一覧
-export function createDashboard({ loadEntries, rigLabels, getTrack = null, getMarks = null }) {
+// getCrop:  () => {start,end}|null — 現在のクロップ範囲(epoch ms)。null/未設定は全体
+export function createDashboard({ loadEntries, rigLabels, getTrack = null, getMarks = null, getCrop = null }) {
   let data = null;       // collectTuning の結果
   let rows = [];         // collectTuningRows の結果(表用の平坦行)
   let view = null;       // { from, to } 現在の表示域
@@ -226,9 +227,18 @@ export function createDashboard({ loadEntries, rigLabels, getTrack = null, getMa
     $('windaxis-section').classList.remove('hidden');
 
     const marks = getMarks ? getMarks() : [];
+
+    // クロップ範囲内の点のみを対象とする(spec §2)。crop が null/不正な場合は全体を使う。
+    const crop = getCrop ? getCrop() : null;
+    let analysisTrack = track;
+    if (crop && crop.start != null && crop.end != null && crop.end > crop.start) {
+      const croppedPoints = track.points.filter((p) => p.t >= crop.start && p.t <= crop.end);
+      analysisTrack = { ...track, points: croppedPoints };
+    }
+
     let series;
     try {
-      series = estimateWindAxisSeries(track, { marks });
+      series = estimateWindAxisSeries(analysisTrack, { marks });
     } catch (e) {
       // 推定失敗時はパネルを空にして落ちない
       series = [];

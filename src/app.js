@@ -889,6 +889,7 @@ const dashboard = createDashboard({
   },
   getTrack: () => state.tracks.find((t) => t.visible) ?? null,
   getMarks: () => state.marks,
+  getCrop: () => state.crop,
 });
 
 // 反省エディタの艇セッティング(数値12項目)と反省内容(テキスト5項目)を動的生成。
