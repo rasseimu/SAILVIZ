@@ -253,3 +253,10 @@ export function fillLegEstimates(legs, anchors, polar, opts = {}) {
   }
   return out;
 }
+
+// マーク近傍のマニューバを除外
+export function rejectMarkRoundings(maneuvers, marks, opts = {}) {
+  const radiusM = opts.radiusM ?? 30;
+  if (!marks || marks.length === 0) return maneuvers;
+  return maneuvers.filter((m) => marks.every((mk) => haversineMeters(m, mk) > radiusM));
+}

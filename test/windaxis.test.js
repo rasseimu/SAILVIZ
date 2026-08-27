@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   normalizeDeg, circDiffDeg, circMeanDeg, circMedianDeg, bisectorDeg, bearingDeg, computeCog,
   segmentLegs, classifyManeuver, estimateWindFromManeuver, learnPolarAngles,
-  assignLegKinds, fillLegEstimates,
+  assignLegKinds, fillLegEstimates, rejectMarkRoundings,
 } from '../src/windaxis.js';
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -205,4 +205,20 @@ test('fillLegEstimates: ビートのレグ内でcogからwindFromを逆算', () 
   assert.ok(est.length >= 1);
   assert.equal(est[0].source, 'leg');
   assert.ok(Math.abs(circDiffDeg(est[0].windFromDeg, 0)) < 1);  // cog45 - 45 = 0
+});
+
+test('rejectMarkRoundings: マーク近傍のマニューバを除外', () => {
+  const mans = [
+    { tMs: 1, lat: 35.2937, lon: 139.4898 }, // マーク直近
+    { tMs: 2, lat: 35.3100, lon: 139.4800 }, // 遠い
+  ];
+  const marks = [{ lat: 35.2937, lon: 139.4898 }];
+  const out = rejectMarkRoundings(mans, marks, { radiusM: 30 });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].tMs, 2);
+});
+
+test('rejectMarkRoundings: marks空なら素通し', () => {
+  const mans = [{ tMs: 1, lat: 35.3, lon: 139.48 }];
+  assert.equal(rejectMarkRoundings(mans, [], {}).length, 1);
 });
