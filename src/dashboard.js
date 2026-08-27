@@ -2,20 +2,26 @@
 // 集計(tuning)・Chart.js描画(chartview)・ブラシ(timebrush)・表(tuningtable)を束ね、
 // #dashboard-screen に「4×3グリッドの推移グラフ＋数値表＋期間バー」を描画するDOMコントローラ。
 // ミニグラフはクリックで拡大(対話グラフ)。ブラシは各チャートのx範囲を更新して連動。
+// 風軸パネル: 現在読込中GPSトラック(1艇)から推定風向を時系列で表示（チューニンググリッドとは別セクション）。
 import { collectTuning, collectTuningRows, activeBoats, TUNING_PARAMS, FOCUS_BOATS, BOAT_COLORS } from './tuning.js';
 import { buildChartDatasets, renderChart } from './chartview.js';
 import { buildTuningTable } from './tuningtable.js';
 import { msToX, xToMs, clampRange } from './timebrush.js';
+import { estimateWindAxisSeries } from './windaxis.js';
+import { buildWindAxisDatasets } from './windaxisview.js';
 
 const $ = (id) => document.getElementById(id);
 
-export function createDashboard({ loadEntries, rigLabels }) {
+// getTrack: () => track|null — 現在読込中の最初の可視GPSトラック(app.js の state 参照)
+// getMarks: () => mark[]   — 現在のマーク一覧
+export function createDashboard({ loadEntries, rigLabels, getTrack = null, getMarks = null }) {
   let data = null;       // collectTuning の結果
   let rows = [];         // collectTuningRows の結果(表用の平坦行)
   let view = null;       // { from, to } 現在の表示域
   let drag = null;       // ブラシのドラッグ状態
   let miniCharts = [];   // ミニ Chart.js インスタンス群(再描画時に destroy)
   let modalChart = null; // 拡大表示中の Chart.js インスタンス
+  let windAxisChart = null; // 風軸グラフの Chart.js インスタンス
   let selected = 'all';  // サイドメニューの選択('all' | 艇番号)
 
   // 現在の選択で実際に描画する艇。データ集計後の boats を基準に絞る。
@@ -201,6 +207,50 @@ export function createDashboard({ loadEntries, rigLabels }) {
     });
   }
 
+  // 風軸グラフを描画する。現在読込中のGPSトラックからタック/ジャイブを検出して風向を推定。
+  // amedas参考ライン: TODO — src/wind.js の fetchWind 結果を { obsMs, dirDeg }[] に整形して渡す
+  function renderWindAxis() {
+    const canvas = $('windaxis-chart');
+    const emptyEl = $('windaxis-empty');
+    if (!canvas) return;
+
+    // 既存のChart.jsインスタンスを破棄
+    if (windAxisChart) { try { windAxisChart.destroy(); } catch { /* 破棄済みは無視 */ } windAxisChart = null; }
+
+    const track = getTrack ? getTrack() : null;
+    if (!track) {
+      // トラック未読込: パネルは非表示
+      $('windaxis-section').classList.add('hidden');
+      return;
+    }
+    $('windaxis-section').classList.remove('hidden');
+
+    const marks = getMarks ? getMarks() : [];
+    let series;
+    try {
+      series = estimateWindAxisSeries(track, { marks });
+    } catch (e) {
+      // 推定失敗時はパネルを空にして落ちない
+      series = [];
+    }
+
+    if (series.length === 0) {
+      // タック/ジャイブ不検出: 空グラフではなくメッセージを表示
+      canvas.style.display = 'none';
+      if (emptyEl) emptyEl.classList.remove('hidden');
+      return;
+    }
+    canvas.style.display = '';
+    if (emptyEl) emptyEl.classList.add('hidden');
+
+    const { datasets } = buildWindAxisDatasets({ series, amedas: [] });
+    // x範囲はトラック全体。fmtXはHH:MM(JST)。
+    const from = track.tRange.start;
+    const to = track.tRange.end;
+    const fmtX = (ms) => new Date(ms).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    windAxisChart = renderChart(canvas, { datasets, from, to, mini: false, fmtX });
+  }
+
   async function render() {
     const entries = await loadEntries();
     data = collectTuning(entries);
@@ -213,6 +263,7 @@ export function createDashboard({ loadEntries, rigLabels }) {
     renderTable();
     wireTimebar();
     wireModal();
+    renderWindAxis();
   }
 
   return { render };

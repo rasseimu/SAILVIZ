@@ -874,6 +874,7 @@ const NOTE_LABELS = {
 };
 
 // 全練習を deserialize して渡す(projectDir 前提)。
+// getTrack/getMarks: ダッシュボード表示時に現在読込中の最初の可視トラック/マークを渡す(風軸パネル用)。
 const dashboard = createDashboard({
   rigLabels: RIG_LABELS,
   loadEntries: async () => {
@@ -886,6 +887,8 @@ const dashboard = createDashboard({
     }
     return entries;
   },
+  getTrack: () => state.tracks.find((t) => t.visible) ?? null,
+  getMarks: () => state.marks,
 });
 
 // 反省エディタの艇セッティング(数値12項目)と反省内容(テキスト5項目)を動的生成。
