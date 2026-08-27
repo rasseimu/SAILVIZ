@@ -24,6 +24,9 @@ import { projectFileName, listProjectFiles, readProject, writeProject } from './
 import { practiceSummary, earliestContentMs } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
 import { createDashboard } from './dashboard.js';
+import { analyzeFleetVmg, unifyWindAxis, rankVmg } from './vmg.js';
+import { createVmgPanel } from './vmgview.js';
+import { estimateWindAxisSeries } from './windaxis.js';
 
 // トラック自動割当＆色変更メニューの共通パレット(識別しやすい12色)。
 const PALETTE = [
@@ -52,6 +55,13 @@ const state = {
   accuracyFilter: true,
   crop: { start: 0, end: 0 },
   transform: { scale: 1, cx: 0, cy: 0, w: 1, h: 1, proj: null },
+  // VMG比較 ---
+  vmgEnabled: false,
+  vmgHighlights: [],      // renderer に渡すハイライト区間 {boatId,color,lo,hi,...}[]
+  vmgLegs: [],            // 高コスト解析キャッシュ: perBoatLegVmg
+  vmgHighlightsAll: [],   // 同上: highlights（全期間）
+  vmgColors: {},          // {boatId: color}
+  vmgWindSeries: [],      // unifyWindAxis の結果キャッシュ
 };
 
 const $ = (id) => document.getElementById(id);
@@ -71,7 +81,7 @@ function resizeCanvas() {
 
 const playback = createPlayback({ onTick: () => draw() });
 const timeline = createTimeline($('timeline'), {
-  onCropChange: (c) => { state.crop = c; playback.setRange(c); draw(); },
+  onCropChange: (c) => { state.crop = c; playback.setRange(c); recomputeVmgCrop(); draw(); },
   onScrub: (t) => {
     // 動画パネル表示中は動画がマスター。バーのスクラブで動画の再生位置を動かす(seekedでplayhead追従)。
     if (currentVideo) seekVideoToAxisTime(t);
@@ -120,6 +130,7 @@ function draw() {
     transform: state.transform, tracks: state.tracks, events: state.events,
     marks: state.marks, videos: state.videos, activeVideoId: currentVideo?.id,
     now, mode: state.mode, crop: state.crop, referenceTrack: refTrack,
+    vmgHighlights: state.vmgHighlights,
   });
   timeline.render({ range, crop: state.crop, now, events: axisEvents, pending: pendingStart, videos: axisVideos, pins: axisPins });
   $('clock').textContent = range.end > range.start ? formatClock(now, state.mode) : '--:--:--';
@@ -266,6 +277,7 @@ async function loadPractice(name) {
   saveReflections(state.reflections); // localStorage にも反映
   $('align-mode').value = state.mode;
   $('accuracy-filter').checked = state.accuracyFilter;
+  invalidateVmgCache();
   recomputeView(); // tracks から transform と既定 crop を再計算
   // 保存されたクロップ範囲が妥当なら復元(recomputeView の全域クロップを上書き)
   if (data.crop && data.crop.end > data.crop.start) {
@@ -273,6 +285,7 @@ async function loadPractice(name) {
     playback.setRange(state.crop);
   }
   renderSidebar();
+  if (state.vmgEnabled) recomputeVmgFull();
   draw();
   const n = state.videos.length;
   statusEl.textContent = n
@@ -318,6 +331,7 @@ function resetState() {
   state.videos = []; state.reflections = [];
   state.crop = { start: 0, end: 0 };
   saveReflections(state.reflections);
+  invalidateVmgCache();
   recomputeView(); renderSidebar(); draw();
 }
 
@@ -468,6 +482,7 @@ function addTrack(name, header, rows) {
     bounds: computeBounds([{ visible: true, points: clean }]),
     tRange: { start: clean[0].t, end: clean[clean.length - 1].t },
   });
+  invalidateVmgCache();
   statusEl.textContent = `${name}: ${clean.length}点 (外れ値${removed}点除外)`;
 }
 
@@ -495,11 +510,13 @@ function renderSidebar() {
   tl.querySelectorAll('input[type=checkbox]').forEach((cb) =>
     cb.addEventListener('change', (e) => {
       state.tracks[+e.target.dataset.i].visible = e.target.checked;
+      invalidateVmgCache(); if (state.vmgEnabled) recomputeVmgFull();
       recomputeView(); draw();
     }));
   tl.querySelectorAll('button[data-del]').forEach((b) =>
     b.addEventListener('click', (e) => {
       state.tracks.splice(+e.target.dataset.del, 1);
+      invalidateVmgCache(); if (state.vmgEnabled) recomputeVmgFull();
       recomputeView(); draw(); renderSidebar();
     }));
 
@@ -891,6 +908,91 @@ const dashboard = createDashboard({
   getMarks: () => state.marks,
   getCrop: () => state.crop,
 });
+
+// VMGキャッシュをクリアして無効化。トラック変更時に呼ぶ。
+function invalidateVmgCache() {
+  state.vmgLegs = []; state.vmgHighlightsAll = []; state.vmgColors = {};
+  state.vmgWindSeries = []; state.vmgHighlights = [];
+}
+
+// ================= VMG比較 =================
+// VMGパネル: #vmg-panel が存在しない環境(ダッシュボード画面以外)では null になる。
+const vmgPanelEl = $('vmg-panel');
+const vmgPanel = vmgPanelEl ? createVmgPanel({ mount: vmgPanelEl }) : null;
+
+// 高コスト解析（crop非依存）。トグルON時・トラック変更時に1回だけ実行。
+function recomputeVmgFull() {
+  if (!state.vmgEnabled) return;
+  if (state.mode !== 'absolute') {
+    state.vmgHighlights = [];
+    if (vmgPanel) vmgPanel.render([], [], { colors: {} });
+    // elapsed モード通知
+    if (vmgPanelEl) vmgPanelEl.querySelector('.vmg-mode-notice')?.remove();
+    if (vmgPanelEl) {
+      const notice = document.createElement('p');
+      notice.className = 'vmg-mode-notice';
+      notice.textContent = '絶対時刻モードでのみVMG比較できます';
+      vmgPanelEl.prepend(notice);
+    }
+    return;
+  }
+  // elapsed モード通知を消す
+  if (vmgPanelEl) vmgPanelEl.querySelector('.vmg-mode-notice')?.remove();
+
+  const visibleTracks = state.tracks.filter((t) => t.visible);
+  if (visibleTracks.length === 0) {
+    state.vmgHighlights = [];
+    state.vmgLegs = []; state.vmgHighlightsAll = []; state.vmgColors = {}; state.vmgWindSeries = [];
+    if (vmgPanel) vmgPanel.render([], [], { colors: {} });
+    return;
+  }
+  let windSeries;
+  try {
+    windSeries = unifyWindAxis(visibleTracks, { estimator: estimateWindAxisSeries, marks: state.marks });
+  } catch {
+    windSeries = [];
+  }
+  state.vmgWindSeries = windSeries;
+  if (windSeries.length === 0) {
+    state.vmgHighlights = [];
+    state.vmgLegs = []; state.vmgHighlightsAll = []; state.vmgColors = {};
+    if (vmgPanel) vmgPanel.render([], [], { colors: {} });
+    return;
+  }
+  const colors = Object.fromEntries(visibleTracks.map((t) => [t.id, t.color]));
+  const { perBoatLegVmg, highlights, ranks } = analyzeFleetVmg(visibleTracks, windSeries, {});
+  state.vmgLegs = perBoatLegVmg;
+  state.vmgHighlightsAll = highlights;
+  state.vmgColors = colors;
+  state.vmgHighlights = highlights;
+  if (vmgPanel) vmgPanel.render(perBoatLegVmg, ranks, { colors });
+}
+
+// 安価なクロップ再ウィンドウ（drag中に呼ばれる）。高コスト再解析はしない。
+function recomputeVmgCrop() {
+  if (!state.vmgEnabled || state.vmgLegs.length === 0) return;
+  const ranks = rankVmg(state.vmgLegs, {
+    from: state.crop.start, to: state.crop.end, highlights: state.vmgHighlightsAll,
+  });
+  if (vmgPanel) vmgPanel.render(state.vmgLegs, ranks, { colors: state.vmgColors });
+}
+
+// トグルボタン配線
+const vmgToggleBtn = $('vmg-toggle');
+if (vmgToggleBtn) {
+  vmgToggleBtn.addEventListener('click', () => {
+    state.vmgEnabled = !state.vmgEnabled;
+    vmgToggleBtn.classList.toggle('active', state.vmgEnabled);
+    if (!state.vmgEnabled) {
+      state.vmgHighlights = [];
+      if (vmgPanelEl) vmgPanelEl.querySelector('.vmg-mode-notice')?.remove();
+      if (vmgPanel) vmgPanel.render([], [], { colors: {} });
+    } else {
+      recomputeVmgFull();
+    }
+    draw();
+  });
+}
 
 // 反省エディタの艇セッティング(数値12項目)と反省内容(テキスト5項目)を動的生成。
 (function buildReflFields() {
