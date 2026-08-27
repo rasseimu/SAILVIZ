@@ -5,6 +5,7 @@ import {
   windFromAt, vmgComponents, classifyPointOfSail, boatLegVmg,
   winnerTimeline, rankVmg, analyzeFleetVmg, unifyWindAxis,
 } from '../src/vmg.js';
+import { trackForHighlight } from '../src/renderer.js';
 
 // Test helpers
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -150,4 +151,11 @@ test('unifyWindAxis: 3艇推定を円周中央値で統合', () => {
 
 test('unifyWindAxis: estimator 未指定はエラー', () => {
   assert.throws(() => unifyWindAxis([{ id: 'x', points: [] }], {}));
+});
+
+// ===== Task 8: trackForHighlight =====
+test('trackForHighlight: boatId でトラックを引く', () => {
+  const tracks = [{ id: 'A' }, { id: 'B' }];
+  assert.equal(trackForHighlight(tracks, 'B').id, 'B');
+  assert.equal(trackForHighlight(tracks, 'Z'), null);
 });
