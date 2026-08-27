@@ -101,6 +101,18 @@ export function classifyManeuver(m, opts = {}) {
   return { type, confidence };
 }
 
+// マニューバ前後レグの二等分から風向(風上)を推定。ジャイブは風下なので+180。
+export function estimateWindFromManeuver(m) {
+  const bis = bisectorDeg(m.headingBefore, m.headingAfter);
+  const windFromDeg = m.type === 'tack' ? bis : normalizeDeg(bis + 180);
+  return {
+    tMs: m.tMs, lat: m.lat, lon: m.lon, windFromDeg,
+    type: m.type, confidence: m.confidence,
+    headingBefore: m.headingBefore, headingAfter: m.headingAfter,
+    source: 'anchor',
+  };
+}
+
 export function segmentLegs(samples, opts = {}) {
   const turnThresh = opts.turnRateThreshDegPerSec ?? 8;
   const minLegSec = opts.minLegSec ?? 8;

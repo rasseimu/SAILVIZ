@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   normalizeDeg, circDiffDeg, circMeanDeg, circMedianDeg, bisectorDeg, bearingDeg, computeCog,
-  segmentLegs, classifyManeuver,
+  segmentLegs, classifyManeuver, estimateWindFromManeuver,
 } from '../src/windaxis.js';
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -162,4 +162,13 @@ test('classifyManeuver: 大きく失速=タック / 速度維持=ジャイブ', 
   assert.equal(tack.type, 'tack');
   assert.equal(gybe.type, 'gybe');
   assert.ok(tack.confidence > 0 && tack.confidence <= 1);
+});
+
+test('estimateWindFromManeuver: タックは風上=二等分、ジャイブは+180', () => {
+  const base = { tMs: 1, lat: 35.3, lon: 139.48, headingBefore: 45, headingAfter: 315, confidence: 1 };
+  const tack = estimateWindFromManeuver({ ...base, type: 'tack' });
+  const gybe = estimateWindFromManeuver({ ...base, headingBefore: 135, headingAfter: 225, type: 'gybe' });
+  assert.ok(Math.abs(circDiffDeg(tack.windFromDeg, 0)) < 0.5);   // 風上=北
+  assert.ok(Math.abs(circDiffDeg(gybe.windFromDeg, 0)) < 0.5);   // 風下180 -> 風上0
+  assert.equal(tack.source, 'anchor');
 });
