@@ -2,6 +2,8 @@
 // GPS軌跡からの風軸(風向)推定。円周演算＋レグ分割＋タック/ジャイブ幾何＋帆走角学習。
 // すべて純粋関数。DOM/副作用なし。
 
+import { positionAt, speedAt } from './interpolate.js';
+
 const DEG = Math.PI / 180;
 
 // 角度を [0, 360) に正規化
@@ -48,4 +50,21 @@ export function bearingDeg(from, to) {
   const y = Math.sin(Δλ) * Math.cos(φ2);
   const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
   return normalizeDeg(Math.atan2(y, x) / DEG);
+}
+
+// 位置から中心差分でCOGを算出し、speed>=閾値の点のみ返す
+export function computeCog(points, opts = {}) {
+  const windowMs = opts.windowMs ?? 3000;
+  const minSpeedMps = opts.minSpeedMps ?? 1.5;
+  const half = windowMs / 2;
+  const out = [];
+  for (const p of points) {
+    const a = positionAt(points, p.t - half);
+    const b = positionAt(points, p.t + half);
+    if (!a || !b) continue; // 端点は窓が取れないので除外
+    const sp = speedAt(points, p.t);
+    if (sp == null || sp < minSpeedMps) continue;
+    out.push({ t: p.t, lat: p.lat, lon: p.lon, cog: bearingDeg(a, b), speed: sp });
+  }
+  return out;
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  normalizeDeg, circDiffDeg, circMeanDeg, circMedianDeg, bisectorDeg, bearingDeg,
+  normalizeDeg, circDiffDeg, circMeanDeg, circMedianDeg, bisectorDeg, bearingDeg, computeCog,
 } from '../src/windaxis.js';
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -43,4 +43,29 @@ test('bisectorDeg picks the inner bisector', () => {
 test('bearingDeg north/east', () => {
   nearCirc(bearingDeg({ lat: 35.30, lon: 139.48 }, { lat: 35.31, lon: 139.48 }), 0, 1);
   nearCirc(bearingDeg({ lat: 35.30, lon: 139.48 }, { lat: 35.30, lon: 139.49 }), 90, 1);
+});
+
+// 東へ一定速で進む合成トラック（0.2s刻み, 経度増加=東）を作る
+function eastwardTrack(n = 40, dtMs = 200, speed = 3) {
+  const pts = [];
+  let lat = 35.30, lon = 139.48;
+  const t0 = 1_787_000_000_000;
+  const mPerDegLon = 111_320 * Math.cos(lat * Math.PI / 180);
+  for (let i = 0; i < n; i++) {
+    pts.push({ t: t0 + i * dtMs, lat, lon, speed, bearing: 90, accuracy: 5 });
+    lon += (speed * (dtMs / 1000)) / mPerDegLon; // 東へ
+  }
+  return pts;
+}
+
+test('computeCog: 東進トラックのCOGは約90度', () => {
+  const samples = computeCog(eastwardTrack(), { windowMs: 1000, minSpeedMps: 1 });
+  assert.ok(samples.length > 0);
+  for (const s of samples) assert.ok(Math.abs(circDiffDeg(s.cog, 90)) < 2, `cog=${s.cog}`);
+});
+
+test('computeCog: 低速点を除外する', () => {
+  const pts = eastwardTrack(10, 200, 0.5); // すべて低速
+  const samples = computeCog(pts, { minSpeedMps: 1.5 });
+  assert.equal(samples.length, 0);
 });
