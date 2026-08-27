@@ -29,8 +29,11 @@ function fakeRWDir() {
   };
 }
 
-test('projectFileName はタイムスタンプ付きファイル名を作る', () => {
-  assert.equal(projectFileName(new Date(2026, 7, 17, 9, 30)), 'sailviz-20260817-0930.sailviz.json');
+test('projectFileName は実データ時刻を JST 整形したファイル名を作る', () => {
+  // JST 09:30 の練習(TZ 非依存に検証するため明示オフセットで指定)。
+  assert.equal(projectFileName(new Date('2026-08-17T09:30:00+09:00')), 'sailviz-20260817-0930.sailviz.json');
+  // UTC 23:00 = JST 翌朝 08:00。マシン TZ に依らず JST で命名する。
+  assert.equal(projectFileName(new Date('2026-08-16T23:00:00Z')), 'sailviz-20260817-0800.sailviz.json');
 });
 
 test('projectLabel は読みやすい日時に、不正なら名前をそのまま', () => {

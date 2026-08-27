@@ -52,15 +52,79 @@ function readMvhd(dv, payloadStart) {
   };
 }
 
-// ArrayBuffer から { creationMs, durationMs } を返す。取れなければ null。
-// 注意: creation_time はUTC想定だが端末により現地時刻で書かれ得る(TZは別途注意)。
+// バイト列から ASCII 部分文字列の開始位置を from 以降で返す(無ければ -1)。
+function indexOfAscii(bytes, str, from = 0) {
+  const n = str.length;
+  for (let i = Math.max(0, from); i + n <= bytes.length; i++) {
+    let hit = true;
+    for (let j = 0; j < n; j++) { if (bytes[i + j] !== str.charCodeAt(j)) { hit = false; break; } }
+    if (hit) return i;
+  }
+  return -1;
+}
+
+const ISO8601 = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/;
+
+// QuickTime レガシー udta の `date` アトム(ASCII "date" の直後に ISO8601 日時)から
+// 撮影日時を拾う。creationdate を残さず date アトムに録画時刻を入れる書き出しがあるため。
+// 誤検出防止のため「"date" の直後(数バイト以内)に ISO8601 が始まる」場合のみ採用する。
+function findDateAtomMs(bytes) {
+  let at = 0;
+  while ((at = indexOfAscii(bytes, 'date', at)) >= 0) {
+    const payloadStart = at + 4; // "date" の直後
+    const end = Math.min(bytes.length, payloadStart + 8 + 32); // 小窓(先頭8B以内にISO開始)
+    let s = '';
+    for (let i = payloadStart; i < end; i++) s += String.fromCharCode(bytes[i]);
+    const m = s.match(ISO8601);
+    if (m && m.index <= 8) {
+      const ms = Date.parse(m[0]);
+      if (Number.isFinite(ms)) return ms;
+    }
+    at = payloadStart;
+  }
+  return null;
+}
+
+// 書き出し/DLしたMP4は mvhd.creation_time が「書き出し時刻」に化けることがある。
+// Apple由来の動画は moov メタに元の撮影日時
+//   com.apple.quicktime.creationdate (例 "2026-08-23T09:27:01+0900")
+// を keys/ilst として残すことが多く、書き出し後も生きていれば本来の録画時刻が復元できる。
+// creationdate キーの近傍から ISO8601 日時を1つ拾い Unix ms で返す(TZ付きは Date.parse が吸収)。
+// キーが無ければ誤検出を避けるため null(裸の日付文字列は拾わない)。
+export function findAppleCreationMs(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  const key = indexOfAscii(bytes, 'creationdate');
+  if (key >= 0) {
+    // keys(キー名)の後、ilst(値)側に日時文字列が来る。近傍を広めに走査。
+    const end = Math.min(bytes.length, key + 4096);
+    let s = '';
+    for (let i = key; i < end; i++) s += String.fromCharCode(bytes[i]);
+    const m = s.match(ISO8601);
+    if (m) {
+      const ms = Date.parse(m[0]);
+      if (Number.isFinite(ms)) return ms;
+    }
+  }
+  // creationdate が無い/日時を取れない書き出しは udta `date` アトムを試す。
+  return findDateAtomMs(bytes);
+}
+
+// ArrayBuffer から { creationMs, durationMs, appleCreationMs } を返す。取れなければ null。
+// creationMs は mvhd(端末により意味が違う/書き出しで化ける)。appleCreationMs は元撮影日時(あれば信頼)。
 export function parseMp4Times(arrayBuffer) {
   const dv = new DataView(arrayBuffer);
   const moov = findBox(dv, 0, dv.byteLength, 'moov');
   if (!moov) return null;
   const mvhd = findBox(dv, moov.start, moov.end, 'mvhd');
   if (!mvhd) return null;
-  return readMvhd(dv, mvhd.start);
+  const base = readMvhd(dv, mvhd.start);
+  const appleCreationMs = findAppleCreationMs(arrayBuffer);
+  if (!base && appleCreationMs == null) return null;
+  return {
+    creationMs: base?.creationMs ?? null,
+    durationMs: base?.durationMs ?? null,
+    appleCreationMs,
+  };
 }
 
 // 後方互換: creation_time(Unix ms) のみ。
@@ -81,6 +145,8 @@ export function isEndTimeDevice(name) {
 // meta 無しは null。
 export function embeddedStartMs(meta, name) {
   if (!meta) return null;
+  // 元の撮影日時(Apple)が残っていれば最優先。書き出しで mvhd が化けても正しい録画開始が得られる。
+  if (meta.appleCreationMs != null) return meta.appleCreationMs;
   if (isEndTimeDevice(name) && meta.durationMs != null) {
     return meta.creationMs - meta.durationMs;
   }

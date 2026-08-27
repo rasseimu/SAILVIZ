@@ -1,15 +1,87 @@
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
-body { display: flex; flex-direction: column; height: 100vh; color: #1a2733; }
-#topbar { display: flex; gap: 14px; align-items: center; padding: 8px 14px;
-  background: #0d3b5e; color: #fff; }
-#topbar .btn { background: #1c72b8; color: #fff; border: 0; font: inherit; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
-#topbar .btn-loading { background: #5a6b7b; cursor: progress; }
-#topbar .btn-success { background: #27ae60; }
-#topbar .btn-error { background: #c0392b; }
+
+/* Google Drive 風デザイントークン */
+:root {
+  --gd-blue: #1a73e8;
+  --gd-blue-hover: #1558b0;
+  --gd-surface: #ffffff;
+  --gd-page: #ffffff;
+  --gd-hover: #f1f3f4;
+  --gd-border: #dadce0;
+  --gd-text: #202124;
+  --gd-text2: #5f6368;
+  --gd-font: "Roboto", "Helvetica Neue", system-ui, sans-serif;
+}
+
+/* --- ホーム画面(Google Drive「マイドライブ」風) --- */
+#home-screen { display: none; flex-direction: column; height: 100vh;
+  background: var(--gd-page); font-family: var(--gd-font); color: var(--gd-text); }
+body.view-home #topbar,
+body.view-home main,
+body.view-home #reflection-editor,
+body.view-home #transport,
+body.view-home #color-menu { display: none !important; }
+body.view-home #home-screen { display: flex; }
+
+/* 白いトップアプリバー */
+#home-bar { display: flex; gap: 12px; align-items: center; height: 64px; padding: 0 16px;
+  background: var(--gd-surface); border-bottom: 1px solid var(--gd-border); }
+#home-bar strong { font-size: 20px; font-weight: 500; color: #5f6368; letter-spacing: .2px; }
+#home-bar strong::before { content: "⛵"; margin-right: 8px; }
+#home-folder { margin-left: auto; }
+#home-folder .btn { background: none; color: var(--gd-blue); border: 1px solid var(--gd-border);
+  font: inherit; padding: 7px 16px; border-radius: 8px; cursor: pointer; }
+#home-folder .btn:hover { background: rgba(26,115,232,0.06); }
+
+#home-body { flex: 1; overflow-y: auto; padding: 12px 20px 28px; }
+#home-toolbar { display: flex; align-items: center; gap: 16px; padding: 12px 4px 20px; }
+/* Drive の「新規」ボタン(白・淡い影・丸み) */
+.gd-new { display: inline-flex; align-items: center; gap: 10px; font: inherit; font-size: 14px;
+  color: var(--gd-text); background: var(--gd-surface); border: 1px solid var(--gd-border);
+  padding: 11px 22px 11px 18px; border-radius: 24px; cursor: pointer;
+  box-shadow: 0 1px 2px rgba(60,64,67,0.15), 0 1px 3px 1px rgba(60,64,67,0.08); }
+.gd-new:hover { background: #f8f9fa; box-shadow: 0 1px 3px rgba(60,64,67,0.2), 0 2px 6px 2px rgba(60,64,67,0.1); }
+.gd-new .gd-plus { font-size: 20px; line-height: 1; color: var(--gd-blue); font-weight: 700; }
+#home-section-title { font-size: 16px; font-weight: 500; color: var(--gd-text); }
+
+#home-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(224px, 1fr));
+  gap: 14px; align-content: start; }
+/* Drive のファイルカード */
+.home-card { display: flex; flex-direction: column; gap: 8px; text-align: left;
+  min-height: 112px; padding: 14px 16px; border: 1px solid var(--gd-border); border-radius: 12px;
+  background: var(--gd-surface); cursor: pointer; font: inherit; color: var(--gd-text);
+  transition: background .1s, box-shadow .1s, border-color .1s; }
+.home-card:hover { background: #f8f9fa; border-color: #d2e3fc;
+  box-shadow: 0 1px 2px rgba(60,64,67,0.15), 0 1px 3px 1px rgba(60,64,67,0.08); }
+.home-card .hc-title { display: flex; align-items: center; gap: 8px;
+  font-size: 14px; font-weight: 500; color: var(--gd-text); }
+.home-card .hc-title::before { content: "⛵"; font-size: 16px; }
+.home-card .hc-meta { font-size: 12px; color: var(--gd-text2); display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.home-card .hc-wind { font-size: 12px; color: var(--gd-blue); }
+#home-empty { grid-column: 1 / -1; color: var(--gd-text2); padding: 24px 4px; }
+@media (max-width: 768px) {
+  #home-cards { grid-template-columns: 1fr; }
+  #home-body { padding: 8px 14px 24px; }
+}
+html, body { margin: 0; height: 100%; font-family: var(--gd-font); }
+body { display: flex; flex-direction: column; height: 100vh; color: var(--gd-text); }
+#topbar { display: flex; gap: 14px; align-items: center; padding: 8px 16px;
+  background: var(--gd-surface); color: var(--gd-text); border-bottom: 1px solid var(--gd-border); }
+#topbar strong { font-size: 20px; font-weight: 500; color: #5f6368; }
+#app-title { cursor: pointer; border-radius: 6px; padding: 2px 6px; }
+#app-title::before { content: "⛵"; margin-right: 6px; }
+#app-title:hover { background: var(--gd-hover); color: var(--gd-blue); }
+#topbar label { font-size: 13px; color: var(--gd-text2); display: inline-flex; align-items: center; gap: 4px; }
+#topbar .btn { background: none; color: var(--gd-blue); border: 1px solid var(--gd-border);
+  font: inherit; padding: 6px 14px; border-radius: 8px; cursor: pointer; }
+#topbar .btn:hover { background: rgba(26,115,232,0.06); }
+#topbar .btn-loading { background: var(--gd-hover); color: var(--gd-text2); cursor: progress; }
+#topbar .btn-success { background: #e6f4ea; color: #188038; border-color: #a8dab5; }
+#topbar .btn-error { background: #fce8e6; color: #c5221f; border-color: #f2b8b5; }
 #topbar .btn:disabled { cursor: progress; opacity: 0.9; }
-#topbar select { padding: 2px; }
-#status { margin-left: auto; font-size: 12px; opacity: 0.85; }
+#topbar select { padding: 4px 6px; border: 1px solid var(--gd-border); border-radius: 6px;
+  background: var(--gd-surface); color: var(--gd-text); font: inherit; }
+#status { margin-left: auto; font-size: 12px; color: var(--gd-text2); }
 main { flex: 1; display: flex; min-height: 0; }
 #sidebar { width: 240px; padding: 10px; overflow-y: auto; background: #f2f5f8;
   border-right: 1px solid #d4dde5; }
@@ -38,6 +110,19 @@ main { flex: 1; display: flex; min-height: 0; }
 .track-row, .tag-row { display: flex; align-items: center; gap: 6px; font-size: 13px;
   padding: 3px 0; }
 .swatch { width: 12px; height: 12px; border-radius: 2px; flex: 0 0 auto; }
+.swatch-btn { width: 14px; height: 14px; cursor: pointer; border: 1px solid rgba(0,0,0,0.15);
+  transition: transform .08s; }
+.swatch-btn:hover { transform: scale(1.2); box-shadow: 0 0 0 2px rgba(28,114,184,0.35); }
+
+/* トラック色の変更メニュー(12色パレット) */
+#color-menu { position: fixed; z-index: 30; display: grid; grid-template-columns: repeat(6, 1fr);
+  gap: 6px; padding: 8px; background: #fff; border: 1px solid #b7c4d0; border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(13,59,94,0.25); }
+#color-menu.hidden { display: none; }
+#color-menu .color-swatch { width: 22px; height: 22px; border-radius: 4px; cursor: pointer;
+  border: 1px solid rgba(0,0,0,0.15); padding: 0; }
+#color-menu .color-swatch:hover { transform: scale(1.12); }
+#color-menu .color-swatch.active { outline: 2px solid #0d3b5e; outline-offset: 1px; }
 .track-name { cursor: text; }
 .rename-input { flex: 1; min-width: 0; font-size: 13px; padding: 1px 4px;
   border: 1px solid #1c72b8; border-radius: 3px; }
@@ -121,7 +206,7 @@ main { flex: 1; display: flex; min-height: 0; }
 
 /* --- スマホ: 反省入力をメイン表示(地図/動画/タイムラインは省く) --- */
 @media (max-width: 768px) {
-  /* トップバーはタイトルだけ残し、操作系は隠してスッキリ */
+  /* トップバーはタイトル(=ホームへ戻る)だけ残し、操作系は隠してスッキリ */
   #topbar > :not(strong) { display: none; }
   #topbar { padding: 8px 14px; }
 
@@ -144,3 +229,68 @@ main { flex: 1; display: flex; min-height: 0; }
   #refl-save, #refl-cancel { padding: 8px 16px; font-size: 15px; }
   #refl-text { font-size: 16px; }
 }
+
+/* --- チューニングダッシュボード --- */
+#dashboard-screen { display: none; }
+body.view-dashboard #dashboard-screen { display: flex; flex-direction: column; height: 100vh; }
+body.view-dashboard #topbar,
+body.view-dashboard main,
+body.view-dashboard #transport { display: none; }
+
+#dashboard-bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid #ccc; }
+#dashboard-icon { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; }
+#dashboard-title { font-size: 26px; font-weight: 700; letter-spacing: 0.02em; }
+#dashboard-legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; margin-left: auto; }
+.legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.legend-swatch { width: 12px; height: 3px; display: inline-block; }
+
+.home-link { cursor: pointer; color: #1558d6; text-decoration: underline; font-size: 13px; }
+
+/* ヘッダ下: 左サイドメニュー + 右コンテンツ(グラフ/表/期間バー) */
+#dashboard-body { display: flex; flex: 1; min-height: 0; }
+/* グラフ/表/期間バーが画面端に張り付かないよう左右＋下に余白を確保 */
+#dashboard-content { display: flex; flex-direction: column; flex: 1; min-width: 0; padding: 0 16px 16px; }
+
+/* サイドメニュー: 全て + 6艇の縦並び。選択中をハイライト。 */
+#dashboard-nav { flex: 0 0 auto; width: 120px; border-right: 1px solid #ccc;
+  padding: 8px; display: flex; flex-direction: column; gap: 4px; overflow: auto; }
+.dashboard-nav-item { text-align: left; padding: 8px 10px; border: 1px solid transparent;
+  border-radius: 4px; background: none; cursor: pointer; font-size: 13px; color: #333; }
+.dashboard-nav-item:hover { background: #f0f4fd; }
+.dashboard-nav-item.active { background: #1558d6; color: #fff; font-weight: 600; }
+
+#dashboard-stage { position: relative; flex: 1; overflow: auto; }
+/* 11パラメータのミニグラフを 4列×3行のグリッドに整列 */
+#dashboard-charts { display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 8px; padding: 8px; align-content: start; }
+/* min-width:0 が無いとグリッドアイテムの min-content(=canvas幅)が下限になり
+   1fr が縮まず横オーバーフロー→右端グラフが切れる。0 にして確実に収める。 */
+.tuning-chart { background: rgba(255,255,255,0.92); min-width: 0;
+  border: 1px solid #ddd; border-radius: 4px; padding: 2px 4px; font-size: 11px; cursor: pointer; }
+.tuning-chart:hover { border-color: #1558d6; box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
+.tuning-chart .tc-title { color: #333; }
+.tuning-chart .tc-canvas-wrap { position: relative; height: 130px; }
+
+/* ミニグラフをクリックで拡大する対話グラフ(オーバレイ) */
+#dashboard-chart-modal { position: absolute; inset: 0; z-index: 10; background: rgba(0,0,0,0.35);
+  display: flex; align-items: center; justify-content: center; }
+#dashboard-chart-modal.hidden { display: none; }
+.dcm-inner { background: #fff; border-radius: 6px; width: 80%; max-width: 900px; height: 70%;
+  display: flex; flex-direction: column; box-shadow: 0 6px 24px rgba(0,0,0,0.3); }
+#dcm-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #eee; }
+#dashboard-modal-close { margin-left: auto; font-size: 18px; border: none; background: none; cursor: pointer; line-height: 1; }
+#dcm-body { flex: 1; position: relative; padding: 8px; min-height: 0; }
+#dashboard-modal-canvas { width: 100%; height: 100%; }
+
+/* グラフ下の数値まとめ表(行=練習日×艇)。スクロール可・ヘッダ固定。 */
+#dashboard-table { flex: 0 0 auto; max-height: 30vh; overflow: auto; border-top: 1px solid #ccc; }
+#dashboard-table:empty { display: none; }
+table.tuning-table { border-collapse: collapse; width: 100%; font-size: 12px; }
+table.tuning-table th, table.tuning-table td {
+  border: 1px solid #e2e2e2; padding: 2px 8px; text-align: right; white-space: nowrap; }
+table.tuning-table th { position: sticky; top: 0; background: #f5f5f5; z-index: 1; }
+table.tuning-table td:first-child, table.tuning-table td:nth-child(2) { text-align: left; }
+table.tuning-table .tt-boat { font-weight: 600; }
+table.tuning-table tbody tr:nth-child(even) { background: #fafafa; }
+
+#dashboard-timebar { width: 100%; height: 44px; border-top: 1px solid #ccc; display: block; }

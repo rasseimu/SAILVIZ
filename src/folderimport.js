@@ -16,7 +16,10 @@ export function videoOverlapsRange(startMs, durationMs, range) {
 // 返り値: { matched: [{file, t, durationMs}], scanned: 動画本数, skipped: 範囲外/時刻不明数 }
 export async function scanFolderVideos(dirHandle, range, readTimes = parseMp4TimesFromFile) {
   const matched = [];
+  const skippedInfo = []; // 診断用: 各スキップ動画の理由と抽出時刻
   let scanned = 0;
+  let noTime = 0;     // 埋め込み時刻が取れずスキップ
+  let outOfRange = 0; // 時刻は取れたが GPS 範囲外でスキップ
   for await (const entry of dirHandle.values()) {
     if (entry.kind !== 'file' || !VIDEO_RE.test(entry.name)) continue;
     scanned++;
@@ -24,11 +27,18 @@ export async function scanFolderVideos(dirHandle, range, readTimes = parseMp4Tim
     let meta = null;
     try { meta = await readTimes(file); } catch { /* パース失敗は時刻不明扱い */ }
     const t = embeddedStartMs(meta, file.name);
-    if (videoOverlapsRange(t, meta?.durationMs ?? null, range)) {
-      matched.push({ file, t, durationMs: meta?.durationMs ?? null });
+    const durationMs = meta?.durationMs ?? null;
+    if (videoOverlapsRange(t, durationMs, range)) {
+      matched.push({ file, t, durationMs });
+    } else if (t == null) {
+      noTime++;
+      skippedInfo.push({ name: file.name, reason: 'noTime', t: null, durationMs, apple: meta?.appleCreationMs ?? null });
+    } else {
+      outOfRange++;
+      skippedInfo.push({ name: file.name, reason: 'outOfRange', t, durationMs, apple: meta?.appleCreationMs ?? null });
     }
   }
-  return { matched, scanned, skipped: scanned - matched.length };
+  return { matched, scanned, skipped: scanned - matched.length, noTime, outOfRange, skippedInfo };
 }
 
 // dirHandle 直下のファイルのうち、名前が nameSet に含まれるものを収集して

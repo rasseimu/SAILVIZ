@@ -6,9 +6,52 @@
   <title>SailViz — GPS軌跡ビューア</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
+<body class="view-home">
+  <section id="home-screen">
+    <header id="home-bar">
+      <strong>SailViz</strong>
+      <a id="home-dashboard-link" class="home-link" title="全艇チューニングを見比べる">🔧 チューニングダッシュボード</a>
+      <span id="home-folder"></span>
+    </header>
+    <div id="home-body">
+      <div id="home-toolbar">
+        <button id="home-new" class="gd-new"><span class="gd-plus">＋</span> 新規練習</button>
+        <span id="home-section-title">練習データ</span>
+      </div>
+      <div id="home-cards"></div>
+    </div>
+  </section>
+
+  <section id="dashboard-screen">
+    <header id="dashboard-bar">
+      <a id="dashboard-home-link" class="home-link" title="ホームへ戻る">← ホーム</a>
+      <img id="dashboard-icon" src="src/Component 2.png" alt="" />
+      <strong id="dashboard-title">全艇チューニングダッシュボード</strong>
+      <div id="dashboard-legend"></div>
+    </header>
+    <div id="dashboard-body">
+      <nav id="dashboard-nav"></nav>
+      <div id="dashboard-content">
+        <div id="dashboard-stage">
+          <div id="dashboard-charts"></div>
+        </div>
+        <div id="dashboard-table"></div>
+        <canvas id="dashboard-timebar"></canvas>
+      </div>
+    </div>
+    <div id="dashboard-chart-modal" class="hidden">
+      <div class="dcm-inner">
+        <div id="dcm-bar">
+          <strong id="dashboard-modal-title"></strong>
+          <button id="dashboard-modal-close" title="閉じる (Esc)">×</button>
+        </div>
+        <div id="dcm-body"><canvas id="dashboard-modal-canvas"></canvas></div>
+      </div>
+    </div>
+  </section>
+
   <header id="topbar">
-    <strong>SailViz</strong>
+    <strong id="app-title" title="ホームへ戻る">SailViz</strong>
     <label class="btn">CSV読込
       <input type="file" id="file-input" accept=".csv" multiple hidden />
     </label>
@@ -103,6 +146,8 @@
       </details>
     </div>
   </section>
+
+  <div id="color-menu" class="hidden"></div>
 
   <footer id="transport">
     <button id="play-btn">▶</button>

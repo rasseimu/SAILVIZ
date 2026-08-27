@@ -21,9 +21,25 @@ import {
 } from './reflections.js';
 import { serializeProject, deserializeProject } from './project.js';
 import { projectFileName, listProjectFiles, readProject, writeProject } from './projectfs.js';
+import { practiceSummary, earliestContentMs } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
+import { createDashboard } from './dashboard.js';
 
-const PALETTE = ['#1c72b8', '#e67e22', '#27ae60', '#8e44ad', '#c0392b', '#16a085'];
+// トラック自動割当＆色変更メニューの共通パレット(識別しやすい12色)。
+const PALETTE = [
+  '#1c72b8', // 青
+  '#e67e22', // 橙
+  '#27ae60', // 緑
+  '#8e44ad', // 紫
+  '#c0392b', // 赤
+  '#16a085', // 青緑
+  '#d81b60', // ピンク
+  '#795548', // 茶
+  '#f39c12', // 黄土
+  '#34495e', // 濃紺
+  '#00acc1', // シアン
+  '#689f38', // 黄緑
+];
 
 const state = {
   tracks: [],
@@ -210,27 +226,32 @@ async function refreshPracticeList() {
 async function saveProject() {
   const dir = await ensureProjectDir();
   if (!dir) return;
-  const name = projectFileName(new Date());
+  const obj = serializeProject(state, { savedAt: new Date().toISOString() });
+  // ファイル名は練習の実データ時刻(トラックGPS開始/動画配置の最小)で命名。
+  // 実データが無い練習は従来どおり保存時刻へフォールバック。
+  const dataMs = earliestContentMs(obj);
+  const name = projectFileName(new Date(dataMs ?? Date.now()));
   try {
-    await writeProject(dir, name, serializeProject(state, { savedAt: new Date().toISOString() }));
+    await writeProject(dir, name, obj);
   } catch (e) {
     statusEl.textContent = `保存に失敗: ${e.message}`; return;
   }
+  cacheSummary(name, practiceSummary(obj, { name })); // ホームのカードに即反映
   await refreshPracticeList();
   statusEl.textContent = `保存しました: ${name}`;
 }
 
-// 選択した練習ファイルを読み込み、state を置換する。
+// 選択した練習ファイルを読み込み、state を置換する。成否を boolean で返す。
 async function loadPractice(name) {
   if (state.tracks.length && !window.confirm('現在の内容を破棄して読み込みますか？')) {
-    $('practice-select').value = ''; return;
+    $('practice-select').value = ''; return false;
   }
   let data;
   try {
     data = deserializeProject(await readProject(projectDir, name));
   } catch (e) {
     statusEl.textContent = `読込に失敗: ${e.message}`;
-    $('practice-select').value = ''; return;
+    $('practice-select').value = ''; return false;
   }
   closeVideoPanel(); // stale currentVideo を破棄（パネルが閉じていれば即 return）
   state.mode = data.mode;
@@ -257,6 +278,107 @@ async function loadPractice(name) {
   statusEl.textContent = n
     ? `読込: ${name}。動画${n}本は未リンク（📁 動画フォルダ取込で再リンク）`
     : `読込: ${name}`;
+  return true;
+}
+
+// ================= ホーム画面(カード型ランチャー) =================
+const SUMMARY_KEY = 'sailviz.summaries.v3'; // v3: 練習日をトラック＋動画の最古時刻に変更(旧キャッシュ破棄)
+// 要約キャッシュ: { ファイル名: 要約 }。ファイル名はタイムスタンプで不変なので陳腐化しない。
+function loadSummaryCache() {
+  try { return JSON.parse(localStorage.getItem(SUMMARY_KEY)) || {}; } catch { return {}; }
+}
+function cacheSummary(name, summary) {
+  const c = loadSummaryCache();
+  c[name] = summary;
+  try { localStorage.setItem(SUMMARY_KEY, JSON.stringify(c)); } catch { /* quota は無視 */ }
+}
+
+function showHome() { document.body.classList.add('view-home'); renderHome(); }
+async function showDashboard() {
+  if (!projectDir && !(await ensureProjectDir())) return;
+  document.body.classList.remove('view-home');
+  document.body.classList.add('view-dashboard');
+  await dashboard.render();
+}
+function backToHomeFromDashboard() {
+  document.body.classList.remove('view-dashboard');
+  showHome();
+}
+function showTrack() {
+  document.body.classList.remove('view-home');
+  // ホーム中は stage が display:none だった → canvas バッファを再計算しないと潰れる
+  resizeCanvas(); refitTransform(); draw();
+}
+
+// 現在の作業内容を空にする(新規練習用)。blob URL は解放。
+function resetState() {
+  closeVideoPanel();
+  for (const v of state.videos) if (v.url) URL.revokeObjectURL(v.url);
+  state.tracks = []; state.events = []; state.marks = []; state.pins = [];
+  state.videos = []; state.reflections = [];
+  state.crop = { start: 0, end: 0 };
+  saveReflections(state.reflections);
+  recomputeView(); renderSidebar(); draw();
+}
+
+function startNewPractice() {
+  if (state.tracks.length && !window.confirm('現在の内容を破棄して新規練習を始めますか？')) return;
+  resetState();
+  showTrack();
+}
+
+async function openPractice(name) {
+  if (await loadPractice(name)) showTrack();
+}
+
+// カードの中身(ラベル＋要約 or 読込中プレースホルダ)を描画。
+function renderCard(card, item, summary) {
+  // タイトルは練習日(要約のトラッキング日)を優先。未読込中はファイル名ラベルを仮表示。
+  const title = summary?.label || item.label;
+  const meta = summary
+    ? `<div class="hc-meta"><span>トラック${summary.trackCount}</span>`
+      + `<span>反省${summary.reflectionCount}</span>`
+      + `<span>動画${summary.videoCount}</span></div>`
+      + (summary.wind ? `<div class="hc-wind">💨 ${escapeHtml(summary.wind)}</div>` : '')
+    : '<div class="hc-meta">読込中…</div>';
+  card.innerHTML = `<div class="hc-title">${escapeHtml(title)}</div>${meta}`;
+}
+
+async function renderHome() {
+  const grid = $('home-cards');
+  const folderEl = $('home-folder');
+  folderEl.innerHTML = '';
+  if (!projectDir) {
+    const pick = document.createElement('button');
+    pick.className = 'btn'; pick.textContent = '▶ 保存フォルダを選択…';
+    pick.addEventListener('click', async () => { if (await ensureProjectDir()) renderHome(); });
+    folderEl.appendChild(pick);
+  }
+
+  grid.innerHTML = '';
+  if (!projectDir) {
+    const empty = document.createElement('div');
+    empty.id = 'home-empty';
+    empty.textContent = '保存フォルダを選択すると、過去の練習がここに並びます。';
+    grid.appendChild(empty);
+    return;
+  }
+
+  const items = await listProjectFiles(projectDir);
+  const cache = loadSummaryCache();
+  for (const it of items) {
+    const card = document.createElement('button');
+    card.className = 'home-card';
+    renderCard(card, it, cache[it.name] ?? null);
+    card.addEventListener('click', () => openPractice(it.name));
+    grid.appendChild(card);
+    // 未キャッシュはその1件だけ読んで要約(初回のみ。以後は即時)。
+    if (!cache[it.name]) {
+      readProject(projectDir, it.name)
+        .then((proj) => { const s = practiceSummary(proj, { name: it.name }); cacheSummary(it.name, s); renderCard(card, it, s); })
+        .catch(() => { renderCard(card, it, { trackCount: '?', reflectionCount: '?', videoCount: '?', wind: null }); });
+    }
+  }
 }
 
 // 取込ボタンの状態表示。state: idle|loading|success|error。
@@ -314,8 +436,14 @@ async function importFromVideoFolder() {
   draw(); renderSidebar();
   setFolderBtn('success', `✅ ${res.matched.length}本取込`);
   statusEl.textContent = `${res.scanned}本中${res.matched.length}本を取込`
-    + `（${res.skipped}本は範囲外/時刻不明でスキップ）`
+    + `（スキップ${res.skipped}本: 時刻不明${res.noTime ?? 0} / 範囲外${res.outOfRange ?? 0}）`
     + (relinked ? `（再リンク${relinked}本）` : '');
+  // 診断: スキップ動画の理由・抽出時刻を出す(GPS範囲と突き合わせて原因切り分け)
+  if (res.skippedInfo?.length) {
+    console.log('[SailViz] スキップ動画:', res.skippedInfo);
+    console.log('[SailViz] GPS範囲(絶対ms):', range,
+      new Date(range.start).toLocaleString('ja-JP'), '〜', new Date(range.end).toLocaleString('ja-JP'));
+  }
 }
 
 // 動画の再生時間を <video> のメタから読み、範囲バー用に埋める(mp4以外/パース失敗の保険)。
@@ -355,13 +483,15 @@ function renderSidebar() {
     const row = document.createElement('div'); row.className = 'track-row';
     row.innerHTML =
       `<input type="checkbox" ${tr.visible ? 'checked' : ''} data-i="${i}" />` +
-      `<span class="swatch" style="background:${tr.color}"></span>` +
+      `<span class="swatch swatch-btn" style="background:${tr.color}" data-color="${i}" title="クリックで色を変更"></span>` +
       `<span class="track-name" data-i="${i}" title="ダブルクリックで名前を変更">${tr.name}</span>` +
       `<button data-del="${i}">×</button>`;
     tl.appendChild(row);
   });
   tl.querySelectorAll('.track-name').forEach((s) =>
     s.addEventListener('dblclick', (e) => startRenameTrack(+e.target.dataset.i, e.target)));
+  tl.querySelectorAll('.swatch-btn').forEach((s) =>
+    s.addEventListener('click', (e) => openColorMenu(+e.currentTarget.dataset.color, e.currentTarget)));
   tl.querySelectorAll('input[type=checkbox]').forEach((cb) =>
     cb.addEventListener('change', (e) => {
       state.tracks[+e.target.dataset.i].visible = e.target.checked;
@@ -470,7 +600,13 @@ $('practice-select').addEventListener('change', async (e) => {
     if (h && await ensurePermission(h)) { projectDir = h; }
   } catch { /* 復元失敗は無視 */ }
   await refreshPracticeList();
+  showHome(); // 起動時はホーム画面
 })();
+
+$('app-title').addEventListener('click', showHome); // タイトルクリックでホームへ
+$('home-dashboard-link').addEventListener('click', showDashboard);
+$('dashboard-home-link').addEventListener('click', backToHomeFromDashboard);
+$('home-new').addEventListener('click', startNewPractice);
 
 $('play-btn').addEventListener('click', () => {
   playback.toggle();
@@ -629,7 +765,8 @@ function openVideoPanel(v) {
   playback.pause(); $('play-btn').textContent = '▶';
   currentVideo = v;
   videoRotation = 0; // 表示のみ・毎回リセット
-  resizeCanvas(); refitTransform(); draw(); renderSidebar();
+  // パネルで幅が変わってもユーザーの pan/zoom は保持(cx,cy,scale はそのまま、w/h だけ更新)。
+  resizeCanvas(); draw(); renderSidebar();
   applyVideoRotation(); // パネル表示後にステージ寸法へ合わせる
   vid.play().catch(() => { /* autoplayブロックは手動再生に委ねる */ });
 }
@@ -640,7 +777,8 @@ function closeVideoPanel() {
   vid.pause(); vid.removeAttribute('src'); vid.load();
   currentVideo = null;
   panel.classList.add('hidden');
-  resizeCanvas(); refitTransform(); draw(); renderSidebar();
+  // 閉じても pan/zoom を保持(開く時と対称)。全体には戻さない。
+  resizeCanvas(); draw(); renderSidebar();
 }
 
 // マーク配置: 右クリック→4択メニュー→クリック地点に配置
@@ -665,7 +803,33 @@ markMenu.querySelectorAll('button').forEach((b) =>
     hideMenu(); draw(); renderSidebar();
   }));
 window.addEventListener('pointerdown', (e) => { if (!markMenu.contains(e.target)) hideMenu(); });
-window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideMenu(); cancelPending(); closeVideoPanel(); } });
+
+// トラック色変更: スウォッチ→パレット12色ポップアップ→クリックで変更
+const colorMenu = $('color-menu');
+let colorTargetIdx = null;
+colorMenu.innerHTML = PALETTE.map((c) =>
+  `<button class="color-swatch" style="background:${c}" data-c="${c}" title="${c}"></button>`).join('');
+function hideColorMenu() { colorMenu.classList.add('hidden'); colorTargetIdx = null; }
+function openColorMenu(i, anchorEl) {
+  colorTargetIdx = i;
+  const r = anchorEl.getBoundingClientRect();
+  colorMenu.style.left = `${r.left}px`;
+  colorMenu.style.top = `${r.bottom + 4}px`;
+  colorMenu.querySelectorAll('.color-swatch').forEach((b) =>
+    b.classList.toggle('active', b.dataset.c === state.tracks[i]?.color));
+  colorMenu.classList.remove('hidden');
+}
+colorMenu.querySelectorAll('.color-swatch').forEach((b) =>
+  b.addEventListener('click', () => {
+    const tr = state.tracks[colorTargetIdx];
+    if (tr) { tr.color = b.dataset.c; draw(); renderSidebar(); }
+    hideColorMenu();
+  }));
+window.addEventListener('pointerdown', (e) => {
+  if (!colorMenu.contains(e.target) && !e.target.classList.contains('swatch-btn')) hideColorMenu();
+});
+
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideMenu(); hideColorMenu(); cancelPending(); closeVideoPanel(); } });
 $('video-close').addEventListener('click', closeVideoPanel);
 $('video-rotate').addEventListener('click', () => { videoRotation = nextRotation(videoRotation); applyVideoRotation(); });
 $('video-delete').addEventListener('click', () => { if (currentVideo) deleteVideo(state.videos.indexOf(currentVideo)); });
@@ -708,6 +872,21 @@ const NOTE_LABELS = {
   goal: '目標', issue: '感じている課題', discovery: '発見',
   slowFactor: '遅かった要因', fastFactor: '速かった要因',
 };
+
+// 全練習を deserialize して渡す(projectDir 前提)。
+const dashboard = createDashboard({
+  rigLabels: RIG_LABELS,
+  loadEntries: async () => {
+    if (!projectDir) return [];
+    const files = await listProjectFiles(projectDir);
+    const entries = [];
+    for (const f of files) {
+      try { entries.push({ name: f.name, project: deserializeProject(await readProject(projectDir, f.name)) }); }
+      catch { /* 壊れたファイルはスキップ */ }
+    }
+    return entries;
+  },
+});
 
 // 反省エディタの艇セッティング(数値12項目)と反省内容(テキスト5項目)を動的生成。
 (function buildReflFields() {
@@ -806,8 +985,8 @@ async function openReflectionEditor(existing = null) {
   }));
   $('refl-title').textContent = existing ? '反省を編集' : '反省を記入';
   $('reflection-editor').classList.remove('hidden');
-  // エディタ表示でステージが縮む → canvasバッファを再計算しないと地図が潰れる(動画パネルと同様)
-  resizeCanvas(); refitTransform(); draw();
+  // エディタ表示でステージが縮む → canvasバッファは再計算(潰れ防止)。ただし pan/zoom は保持(全体に戻さない)。
+  resizeCanvas(); draw();
   hideMention();
   $('refl-text').focus();
 
@@ -846,8 +1025,8 @@ function closeReflectionEditor() {
   editorOpen = false; editingId = null;
   hideMention();
   $('reflection-editor').classList.add('hidden');
-  // エディタを閉じるとステージが元の高さに戻る → canvasバッファを再計算
-  resizeCanvas(); refitTransform(); draw();
+  // エディタを閉じるとステージが元の高さに戻る → canvasバッファは再計算。pan/zoom は保持(開く時と対称)。
+  resizeCanvas(); draw();
 }
 
 function videoToken(name, tMs) { return `[動画:${name}@${formatVideoPos(tMs)}]`; }
@@ -960,9 +1139,9 @@ $('reflection-add').addEventListener('click', () => openReflectionEditor(null));
 $('refl-cancel').addEventListener('click', closeReflectionEditor);
 $('refl-save').addEventListener('click', saveReflection);
 // 反省内の各セクション(details)を展開/折りたたむとエディタ高さが変わりステージが伸縮する
-// → canvasバッファを再計算しないと地図が潰れる/伸びる
+// → canvasバッファは再計算(潰れ/伸び防止)。pan/zoom は保持(全体に戻さない)。
 document.querySelectorAll('#reflection-editor .refl-section').forEach((d) =>
-  d.addEventListener('toggle', () => { resizeCanvas(); refitTransform(); draw(); }));
+  d.addEventListener('toggle', () => { resizeCanvas(); draw(); }));
 $('refl-wind-dir').addEventListener('change', () => { windEdited = true; });
 $('refl-wind-speed').addEventListener('input', () => { windEdited = true; });
 $('refl-text').addEventListener('input', updateMention);
