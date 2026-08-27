@@ -242,22 +242,67 @@ function samplesToPoints(samples) {
   return samples.map((s) => ({ t: s.t, lat: s.lat, lon: s.lon, speed: s.speed, bearing: -1, accuracy: 5 }));
 }
 
-test('estimateWindAxisSeries: ビートから風向≈0°(北)を復元', () => {
-  // 45°→315°→45° の3レグ(2タック)で校正が効くようにする
-  const t0 = 1_787_000_000_000;
-  const l1 = straightSamples(t0, 45, 40);
-  const a = l1.at(-1);
-  const l2 = straightSamples(a.t + 500, 315, 40, 3, 500, { lat: a.lat, lon: a.lon });
-  const b = l2.at(-1);
-  const l3 = straightSamples(b.t + 500, 45, 40, 3, 500, { lat: b.lat, lon: b.lon });
-  const points = samplesToPoints([...l1, ...l2, ...l3]);
+// タックを含むビートのraw点列を生成する。
+// 直進レグは ~3 m/s で指定秒数進み、タック中は ~0.6 m/s で4秒かけてヘディングを回す。
+// computeCog (minSpeedMps=1.5) によってタック中の低速点はフィルタされるため、
+// Fix 1 の raw点再サンプリングで減速ディップを捉えられることを検証するための合成データ。
+function beatWithTacks(t0, legSec = 30, tackSec = 4, dtMs = 500) {
+  const legs = [45, 315, 45]; // 3レグ: スタボ→ポート→スタボ
+  const legSpeed = 3;         // 直進速度 [m/s]
+  const tackSpeed = 0.6;      // タック中低速 [m/s]
+  const mLat = 111_320;
+  const refLat = 35.30;
+  const mLon = 111_320 * Math.cos(refLat * Math.PI / 180);
+  const pts = [];
+  let t = t0;
+  let lat = refLat, lon = 139.48;
 
-  const series = estimateWindAxisSeries({ points }, { marks: [], opts: { minLegSec: 5, settleSec: 4, windowMs: 1000, minSpeedMps: 1 } });
-  assert.ok(series.length > 0);
-  // アンカー(tack)の風向が北付近
-  const anchor = series.find((p) => p.source === 'anchor');
-  assert.ok(anchor);
-  assert.ok(Math.abs(circDiffDeg(anchor.windFromDeg, 0)) < 5, `windFrom=${anchor.windFromDeg}`);
+  for (let li = 0; li < legs.length; li++) {
+    const headDeg = legs[li];
+    const rad = headDeg * Math.PI / 180;
+    const n = Math.floor((legSec * 1000) / dtMs);
+    for (let i = 0; i < n; i++) {
+      pts.push({ t, lat, lon, speed: legSpeed, bearing: -1, accuracy: 5 });
+      lat += (Math.cos(rad) * legSpeed * (dtMs / 1000)) / mLat;
+      lon += (Math.sin(rad) * legSpeed * (dtMs / 1000)) / mLon;
+      t += dtMs;
+    }
+    // タックを挿入（最後のレグの後は不要）
+    if (li < legs.length - 1) {
+      const fromDeg = legs[li];
+      const toDeg = legs[li + 1];
+      const nTack = Math.floor((tackSec * 1000) / dtMs);
+      for (let j = 0; j < nTack; j++) {
+        // ヘディングを線形補間しながら低速で前進
+        const frac = nTack > 1 ? j / (nTack - 1) : 0;
+        let interpDeg = fromDeg + circDiffDeg(toDeg, fromDeg) * frac;
+        const irad = interpDeg * Math.PI / 180;
+        pts.push({ t, lat, lon, speed: tackSpeed, bearing: -1, accuracy: 5 });
+        lat += (Math.cos(irad) * tackSpeed * (dtMs / 1000)) / mLat;
+        lon += (Math.sin(irad) * tackSpeed * (dtMs / 1000)) / mLon;
+        t += dtMs;
+      }
+    }
+  }
+  return pts;
+}
+
+test('estimateWindAxisSeries: ビートから風向≈0°(北)を復元', () => {
+  // beatWithTacks: 45°→(tack 0.6m/s)→315°→(tack)→45° の3レグ2タック。
+  // computeCog (minSpeedMps=1.5) がタック中低速点を除外するが、
+  // Fix 1 により raw点からdipを検出しタックとして判別できることを検証。
+  const points = beatWithTacks(1_787_000_000_000);
+  const series = estimateWindAxisSeries({ points }, {
+    marks: [],
+    opts: { minLegSec: 5, settleSec: 4, windowMs: 1000, minSpeedMps: 1.5 },
+  });
+  assert.ok(series.length > 0, `series should be non-empty`);
+  // 少なくとも1つのタックアンカーが存在すること
+  const tackAnchor = series.find((p) => p.source === 'anchor' && p.type === 'tack');
+  assert.ok(tackAnchor, `tack anchor not found; anchors=${JSON.stringify(series.filter(p=>p.source==='anchor').map(p=>({type:p.type,wind:p.windFromDeg})))}`);
+  // そのタックアンカーの風向が北付近（±8°以内）
+  assert.ok(Math.abs(circDiffDeg(tackAnchor.windFromDeg, 0)) < 8,
+    `tackAnchor.windFromDeg=${tackAnchor.windFromDeg} (expected ≈0°)`);
 });
 
 test('estimateWindAxisSeries: アンカー無しなら空配列', () => {

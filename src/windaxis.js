@@ -267,6 +267,29 @@ export function estimateWindAxisSeries(track, options = {}) {
   const marks = options.marks ?? [];
   const samples = computeCog(track.points, opts);
   const { legs, maneuvers } = segmentLegs(samples, opts);
+
+  // Fix: computeCogが低速点を除外するため、マニューバの減速をraw点から測る。
+  // segmentLegsが計算したminSpeed/speedDropRatioはフィルタ後サンプルに基づくため
+  // タックの速度ディップを捉えられない。旋回区間をraw track.pointsから再サンプリングして上書きする。
+  const rawPts = track.points;
+  for (const m of maneuvers) {
+    const startT = legs[m.legBeforeIdx].endT;
+    const endT = legs[m.legAfterIdx].startT;
+    const stepMs = 1000;
+    const speeds = [];
+    for (let t = startT; t <= endT + stepMs / 2; t += stepMs) {
+      const clampedT = Math.min(t, endT);
+      const sp = speedAt(rawPts, clampedT);
+      if (sp != null && isFinite(sp) && sp >= 0) speeds.push(sp);
+    }
+    if (speeds.length > 0) {
+      const rawMin = Math.min(...speeds);
+      const legAvg = (legs[m.legBeforeIdx].meanSpeed + legs[m.legAfterIdx].meanSpeed) / 2 || 1;
+      m.minSpeed = rawMin;
+      m.speedDropRatio = rawMin / legAvg;
+    }
+  }
+
   for (const m of maneuvers) Object.assign(m, classifyManeuver(m, opts));
   const kept = rejectMarkRoundings(maneuvers, marks, opts);
   const anchors = kept.map(estimateWindFromManeuver);
