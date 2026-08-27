@@ -93,6 +93,14 @@ function representativeHeading(seg, settleSec, settleM) {
   return { headingDeg, meanSpeed, lenM };
 }
 
+// 減速比でタック/ジャイブを判別（タックは失速が大きい）
+export function classifyManeuver(m, opts = {}) {
+  const thr = opts.tackMaxSpeedDropRatio ?? 0.6;
+  const type = m.speedDropRatio < thr ? 'tack' : 'gybe';
+  const confidence = Math.max(0, Math.min(1, Math.abs(m.speedDropRatio - thr) / thr));
+  return { type, confidence };
+}
+
 export function segmentLegs(samples, opts = {}) {
   const turnThresh = opts.turnRateThreshDegPerSec ?? 8;
   const minLegSec = opts.minLegSec ?? 8;

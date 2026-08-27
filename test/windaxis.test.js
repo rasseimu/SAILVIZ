@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   normalizeDeg, circDiffDeg, circMeanDeg, circMedianDeg, bisectorDeg, bearingDeg, computeCog,
-  segmentLegs,
+  segmentLegs, classifyManeuver,
 } from '../src/windaxis.js';
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -154,4 +154,12 @@ test('segmentLegs: タック直後のベアアウェイ開始でも代表方位�
   // (b) 2つの headingDeg が意味ある差を持つ — セトリング除外が実際に効いている証明
   assert.ok(Math.abs(circDiffDeg(headNoSettle, headWithSettle)) > 5,
     `セトリング有無で headingDeg に差がなければ settling 処理が無効化されている: noSettle=${headNoSettle} withSettle=${headWithSettle}`);
+});
+
+test('classifyManeuver: 大きく失速=タック / 速度維持=ジャイブ', () => {
+  const tack = classifyManeuver({ speedDropRatio: 0.3, turnDeg: 90 });
+  const gybe = classifyManeuver({ speedDropRatio: 0.9, turnDeg: 90 });
+  assert.equal(tack.type, 'tack');
+  assert.equal(gybe.type, 'gybe');
+  assert.ok(tack.confidence > 0 && tack.confidence <= 1);
 });
