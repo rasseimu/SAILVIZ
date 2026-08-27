@@ -1,0 +1,86 @@
+// 課題の3段階進捗(未着手0/取組中1/解決2)と目標達成フラグを localStorage に持つ軽量オーバーレイ。
+// キー = 反省id。反省(真実源)とは別ストアにし、進捗トグルで練習ファイルを書き戻さずに済ませる。
+// 集計(summarize)は反省配列 × オーバーレイ から画面用データを作る純関数。
+export const STORAGE_KEY = 'sailviz.progress';
+
+// 風速ビン(昇順・境界は max 未満)。末尾は上限なし。unknown は speed 欠損。
+export const WIND_BINS = [
+  { key: 'lt3', label: '〜3 m/s', max: 3 },
+  { key: 'mid', label: '3〜6 m/s', max: 6 },
+  { key: 'ge6', label: '6 m/s〜', max: Infinity },
+];
+
+export function windBinKey(speed) {
+  if (speed == null || !Number.isFinite(Number(speed))) return 'unknown';
+  const s = Number(speed);
+  for (const b of WIND_BINS) if (s < b.max) return b.key;
+  return WIND_BINS[WIND_BINS.length - 1].key;
+}
+
+export function loadProgress(storage = globalThis.localStorage) {
+  try {
+    const raw = storage?.getItem(STORAGE_KEY);
+    if (!raw) return {};
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === 'object' ? obj : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveProgress(obj, storage = globalThis.localStorage) {
+  storage?.setItem(STORAGE_KEY, JSON.stringify(obj));
+  return obj;
+}
+
+// 既存エントリを {issueStage:0, goalDone:false} で補完して不変更新する。
+function updateEntry(obj, reflId, patch) {
+  const prev = obj[reflId] || { issueStage: 0, goalDone: false };
+  return { ...obj, [reflId]: { issueStage: 0, goalDone: false, ...prev, ...patch } };
+}
+
+export function setIssueStage(obj, reflId, stage) {
+  return updateEntry(obj, reflId, { issueStage: stage });
+}
+
+export function setGoalDone(obj, reflId, done) {
+  return updateEntry(obj, reflId, { goalDone: done });
+}
+
+// 反省の練習日時(ms)。practice.startMs → createdAt の順。
+function reflDateMs(r) {
+  return r.practice?.startMs ?? r.createdAt ?? 0;
+}
+
+export function summarize(reflections, progress, { bins = WIND_BINS } = {}) {
+  const byMember = {};
+  const ensure = (name) => (byMember[name] ||= { goals: [], issues: [], discoveriesByBin: {} });
+  // 練習日昇順で走査(累計シリーズの単調性のため)。
+  const sorted = [...reflections].sort((a, b) => reflDateMs(a) - reflDateMs(b));
+  const series = { all: [] };
+  let allCum = 0;
+  const memberCum = {};
+  for (const r of sorted) {
+    const name = r.people?.[0];
+    if (!name) continue;
+    const bucket = ensure(name);
+    const dateMs = reflDateMs(r);
+    const st = progress[r.id] || {};
+    const notes = r.notes || {};
+    if (notes.goal) bucket.goals.push({ reflId: r.id, text: notes.goal, dateMs, done: !!st.goalDone });
+    if (notes.issue) bucket.issues.push({ reflId: r.id, text: notes.issue, dateMs, stage: st.issueStage ?? 0 });
+    if (notes.discovery) {
+      const speed = r.wind?.speed ?? null;
+      const bk = windBinKey(speed);
+      (bucket.discoveriesByBin[bk] ||= []).push({ reflId: r.id, text: notes.discovery, dateMs, speed });
+    }
+    // 解決(stage=2)到達を累計。課題を持つ反省のみ対象。
+    if (notes.issue && (st.issueStage ?? 0) === 2) {
+      allCum += 1;
+      memberCum[name] = (memberCum[name] || 0) + 1;
+      series.all.push({ dateMs, value: allCum });
+      (series[name] ||= []).push({ dateMs, value: memberCum[name] });
+    }
+  }
+  return { byMember, resolutionSeries: series };
+}
