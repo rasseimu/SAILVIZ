@@ -13,6 +13,7 @@ import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
 import { nextRotation, rotatedFitBox } from './videoview.js';
 import { memberList, filterMembers } from './members.js';
+import { parseMinutes, matchMember } from './minutes.js';
 import { DIR_NAMES, fetchWind } from './wind.js';
 import { fetchWindFromCsv } from './windCsv.js';
 import {
@@ -1161,6 +1162,83 @@ function saveReflection() {
 $('reflection-add').addEventListener('click', () => openReflectionEditor(null));
 $('refl-cancel').addEventListener('click', closeReflectionEditor);
 $('refl-save').addEventListener('click', saveReflection);
+
+// ================= 議事録一括インポート =================
+let importRows = []; // [{ block, memberFullName|null, include }]
+
+function openImportModal() {
+  if (!firstVisibleTrack()) { statusEl.textContent = '先に練習(GPS)を読み込んでください'; return; }
+  $('import-text').value = '';
+  $('import-preview').innerHTML = '';
+  $('import-wind').textContent = '';
+  importRows = [];
+  $('import-modal').classList.remove('hidden');
+}
+function closeImportModal() { $('import-modal').classList.add('hidden'); }
+
+// テキストをパースしてプレビュー行を構築。
+function rebuildImportPreview(text) {
+  const roster = memberList();
+  const blocks = parseMinutes(text);
+  importRows = blocks.map((b) => {
+    const { member } = matchMember(b.headerName, b.fullNameHint, roster);
+    return { block: b, memberFullName: member?.fullName ?? null, include: true };
+  });
+  renderImportPreview(roster);
+}
+
+function renderImportPreview(roster = memberList()) {
+  const el = $('import-preview');
+  if (!importRows.length) { el.innerHTML = '<p>議事録を入力するとプレビューされます。</p>'; return; }
+  const opts = (sel) => ['<option value="">(未割当)</option>']
+    .concat(roster.map((m) => `<option value="${escapeHtml(m.fullName)}"${m.fullName === sel ? ' selected' : ''}>${escapeHtml(m.fullName)}</option>`)).join('');
+  el.innerHTML = importRows.map((row, i) => {
+    const b = row.block;
+    return `<div class="import-row${row.memberFullName ? '' : ' unmatched'}">`
+      + `<label><input type="checkbox" data-inc="${i}" ${row.include ? 'checked' : ''} /> 取込</label>`
+      + `<span class="ir-head">${escapeHtml(b.headerName)}${b.fullNameHint ? '（' + escapeHtml(b.fullNameHint) + '）' : ''} →</span>`
+      + `<select data-member="${i}">${opts(row.memberFullName)}</select>`
+      + `<div class="ir-notes">目標: ${escapeHtml(b.goal || '—')}／課題: ${escapeHtml(b.issue || '—')}／発見: ${escapeHtml(b.discovery || '—')}</div>`
+      + `</div>`;
+  }).join('');
+  el.querySelectorAll('select[data-member]').forEach((s) =>
+    s.addEventListener('change', (e) => { importRows[+e.target.dataset.member].memberFullName = e.target.value || null; }));
+  el.querySelectorAll('input[data-inc]').forEach((cb) =>
+    cb.addEventListener('change', (e) => { importRows[+e.target.dataset.inc].include = e.target.checked; }));
+}
+
+// 取込実行: 練習の風を1回取得し、採用行を反省化して追加。
+async function runImport() {
+  const rows = importRows.filter((r) => r.include && r.memberFullName);
+  if (!rows.length) { statusEl.textContent = '取込対象がありません(部員を割り当ててください)'; return; }
+  const practice = practiceInfo();
+  const target = firstVisibleTrack() ? nowAbsolute() : Date.now();
+  const wind = await fetchWind(target) ?? await fetchWindFromCsv(target);
+  for (const row of rows) {
+    const b = row.block;
+    state.reflections.push(createReflection({
+      id: `refl${Date.now()}_${reflSeq++}`, createdAt: Date.now(),
+      text: b.raw, people: [row.memberFullName], wind, practice,
+      notes: { goal: b.goal, issue: b.issue, discovery: b.discovery },
+    }));
+  }
+  persistReflections();
+  renderReflectionList();
+  closeImportModal();
+  statusEl.textContent = `${rows.length}名分の反省を議事録から取込みました`;
+}
+
+$('reflection-import').addEventListener('click', openImportModal);
+$('import-cancel').addEventListener('click', closeImportModal);
+$('import-run').addEventListener('click', runImport);
+$('import-file').addEventListener('change', async (e) => {
+  const f = e.target.files?.[0];
+  if (!f) return;
+  const text = await f.text();
+  $('import-text').value = text;
+  rebuildImportPreview(text);
+});
+$('import-text').addEventListener('input', (e) => rebuildImportPreview(e.target.value));
 // 反省内の各セクション(details)を展開/折りたたむとエディタ高さが変わりステージが伸縮する
 // → canvasバッファは再計算(潰れ/伸び防止)。pan/zoom は保持(全体に戻さない)。
 document.querySelectorAll('#reflection-editor .refl-section').forEach((d) =>
