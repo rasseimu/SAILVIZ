@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   normalizeDeg, circDiffDeg, circMeanDeg, circMedianDeg, bisectorDeg, bearingDeg, computeCog,
-  segmentLegs, classifyManeuver, estimateWindFromManeuver,
+  segmentLegs, classifyManeuver, estimateWindFromManeuver, learnPolarAngles,
 } from '../src/windaxis.js';
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -171,4 +171,14 @@ test('estimateWindFromManeuver: タックは風上=二等分、ジャイブは+1
   assert.ok(Math.abs(circDiffDeg(tack.windFromDeg, 0)) < 0.5);   // 風上=北
   assert.ok(Math.abs(circDiffDeg(gybe.windFromDeg, 0)) < 0.5);   // 風下180 -> 風上0
   assert.equal(tack.source, 'anchor');
+});
+
+test('learnPolarAngles: クローズ角とランニング角を学習', () => {
+  const anchors = [
+    { type: 'tack', windFromDeg: 0, headingBefore: 45, headingAfter: 315 },
+    { type: 'gybe', windFromDeg: 0, headingBefore: 135, headingAfter: 225 },
+  ];
+  const { betaCloseHauled, betaRun } = learnPolarAngles(anchors);
+  assert.ok(Math.abs(betaCloseHauled - 45) < 1);
+  assert.ok(Math.abs(betaRun - 45) < 1);
 });

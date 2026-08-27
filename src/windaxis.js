@@ -101,6 +101,30 @@ export function classifyManeuver(m, opts = {}) {
   return { type, confidence };
 }
 
+// 線形中央値（帆走角は0..90付近で北またぎしないため単純中央値でよい）
+function median(xs) {
+  if (xs.length === 0) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const n = s.length;
+  return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
+}
+
+// タック/ジャイブからの帆走角学習（クローズ角＋ランニング角）
+export function learnPolarAngles(anchors) {
+  const ch = [], run = [];
+  for (const a of anchors) {
+    if (a.type === 'tack') {
+      ch.push(Math.abs(circDiffDeg(a.headingBefore, a.windFromDeg)));
+      ch.push(Math.abs(circDiffDeg(a.headingAfter, a.windFromDeg)));
+    } else if (a.type === 'gybe') {
+      const down = normalizeDeg(a.windFromDeg + 180);
+      run.push(Math.abs(circDiffDeg(a.headingBefore, down)));
+      run.push(Math.abs(circDiffDeg(a.headingAfter, down)));
+    }
+  }
+  return { betaCloseHauled: median(ch), betaRun: median(run) };
+}
+
 // マニューバ前後レグの二等分から風向(風上)を推定。ジャイブは風下なので+180。
 export function estimateWindFromManeuver(m) {
   const bis = bisectorDeg(m.headingBefore, m.headingAfter);
