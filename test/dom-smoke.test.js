@@ -124,7 +124,9 @@ test('renderer draws a per-track speed label at the current position', () => {
     transform: T, tracks: [track], events: [], now: 5000,
     mode: 'absolute', crop: { start: 0, end: 1000 },
   });
-  assert.ok(!ctx2.calls.fillText, 'no label when now is out of range');
+  // 風軸インジケータ(右上)は now に依らず常時テキストを描くため fillText は残る。
+  // 速度ラベルが無いこと＝範囲内(ctx)より fillText 回数が少ないことで確認する。
+  assert.ok((ctx2.calls.fillText || 0) < ctx.calls.fillText, '範囲外では速度ラベルが描かれない（風軸インジケータは残る）');
 });
 
 test('playback advances now, clamps to range, and auto-pauses at end', () => {

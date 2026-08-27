@@ -12,6 +12,68 @@ export function trackForHighlight(tracks, boatId) {
   return tracks.find((t) => t.id === boatId) || null;
 }
 
+// コンパス方位(度,北=0,時計回り)＋地図回転(rad)→画面上の単位ベクトル(px右,py下)。
+// worldToScreen と整合: 北ベクトル(0,1)は rot=0 で上(0,-1)、rot=π/2 で右(1,0)。
+export function compassScreenVector(bearingDeg, rotRad = 0) {
+  const a = (bearingDeg * Math.PI) / 180 + rotRad;
+  return { dx: Math.sin(a), dy: -Math.cos(a) };
+}
+
+// 右上の風軸インジケータ。windFromDeg=風が吹いてくる方位を指す矢印＋数値。
+// null（推定不可）ならミュート表示。地図回転(T.rot)に追従。screen空間・最前面。
+function drawWindIndicator(ctx, T, windFromDeg) {
+  const cx = T.w - 46, cy = 46, r = 22;
+  const rot = T.rot || 0;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.82)';
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = '#12283a';
+  ctx.stroke();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  if (windFromDeg == null) {
+    ctx.fillStyle = '#8a97a3';
+    ctx.font = '600 9px system-ui, sans-serif';
+    ctx.fillText('風軸', cx, cy - 4);
+    ctx.fillText('推定不可', cx, cy + 6);
+    return;
+  }
+
+  // 北ティック（地図回転に追従）
+  const n = compassScreenVector(0, rot);
+  ctx.fillStyle = '#c0392b';
+  ctx.font = '700 10px system-ui, sans-serif';
+  ctx.fillText('N', cx + n.dx * (r - 6), cy + n.dy * (r - 6));
+
+  // 風向矢印（風が吹いてくる方位を指す）
+  const v = compassScreenVector(windFromDeg, rot);
+  const tipX = cx + v.dx * (r - 3), tipY = cy + v.dy * (r - 3);
+  const tailX = cx - v.dx * (r - 8), tailY = cy - v.dy * (r - 8);
+  ctx.beginPath();
+  ctx.moveTo(tailX, tailY);
+  ctx.lineTo(tipX, tipY);
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = '#0d3b5e';
+  ctx.stroke();
+  const ah = 6, ang = Math.atan2(v.dy, v.dx);
+  ctx.beginPath();
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(tipX - ah * Math.cos(ang - 0.4), tipY - ah * Math.sin(ang - 0.4));
+  ctx.lineTo(tipX - ah * Math.cos(ang + 0.4), tipY - ah * Math.sin(ang + 0.4));
+  ctx.closePath();
+  ctx.fillStyle = '#0d3b5e';
+  ctx.fill();
+
+  // 数値ラベル（バッジ下・画面固定）
+  ctx.fillStyle = '#12283a';
+  ctx.font = '600 11px system-ui, sans-serif';
+  ctx.textBaseline = 'top';
+  ctx.fillText(`風 ${Math.round(windFromDeg) % 360}°`, cx, cy + r + 3);
+}
+
 // crop(グローバル時間)を各トラックの絶対時刻窓に変換
 function trackWindow(track, crop, mode) {
   if (mode === 'elapsed') {
@@ -92,7 +154,7 @@ function drawSpeedLabel(ctx, s, text, color) {
 }
 
 export function drawScene(ctx, state) {
-  const { transform: T, tracks, events, now, mode, crop, referenceTrack, marks = [], videos = [], activeVideoId = null } = state;
+  const { transform: T, tracks, events, now, mode, crop, referenceTrack, marks = [], videos = [], activeVideoId = null, windAxisNow = null } = state;
   ctx.clearRect(0, 0, T.w, T.h);
   if (!T.proj) return;
 
@@ -185,4 +247,7 @@ export function drawScene(ctx, state) {
     if (!pos) continue;
     drawVideoBadge(ctx, toScreen(pos.lat, pos.lon, T), v.id === activeVideoId);
   }
+
+  // 風軸インジケータ（最前面・右上）。windAxisNow=現在時刻の推定風向(度) or null。
+  drawWindIndicator(ctx, T, windAxisNow);
 }

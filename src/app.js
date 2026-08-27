@@ -24,7 +24,7 @@ import { projectFileName, listProjectFiles, readProject, writeProject } from './
 import { practiceSummary, earliestContentMs } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
 import { createDashboard } from './dashboard.js';
-import { analyzeFleetVmg, unifyWindAxis, rankVmg } from './vmg.js';
+import { analyzeFleetVmg, unifyWindAxis, rankVmg, windFromAt } from './vmg.js';
 import { createVmgPanel } from './vmgview.js';
 import { estimateWindAxisSeries } from './windaxis.js';
 
@@ -62,6 +62,8 @@ const state = {
   vmgHighlightsAll: [],   // 同上: highlights（全期間）
   vmgColors: {},          // {boatId: color}
   vmgWindSeries: [],      // unifyWindAxis の結果キャッシュ
+  windAxisSeries: [],     // 風軸インジケータ用の統合風軸（VMGトグルと独立）
+  windAxisDirty: true,    // トラック/モード変更で立て、次のdrawで1回だけ再計算
 };
 
 const $ = (id) => document.getElementById(id);
@@ -111,6 +113,8 @@ function recomputeView() {
 
 function draw() {
   const now = playback.getNow();
+  // 風軸インジケータ用の統合風軸は変更時に1回だけ再計算（毎フレームは避ける）。
+  if (state.windAxisDirty) { recomputeWindAxis(); state.windAxisDirty = false; }
   const range = globalRange(state.tracks, state.mode);
   // 基準トラック = 最初の可視トラック。elapsed の 0起点、lat/lon無しタグの補間位置、
   // および elapsed 軸へのタグ変換の基準に使う。elapsed で開始時刻の異なる複数トラックを
@@ -131,6 +135,7 @@ function draw() {
     marks: state.marks, videos: state.videos, activeVideoId: currentVideo?.id,
     now, mode: state.mode, crop: state.crop, referenceTrack: refTrack,
     vmgHighlights: state.vmgHighlights,
+    windAxisNow: windFromAt(state.windAxisSeries, now),
   });
   timeline.render({ range, crop: state.crop, now, events: axisEvents, pending: pendingStart, videos: axisVideos, pins: axisPins });
   $('clock').textContent = range.end > range.start ? formatClock(now, state.mode) : '--:--:--';
@@ -630,7 +635,7 @@ $('play-btn').addEventListener('click', () => {
   $('play-btn').textContent = playback.isPlaying() ? '⏸' : '▶';
 });
 $('speed-select').addEventListener('change', (e) => playback.setSpeed(+e.target.value));
-$('align-mode').addEventListener('change', (e) => { state.mode = e.target.value; if (state.vmgEnabled) recomputeVmgFull(); recomputeView(); draw(); });
+$('align-mode').addEventListener('change', (e) => { state.mode = e.target.value; state.windAxisDirty = true; if (state.vmgEnabled) recomputeVmgFull(); recomputeView(); draw(); });
 $('accuracy-filter').addEventListener('change', (e) => {
   state.accuracyFilter = e.target.checked;
   statusEl.textContent = '精度フィルタ変更は次回読込から反映されます';
@@ -913,6 +918,20 @@ const dashboard = createDashboard({
 function invalidateVmgCache() {
   state.vmgLegs = []; state.vmgHighlightsAll = []; state.vmgColors = {};
   state.vmgWindSeries = []; state.vmgHighlights = [];
+  state.windAxisDirty = true; // 風軸インジケータも再計算対象に
+}
+
+// 風軸インジケータ用の統合風軸を再計算（VMGトグルと独立・変更時に1回）。
+// VMGが同サイクルで既に算出済みなら再利用して二重計算を避ける。
+function recomputeWindAxis() {
+  const visibleTracks = state.tracks.filter((t) => t.visible);
+  if (state.mode !== 'absolute' || visibleTracks.length === 0) { state.windAxisSeries = []; return; }
+  if (state.vmgWindSeries && state.vmgWindSeries.length) { state.windAxisSeries = state.vmgWindSeries; return; }
+  try {
+    state.windAxisSeries = unifyWindAxis(visibleTracks, { estimator: estimateWindAxisSeries, marks: state.marks });
+  } catch {
+    state.windAxisSeries = [];
+  }
 }
 
 // ================= VMG比較 =================

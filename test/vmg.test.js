@@ -5,7 +5,7 @@ import {
   windFromAt, vmgComponents, classifyPointOfSail, boatLegVmg,
   winnerTimeline, rankVmg, analyzeFleetVmg, unifyWindAxis,
 } from '../src/vmg.js';
-import { trackForHighlight } from '../src/renderer.js';
+import { trackForHighlight, compassScreenVector } from '../src/renderer.js';
 
 // Test helpers
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -158,4 +158,16 @@ test('trackForHighlight: boatId でトラックを引く', () => {
   const tracks = [{ id: 'A' }, { id: 'B' }];
   assert.equal(trackForHighlight(tracks, 'B').id, 'B');
   assert.equal(trackForHighlight(tracks, 'Z'), null);
+});
+
+// ===== 風軸インジケータ: コンパス方位→画面ベクトル =====
+test('compassScreenVector: 方位と地図回転から画面単位ベクトル(px右,py下)', () => {
+  const v = (b, r) => compassScreenVector(b, r);
+  // 回転なし: 北=上, 東=右, 南=下, 西=左
+  near(v(0, 0).dx, 0); near(v(0, 0).dy, -1);
+  near(v(90, 0).dx, 1); near(v(90, 0).dy, 0);
+  near(v(180, 0).dx, 0); near(v(180, 0).dy, 1);
+  near(v(270, 0).dx, -1); near(v(270, 0).dy, 0);
+  // 地図を +90°(π/2) 回転すると北は右を向く（worldToScreen と整合）
+  near(v(0, Math.PI / 2).dx, 1); near(v(0, Math.PI / 2).dy, 0);
 });
