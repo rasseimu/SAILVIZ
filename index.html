@@ -44,6 +44,10 @@
           </div>
           <p id="windaxis-empty" class="hidden">タック・ジャイブが検出されませんでした（推定できませんでした）</p>
         </section>
+        <section id="vmg-section" class="hidden">
+          <h3>VMG 比較</h3>
+          <div id="vmg-panel"></div>
+        </section>
       </div>
     </div>
     <div id="dashboard-chart-modal" class="hidden">
@@ -64,6 +68,7 @@
     </label>
     <button id="folder-import" class="btn" title="同期フォルダから、GPS範囲内の動画を自動取込">📁 動画フォルダ取込</button>
     <button id="project-save" class="btn" title="現在の状態を保存フォルダに書き出す">💾 保存</button>
+    <button id="vmg-toggle" class="btn" title="VMG勝ちレグを地図でハイライト（絶対時刻モードのみ）">VMG強調</button>
     <label>過去の練習:
       <select id="practice-select">
         <option value="">（練習を選択…）</option>

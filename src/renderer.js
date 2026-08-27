@@ -7,6 +7,11 @@ function toScreen(lat, lon, T) {
   return worldToScreen(project(lat, lon, T.proj), T);
 }
 
+// vmgHighlights の boatId から対象トラックを引く（純関数）。
+export function trackForHighlight(tracks, boatId) {
+  return tracks.find((t) => t.id === boatId) || null;
+}
+
 // crop(グローバル時間)を各トラックの絶対時刻窓に変換
 function trackWindow(track, crop, mode) {
   if (mode === 'elapsed') {
@@ -104,6 +109,21 @@ export function drawScene(ctx, state) {
     ctx.setLineDash([]);
     ctx.globalAlpha = 1;
     strokePolyline(ctx, tr.points, T, inWin); // 範囲内のみ実線
+  }
+
+  // VMG勝ちレグのハイライト（既存線の上に太い低透明グローを艇色で重ねる）
+  const vmgHighlights = state.vmgHighlights || [];
+  for (const h of vmgHighlights) {
+    const tr = trackForHighlight(tracks, h.boatId);
+    if (!tr || !tr.visible) continue;
+    ctx.strokeStyle = h.color;
+    ctx.lineWidth = 7;
+    ctx.globalAlpha = 0.35;
+    ctx.lineCap = 'round';
+    strokePolyline(ctx, tr.points, T, (p) => p.t >= h.lo && p.t <= h.hi);
+    ctx.globalAlpha = 1;
+    ctx.lineCap = 'butt';
+    ctx.lineWidth = 2; // 太い7pxを後続描画へ漏らさない
   }
 
   // コースマーク(ポリラインの上・現在地マーカーの下)
