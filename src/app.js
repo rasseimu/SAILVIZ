@@ -24,6 +24,7 @@ import { projectFileName, listProjectFiles, readProject, writeProject } from './
 import { practiceSummary, earliestContentMs } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
 import { createDashboard } from './dashboard.js';
+import { createProgress } from './progress.js';
 
 // トラック自動割当＆色変更メニューの共通パレット(識別しやすい12色)。
 const PALETTE = [
@@ -302,6 +303,16 @@ async function showDashboard() {
 }
 function backToHomeFromDashboard() {
   document.body.classList.remove('view-dashboard');
+  showHome();
+}
+async function showProgress() {
+  if (!projectDir && !(await ensureProjectDir())) return;
+  document.body.classList.remove('view-home');
+  document.body.classList.add('view-progress');
+  await progress.render();
+}
+function backToHomeFromProgress() {
+  document.body.classList.remove('view-progress');
   showHome();
 }
 function showTrack() {
@@ -606,6 +617,8 @@ $('practice-select').addEventListener('change', async (e) => {
 $('app-title').addEventListener('click', showHome); // タイトルクリックでホームへ
 $('home-dashboard-link').addEventListener('click', showDashboard);
 $('dashboard-home-link').addEventListener('click', backToHomeFromDashboard);
+$('home-progress-link').addEventListener('click', showProgress);
+$('progress-home-link').addEventListener('click', backToHomeFromProgress);
 $('home-new').addEventListener('click', startNewPractice);
 
 $('play-btn').addEventListener('click', () => {
@@ -873,24 +886,30 @@ const NOTE_LABELS = {
   slowFactor: '遅かった要因', fastFactor: '速かった要因',
 };
 
-// 全練習を deserialize して渡す(projectDir 前提)。
+// 保存フォルダの全練習ファイルを deserialize して {name, project}[] で返す(projectDir 前提)。
+// ダッシュボードと進捗画面で共有。
+async function loadProjectEntries() {
+  if (!projectDir) return [];
+  const files = await listProjectFiles(projectDir);
+  const entries = [];
+  for (const f of files) {
+    try { entries.push({ name: f.name, project: deserializeProject(await readProject(projectDir, f.name)) }); }
+    catch { /* 壊れたファイルはスキップ */ }
+  }
+  return entries;
+}
+
 // getTrack/getMarks: ダッシュボード表示時に現在読込中の最初の可視トラック/マークを渡す(風軸パネル用)。
 const dashboard = createDashboard({
   rigLabels: RIG_LABELS,
-  loadEntries: async () => {
-    if (!projectDir) return [];
-    const files = await listProjectFiles(projectDir);
-    const entries = [];
-    for (const f of files) {
-      try { entries.push({ name: f.name, project: deserializeProject(await readProject(projectDir, f.name)) }); }
-      catch { /* 壊れたファイルはスキップ */ }
-    }
-    return entries;
-  },
+  loadEntries: loadProjectEntries,
   getTrack: () => state.tracks.find((t) => t.visible) ?? null,
   getMarks: () => state.marks,
   getCrop: () => state.crop,
 });
+
+// 進捗画面: 全練習の反省を部員別に横断集計する。
+const progress = createProgress({ loadEntries: loadProjectEntries });
 
 // 反省エディタの艇セッティング(数値12項目)と反省内容(テキスト5項目)を動的生成。
 (function buildReflFields() {
