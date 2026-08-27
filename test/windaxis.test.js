@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   normalizeDeg, circDiffDeg, circMeanDeg, circMedianDeg, bisectorDeg, bearingDeg, computeCog,
   segmentLegs, classifyManeuver, estimateWindFromManeuver, learnPolarAngles,
-  assignLegKinds, fillLegEstimates, rejectMarkRoundings,
+  assignLegKinds, fillLegEstimates, rejectMarkRoundings, smoothWindSeries,
 } from '../src/windaxis.js';
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -221,4 +221,17 @@ test('rejectMarkRoundings: マーク近傍のマニューバを除外', () => {
 test('rejectMarkRoundings: marks空なら素通し', () => {
   const mans = [{ tMs: 1, lat: 35.3, lon: 139.48 }];
   assert.equal(rejectMarkRoundings(mans, [], {}).length, 1);
+});
+
+test('smoothWindSeries: 飛び値を除去し局所中央値に平滑化', () => {
+  const series = [
+    { tMs: 0, windFromDeg: 10, confidence: 1, source: 'anchor', type: 'tack' },
+    { tMs: 1000, windFromDeg: 12, confidence: 1, source: 'anchor', type: 'tack' },
+    { tMs: 2000, windFromDeg: 200, confidence: 1, source: 'anchor', type: 'tack' }, // 飛び値
+    { tMs: 3000, windFromDeg: 11, confidence: 1, source: 'anchor', type: 'tack' },
+    { tMs: 4000, windFromDeg: 13, confidence: 1, source: 'anchor', type: 'tack' },
+  ];
+  const out = smoothWindSeries(series, { windowMs: 10000, madK: 3, minMadDeg: 20 });
+  assert.ok(out.every((p) => Math.abs(circDiffDeg(p.windFromDeg, 11)) < 10));
+  assert.ok(out.length < series.length); // 飛び値が落ちる
 });

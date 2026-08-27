@@ -260,3 +260,32 @@ export function rejectMarkRoundings(maneuvers, marks, opts = {}) {
   if (!marks || marks.length === 0) return maneuvers;
   return maneuvers.filter((m) => marks.every((mk) => haversineMeters(m, mk) > radiusM));
 }
+
+// 円周量の移動中央値＋MADで外れ値を除去し平滑化
+export function smoothWindSeries(series, opts = {}) {
+  const windowMs = opts.windowMs ?? 120000;
+  const madK = opts.madK ?? 3;
+  const minMadDeg = opts.minMadDeg ?? 25;
+  const half = windowMs / 2;
+  const sorted = [...series].sort((a, b) => a.tMs - b.tMs);
+  if (sorted.length === 0) return [];
+
+  const localMedian = (tMs) => {
+    const near = sorted.filter((p) => Math.abs(p.tMs - tMs) <= half).map((p) => p.windFromDeg);
+    return circMedianDeg(near.length ? near : sorted.map((p) => p.windFromDeg));
+  };
+
+  // 1) 偏差とMAD
+  const devs = sorted.map((p) => Math.abs(circDiffDeg(p.windFromDeg, localMedian(p.tMs))));
+  const madSorted = [...devs].sort((a, b) => a - b);
+  const mad = madSorted[Math.floor(madSorted.length / 2)] || 0;
+  const thr = Math.max(madK * mad, minMadDeg);
+
+  // 2) 外れ値除去＋局所中央値へ置換
+  const out = [];
+  for (let i = 0; i < sorted.length; i++) {
+    if (devs[i] > thr) continue;
+    out.push({ ...sorted[i], windFromDeg: localMedian(sorted[i].tMs) });
+  }
+  return out;
+}
