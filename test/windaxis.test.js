@@ -4,6 +4,7 @@ import {
   normalizeDeg, circDiffDeg, circMeanDeg, circMedianDeg, bisectorDeg, bearingDeg, computeCog,
   segmentLegs, classifyManeuver, estimateWindFromManeuver, learnPolarAngles,
   assignLegKinds, fillLegEstimates, rejectMarkRoundings, smoothWindSeries,
+  estimateWindAxisSeries,
 } from '../src/windaxis.js';
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -234,4 +235,33 @@ test('smoothWindSeries: 飛び値を除去し局所中央値に平滑化', () =>
   const out = smoothWindSeries(series, { windowMs: 10000, madK: 3, minMadDeg: 20 });
   assert.ok(out.every((p) => Math.abs(circDiffDeg(p.windFromDeg, 11)) < 10));
   assert.ok(out.length < series.length); // 飛び値が落ちる
+});
+
+// beatTwoLegs の Sample を、computeCog が扱う生 points へ変換（cog は捨て speed/bearing を付与）
+function samplesToPoints(samples) {
+  return samples.map((s) => ({ t: s.t, lat: s.lat, lon: s.lon, speed: s.speed, bearing: -1, accuracy: 5 }));
+}
+
+test('estimateWindAxisSeries: ビートから風向≈0°(北)を復元', () => {
+  // 45°→315°→45° の3レグ(2タック)で校正が効くようにする
+  const t0 = 1_787_000_000_000;
+  const l1 = straightSamples(t0, 45, 40);
+  const a = l1.at(-1);
+  const l2 = straightSamples(a.t + 500, 315, 40, 3, 500, { lat: a.lat, lon: a.lon });
+  const b = l2.at(-1);
+  const l3 = straightSamples(b.t + 500, 45, 40, 3, 500, { lat: b.lat, lon: b.lon });
+  const points = samplesToPoints([...l1, ...l2, ...l3]);
+
+  const series = estimateWindAxisSeries({ points }, { marks: [], opts: { minLegSec: 5, settleSec: 4, windowMs: 1000, minSpeedMps: 1 } });
+  assert.ok(series.length > 0);
+  // アンカー(tack)の風向が北付近
+  const anchor = series.find((p) => p.source === 'anchor');
+  assert.ok(anchor);
+  assert.ok(Math.abs(circDiffDeg(anchor.windFromDeg, 0)) < 5, `windFrom=${anchor.windFromDeg}`);
+});
+
+test('estimateWindAxisSeries: アンカー無しなら空配列', () => {
+  const points = samplesToPoints(straightSamples(1_787_000_000_000, 45, 40)); // 1レグのみ=マニューバ無し
+  const series = estimateWindAxisSeries({ points }, { opts: { minLegSec: 5, windowMs: 1000, minSpeedMps: 1 } });
+  assert.deepEqual(series, []);
 });

@@ -261,6 +261,22 @@ export function rejectMarkRoundings(maneuvers, marks, opts = {}) {
   return maneuvers.filter((m) => marks.every((mk) => haversineMeters(m, mk) > radiusM));
 }
 
+// 統合エントリ: COG→分割→判別→除去→アンカー→種別→学習→レグ充填→平滑化
+export function estimateWindAxisSeries(track, options = {}) {
+  const opts = options.opts ?? {};
+  const marks = options.marks ?? [];
+  const samples = computeCog(track.points, opts);
+  const { legs, maneuvers } = segmentLegs(samples, opts);
+  for (const m of maneuvers) Object.assign(m, classifyManeuver(m, opts));
+  const kept = rejectMarkRoundings(maneuvers, marks, opts);
+  const anchors = kept.map(estimateWindFromManeuver);
+  if (anchors.length === 0) return [];
+  assignLegKinds(legs, kept);
+  const polar = learnPolarAngles(anchors);
+  const legEstimates = fillLegEstimates(legs, anchors, polar, opts);
+  return smoothWindSeries([...anchors, ...legEstimates], opts);
+}
+
 // 円周量の移動中央値＋MADで外れ値を除去し平滑化
 export function smoothWindSeries(series, opts = {}) {
   const windowMs = opts.windowMs ?? 120000;
