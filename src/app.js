@@ -21,7 +21,7 @@ import {
 } from './reflections.js';
 import { serializeProject, deserializeProject } from './project.js';
 import { projectFileName, listProjectFiles, readProject, writeProject } from './projectfs.js';
-import { practiceSummary } from './summary.js';
+import { practiceSummary, earliestContentMs } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
 import { createDashboard } from './dashboard.js';
 
@@ -226,8 +226,11 @@ async function refreshPracticeList() {
 async function saveProject() {
   const dir = await ensureProjectDir();
   if (!dir) return;
-  const name = projectFileName(new Date());
   const obj = serializeProject(state, { savedAt: new Date().toISOString() });
+  // ファイル名は練習の実データ時刻(トラックGPS開始/動画配置の最小)で命名。
+  // 実データが無い練習は従来どおり保存時刻へフォールバック。
+  const dataMs = earliestContentMs(obj);
+  const name = projectFileName(new Date(dataMs ?? Date.now()));
   try {
     await writeProject(dir, name, obj);
   } catch (e) {

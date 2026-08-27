@@ -2,12 +2,17 @@
 // FileSystemDirectoryHandle 互換を引数で受け取り、テストではフェイクを注入する。
 const PROJECT_RE = /\.sailviz\.json$/i;
 
-const pad = (n) => String(n).padStart(2, '0');
-
-// Date → "sailviz-YYYYMMDD-HHMM.sailviz.json"
+// Date → "sailviz-YYYYMMDD-HHMM.sailviz.json"。
+// 練習の実データ時刻(UTC epoch)を JST で整形するため、Intl で Asia/Tokyo 固定。
+// マシンのタイムゾーンに依らず、表示ラベル(summary/dashboard)と同じ日時になる。
 export function projectFileName(date) {
-  const stamp = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
-    + `-${pad(date.getHours())}${pad(date.getMinutes())}`;
+  const parts = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(date);
+  const g = (type) => parts.find((p) => p.type === type).value;
+  const stamp = `${g('year')}${g('month')}${g('day')}-${g('hour')}${g('minute')}`;
   return `sailviz-${stamp}.sailviz.json`;
 }
 

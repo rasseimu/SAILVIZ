@@ -13,7 +13,7 @@ function windText(w) {
 
 // 練習の「最古の実データ時刻」(絶対ms)。トラックのGPS開始と動画の配置時刻の両方を見る。
 // 保存日ではなく“いつ練習したか”を表すため。トラックが無く動画だけでも動画時刻を使う。無ければ null。
-function earliestContentMs(project) {
+export function earliestContentMs(project) {
   let min = null;
   const consider = (v) => {
     if (typeof v === 'number' && Number.isFinite(v) && (min == null || v < min)) min = v;
