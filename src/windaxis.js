@@ -203,3 +203,53 @@ export function segmentLegs(samples, opts = {}) {
   }
   return { legs, maneuvers };
 }
+
+// 各レグを囲むマニューバ型からレグ種別を決める
+export function assignLegKinds(legs, maneuvers) {
+  for (let k = 0; k < legs.length; k++) {
+    const prev = maneuvers.find((m) => m.legAfterIdx === k);
+    const next = maneuvers.find((m) => m.legBeforeIdx === k);
+    const types = [prev?.type, next?.type].filter(Boolean);
+    if (types.length && types.every((t) => t === 'tack')) legs[k].kind = 'beat';
+    else if (types.length && types.every((t) => t === 'gybe')) legs[k].kind = 'run';
+    else legs[k].kind = 'reach';
+  }
+  return legs;
+}
+
+// 最寄りアンカー（時間差最小）
+function nearestAnchor(anchors, tMs) {
+  let best = null, bestDt = Infinity;
+  for (const a of anchors) {
+    const dt = Math.abs(a.tMs - tMs);
+    if (dt < bestDt) { bestDt = dt; best = a; }
+  }
+  return best;
+}
+
+// beat/run のレグ内をcogから連続推定（アンカー基準で符号sを決定）
+export function fillLegEstimates(legs, anchors, polar, opts = {}) {
+  const stepMs = opts.stepMs ?? 5000;
+  const out = [];
+  for (const leg of legs) {
+    if (leg.kind !== 'beat' && leg.kind !== 'run') continue;
+    if (leg.kind === 'beat' && polar.betaCloseHauled == null) continue;
+    if (leg.kind === 'run' && polar.betaRun == null) continue;
+    const ref = nearestAnchor(anchors, (leg.startT + leg.endT) / 2);
+    if (!ref) continue;
+    const s = Math.sign(circDiffDeg(leg.headingDeg, ref.windFromDeg)) || 1;
+    for (let t = leg.startT; t <= leg.endT; t += stepMs) {
+      // レグ内の最寄りサンプルのcog
+      let cog = leg.headingDeg, bestDt = Infinity;
+      for (const smp of leg.samples) {
+        const dt = Math.abs(smp.t - t);
+        if (dt < bestDt) { bestDt = dt; cog = smp.cog; }
+      }
+      const windFromDeg = leg.kind === 'beat'
+        ? normalizeDeg(cog - s * polar.betaCloseHauled)
+        : normalizeDeg(cog - (180 - s * polar.betaRun));
+      out.push({ tMs: t, windFromDeg, type: null, confidence: 0.4, source: 'leg' });
+    }
+  }
+  return out;
+}

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   normalizeDeg, circDiffDeg, circMeanDeg, circMedianDeg, bisectorDeg, bearingDeg, computeCog,
   segmentLegs, classifyManeuver, estimateWindFromManeuver, learnPolarAngles,
+  assignLegKinds, fillLegEstimates,
 } from '../src/windaxis.js';
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -181,4 +182,27 @@ test('learnPolarAngles: クローズ角とランニング角を学習', () => {
   const { betaCloseHauled, betaRun } = learnPolarAngles(anchors);
   assert.ok(Math.abs(betaCloseHauled - 45) < 1);
   assert.ok(Math.abs(betaRun - 45) < 1);
+});
+
+test('assignLegKinds: 両側タックのレグはbeat', () => {
+  const legs = [{ kind: 'unknown' }, { kind: 'unknown' }, { kind: 'unknown' }];
+  const mans = [
+    { legBeforeIdx: 0, legAfterIdx: 1, type: 'tack' },
+    { legBeforeIdx: 1, legAfterIdx: 2, type: 'tack' },
+  ];
+  const out = assignLegKinds(legs, mans);
+  assert.equal(out[1].kind, 'beat');
+});
+
+test('fillLegEstimates: ビートのレグ内でcogからwindFromを逆算', () => {
+  const legs = [{
+    kind: 'beat', headingDeg: 45, startT: 0, endT: 20000,
+    samples: [{ t: 0, cog: 45, lat: 35.3, lon: 139.48, speed: 3 },
+              { t: 10000, cog: 48, lat: 35.3, lon: 139.48, speed: 3 }],
+  }];
+  const anchors = [{ tMs: 0, windFromDeg: 0, type: 'tack' }];
+  const est = fillLegEstimates(legs, anchors, { betaCloseHauled: 45, betaRun: 45 }, { stepMs: 10000 });
+  assert.ok(est.length >= 1);
+  assert.equal(est[0].source, 'leg');
+  assert.ok(Math.abs(circDiffDeg(est[0].windFromDeg, 0)) < 1);  // cog45 - 45 = 0
 });
