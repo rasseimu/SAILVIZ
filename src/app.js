@@ -630,7 +630,7 @@ $('play-btn').addEventListener('click', () => {
   $('play-btn').textContent = playback.isPlaying() ? '⏸' : '▶';
 });
 $('speed-select').addEventListener('change', (e) => playback.setSpeed(+e.target.value));
-$('align-mode').addEventListener('change', (e) => { state.mode = e.target.value; recomputeView(); draw(); });
+$('align-mode').addEventListener('change', (e) => { state.mode = e.target.value; if (state.vmgEnabled) recomputeVmgFull(); recomputeView(); draw(); });
 $('accuracy-filter').addEventListener('change', (e) => {
   state.accuracyFilter = e.target.checked;
   statusEl.textContent = '精度フィルタ変更は次回読込から反映されます';
@@ -920,6 +920,8 @@ function invalidateVmgCache() {
 const vmgPanelEl = $('vmg-panel');
 const vmgPanel = vmgPanelEl ? createVmgPanel({ mount: vmgPanelEl }) : null;
 
+const setVmgSectionVisible = (show) => { const el = document.getElementById('vmg-section'); if (el) el.classList.toggle('hidden', !show); };
+
 // 高コスト解析（crop非依存）。トグルON時・トラック変更時に1回だけ実行。
 function recomputeVmgFull() {
   if (!state.vmgEnabled) return;
@@ -934,7 +936,7 @@ function recomputeVmgFull() {
       notice.textContent = '絶対時刻モードでのみVMG比較できます';
       vmgPanelEl.prepend(notice);
     }
-    return;
+    setVmgSectionVisible(false); return;
   }
   // elapsed モード通知を消す
   if (vmgPanelEl) vmgPanelEl.querySelector('.vmg-mode-notice')?.remove();
@@ -944,7 +946,7 @@ function recomputeVmgFull() {
     state.vmgHighlights = [];
     state.vmgLegs = []; state.vmgHighlightsAll = []; state.vmgColors = {}; state.vmgWindSeries = [];
     if (vmgPanel) vmgPanel.render([], [], { colors: {} });
-    return;
+    setVmgSectionVisible(false); return;
   }
   let windSeries;
   try {
@@ -957,7 +959,7 @@ function recomputeVmgFull() {
     state.vmgHighlights = [];
     state.vmgLegs = []; state.vmgHighlightsAll = []; state.vmgColors = {};
     if (vmgPanel) vmgPanel.render([], [], { colors: {} });
-    return;
+    setVmgSectionVisible(false); return;
   }
   const colors = Object.fromEntries(visibleTracks.map((t) => [t.id, t.color]));
   const { perBoatLegVmg, highlights, ranks } = analyzeFleetVmg(visibleTracks, windSeries, {});
@@ -966,6 +968,7 @@ function recomputeVmgFull() {
   state.vmgColors = colors;
   state.vmgHighlights = highlights;
   if (vmgPanel) vmgPanel.render(perBoatLegVmg, ranks, { colors });
+  setVmgSectionVisible(true);
 }
 
 // 安価なクロップ再ウィンドウ（drag中に呼ばれる）。高コスト再解析はしない。
@@ -987,6 +990,7 @@ if (vmgToggleBtn) {
       state.vmgHighlights = [];
       if (vmgPanelEl) vmgPanelEl.querySelector('.vmg-mode-notice')?.remove();
       if (vmgPanel) vmgPanel.render([], [], { colors: {} });
+      setVmgSectionVisible(false);
     } else {
       recomputeVmgFull();
     }
