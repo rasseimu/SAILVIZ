@@ -80,15 +80,18 @@ export function boatLegVmg(track, windSeries, opts = {}) {
     if (pos === 'reach') continue;
 
     const steady = steadyWindow(leg.samples, settleSec, settleM);
-    let sumVmg = 0, sumSpeed = 0, sumTwa = 0;
+    let sumVmg = 0, sumSpeed = 0, sumTwa = 0, n = 0;
     for (const s of steady) {
       const w = windFromAt(windSeries, s.t);
+      if (w == null) continue;
       const c = vmgComponents(s.cog, s.speed, w);
       sumVmg += pos === 'upwind' ? c.upwind : c.downwind;
       sumSpeed += s.speed;
       sumTwa += Math.abs(c.delta);
+      n++;
     }
-    const nSamples = steady.length;
+    if (n === 0) continue;
+    const nSamples = n;
     const durSec = (leg.endT - leg.startT) / 1000;
     const confidence = clamp01(
       0.5 * Math.min(1, durSec / (minLegSec * 2)) +
