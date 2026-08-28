@@ -26,9 +26,18 @@ export function createProgress({ loadEntries }) {
   let selected = 'all';   // 'all' | fullName
   let chart = null;
 
+  // 全エントリの反省を平坦化。id で重複排除(先勝ち)＝保存済みファイルと
+  // 現在の未保存 state を両方渡しても二重計上しない。
   function allReflections(entries) {
     const out = [];
-    for (const e of entries) for (const r of (e.project?.reflections || [])) out.push(r);
+    const seen = new Set();
+    for (const e of entries) {
+      for (const r of (e.project?.reflections || [])) {
+        if (r.id != null && seen.has(r.id)) continue;
+        if (r.id != null) seen.add(r.id);
+        out.push(r);
+      }
+    }
     return out;
   }
 

@@ -909,8 +909,17 @@ const dashboard = createDashboard({
   getCrop: () => state.crop,
 });
 
-// 進捗画面: 全練習の反省を部員別に横断集計する。
-const progress = createProgress({ loadEntries: loadProjectEntries });
+// 進捗画面: 保存済み全練習に加え、現在の未保存練習(取込直後の反省を含む)も渡す。
+// 反省 id で重複排除するため、保存済みと現在練習が同一でも二重計上しない(progress.js 側)。
+const progress = createProgress({
+  loadEntries: async () => {
+    const entries = await loadProjectEntries();
+    if (state.reflections.length) {
+      entries.push({ name: '(現在の練習・未保存)', project: { reflections: state.reflections } });
+    }
+    return entries;
+  },
+});
 
 // 反省エディタの艇セッティング(数値12項目)と反省内容(テキスト5項目)を動的生成。
 (function buildReflFields() {
