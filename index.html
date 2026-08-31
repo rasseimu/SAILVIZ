@@ -59,6 +59,10 @@
     <header id="progress-bar">
       <a id="progress-home-link" class="home-link" title="ホームへ戻る">← ホーム</a>
       <strong id="progress-title">練習進捗管理</strong>
+      <label id="progress-hide-comments-label"><input type="checkbox" id="progress-hide-comments" />コメント非表示</label>
+      <input type="password" id="progress-api-key" placeholder="Gemini APIキー" autocomplete="off" />
+      <button type="button" id="progress-ai-generate">🤖 AIコメント生成</button>
+      <span id="progress-ai-status" class="progress-ai-status"></span>
     </header>
     <nav id="progress-nav"></nav>
     <div id="progress-content"></div>
@@ -186,6 +190,7 @@
 
   <div id="windaxis-menu" class="hidden">
     <button data-act="reestimate" title="選択範囲だけ、表示中の全艇の風軸を推定し直して上書き">🧭 風軸を再推定</button>
+    <button data-act="manual" title="選択範囲の風向を手動の角度(0–360°)で固定">✏️ 風軸を手動設定</button>
     <button data-act="pin" title="タイムラインにピンを刺す／消す">📌 ピンを刺す/消す</button>
   </div>
 

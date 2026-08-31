@@ -320,7 +320,7 @@ body.view-progress #transport { display: none; }
 .pq-goals .goal-cards { flex: 1; display: flex; gap: 10px; overflow-x: auto; overflow-y: hidden;
   align-items: stretch; padding-bottom: 4px; }
 .goal-card { flex: 0 0 200px; display: flex; flex-direction: column; gap: 6px;
-  border: 1px solid #e5e5e5; border-radius: 8px; padding: 8px 10px; background: #fafbff; }
+  border: 1px solid #e5e5e5; border-radius: 8px; padding: 8px 10px; background: #fafbff; overflow-y: auto; }
 .goal-card .gc-head { display: flex; align-items: center; justify-content: space-between; }
 .goal-card .gr-date { color: #888; font-size: 12px; }
 .goal-card .gc-body { flex: 1; font-size: 14px; }
@@ -349,6 +349,40 @@ body.view-progress #transport { display: none; }
 .edit-save, .edit-cancel { margin-left: 4px; font-size: 12px; padding: 2px 8px; cursor: pointer;
   border: 1px solid #ccc; border-radius: 4px; background: #fff; }
 .edit-save { background: #1558d6; color: #fff; border-color: #1558d6; }
+/* コメント非表示チェックボックス・AIコントロール(ヘッダー右上) */
+#progress-hide-comments-label { margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 13px; color: #555; cursor: pointer; }
+#progress-api-key { font-size: 12px; padding: 3px 6px; border: 1px solid #ccc; border-radius: 4px; width: 160px; }
+#progress-api-workspace { font-size: 12px; padding: 3px 6px; border: 1px solid #ccc; border-radius: 4px; width: 150px; }
+#progress-ai-generate { font-size: 13px; padding: 4px 10px; cursor: pointer; border: 1px solid #1558d6;
+  border-radius: 6px; background: #1558d6; color: #fff; }
+#progress-ai-generate:disabled { opacity: 0.6; cursor: default; }
+.progress-ai-status { font-size: 12px; color: #666; }
+/* コメント */
+.goal-card .gc-head-right { display: inline-flex; align-items: center; gap: 4px; }
+.comment-btn { border: none; background: transparent; cursor: pointer; opacity: 0.55; padding: 0 4px; font-size: 13px; }
+.comment-btn:hover { opacity: 1; }
+.comment-block { display: flex; flex-direction: column; gap: 4px; margin-top: 6px;
+  padding-top: 6px; border-top: 1px dashed #e0e0e0; }
+.comment-row { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.comment-when { color: #999; font-size: 11px; display: flex; align-items: center; gap: 4px; }
+.comment-text { white-space: pre-wrap; word-break: break-word; }
+.comment-del { border: none; background: transparent; cursor: pointer; color: #c00; opacity: 0.5;
+  padding: 0 4px; font-size: 14px; line-height: 1; margin-left: auto; }
+.comment-del:hover { opacity: 1; }
+.comment-input-row { display: flex; align-items: flex-start; gap: 4px; }
+.comment-input { flex: 1; font: inherit; font-size: 13px; padding: 2px 6px; border: 1px solid #1558d6;
+  border-radius: 4px; box-sizing: border-box; resize: vertical; overflow: hidden;
+  line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
+.comment-save, .comment-cancel { font-size: 12px; padding: 2px 8px; cursor: pointer;
+  border: 1px solid #ccc; border-radius: 4px; background: #fff; flex: 0 0 auto; }
+.comment-save { background: #1558d6; color: #fff; border-color: #1558d6; }
+.comment-ai-badge { flex: 0 0 auto; font-size: 12px; line-height: 1.4; }
+.comment-ai .comment-text { color: #1558d6; }
+.comment-ref-link { font-size: 12px; color: #1558d6; text-decoration: underline; margin-left: 4px; }
+.comment-ref-src { font-size: 12px; color: #888; margin-left: 4px; }
+.comment-refs { font-size: 12px; color: #888; }
+.comment-refs .comment-ref-link { margin-left: 0; }
 @media (max-width: 720px) {
   #progress-content { grid-template-columns: 1fr; grid-template-rows: none; overflow: auto; }
   .progress-section { min-height: 220px; }
