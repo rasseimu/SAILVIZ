@@ -7,6 +7,11 @@ function toScreen(lat, lon, T) {
   return worldToScreen(project(lat, lon, T.proj), T);
 }
 
+// vmgHighlights の boatId から対象トラックを引く（純関数）。
+export function trackForHighlight(tracks, boatId) {
+  return tracks.find((t) => t.id === boatId) || null;
+}
+
 // crop(グローバル時間)を各トラックの絶対時刻窓に変換
 function trackWindow(track, crop, mode) {
   if (mode === 'elapsed') {
