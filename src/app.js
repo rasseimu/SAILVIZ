@@ -13,7 +13,7 @@ import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
 import { createWindStrip } from './windstripview.js';
 import { windDirAt } from './windaxis.js';
-import { applyWindAxisOverrides, pushOverrideRange } from './windaxisoverride.js';
+import { applyWindAxisOverrides, pushOverride } from './windaxisoverride.js';
 import { minuteWinners } from './vmgminute.js';
 import { nextRotation, rotatedFitBox } from './videoview.js';
 import { memberList, filterMembers } from './members.js';
@@ -917,24 +917,48 @@ function openTimelineMenu({ clientX, clientY, t, pinIdx }) {
   windaxisMenu.style.top = `${clientY}px`;
   windaxisMenu.classList.remove('hidden');
 }
-// 選択範囲(crop)だけを、表示中の全艇の風軸に「再推定して上書き」する。
-// crop は軸時刻なので currentBase() で絶対epochへ変換してから override 範囲にする。
-function reestimateWindAxisForCrop() {
+// 現在の選択範囲(crop)を絶対epochへ変換して返す。未選択なら null(ステータス表示)。
+function cropAbsRange() {
   const base = currentBase();
   const range = { start: state.crop.start + base, end: state.crop.end + base };
-  if (!(range.end > range.start)) { statusEl.textContent = '先に下バーで区間を選択してください'; return; }
+  if (!(range.end > range.start)) { statusEl.textContent = '先に下バーで区間を選択してください'; return null; }
+  return range;
+}
+
+// 選択範囲(crop)を、表示中の全艇の windAxisOverrides に entry(再推定 or 手動固定角)で適用。
+function applyOverrideToVisible(entry, doneMsg) {
   const visible = state.tracks.filter((t) => t.visible);
   if (visible.length === 0) { statusEl.textContent = '表示中の艇がありません'; return; }
-  for (const tr of visible) tr.windAxisOverrides = pushOverrideRange(tr.windAxisOverrides, range);
+  for (const tr of visible) tr.windAxisOverrides = pushOverride(tr.windAxisOverrides, entry);
   recomputeWindAxis(); // 上書き後データで風軸ストリップ・風軸↑・VMGを再計算
   draw();
-  statusEl.textContent = `選択区間の風軸を再推定しました（${visible.length}艇）`;
+  statusEl.textContent = `${doneMsg}（${visible.length}艇）`;
 }
+
+function reestimateWindAxisForCrop() {
+  const range = cropAbsRange();
+  if (!range) return;
+  applyOverrideToVisible(range, '選択区間の風軸を再推定しました');
+}
+
+// 選択区間の風軸を手動角度(0–360°)で固定する。
+function setManualWindAxisForCrop() {
+  const range = cropAbsRange();
+  if (!range) return;
+  const input = window.prompt('この区間の風向を度で入力 (0–360)');
+  if (input == null) return; // キャンセル
+  const deg = Number(input.trim());
+  if (!Number.isFinite(deg)) { statusEl.textContent = '数値を入力してください'; return; }
+  applyOverrideToVisible({ ...range, manualDeg: deg }, `選択区間の風軸を ${Math.round(((deg % 360) + 360) % 360)}° に設定しました`);
+}
+
 windaxisMenu.querySelectorAll('button').forEach((b) =>
   b.addEventListener('click', () => {
     const act = b.dataset.act;
     if (act === 'reestimate') {
       reestimateWindAxisForCrop();
+    } else if (act === 'manual') {
+      setManualWindAxisForCrop();
     } else if (act === 'pin' && tlMenu) {
       if (tlMenu.pinIdx >= 0) state.pins.splice(tlMenu.pinIdx, 1);
       else state.pins.push(tlMenu.t + currentBase());
