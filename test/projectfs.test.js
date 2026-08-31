@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   projectFileName, projectLabel, listProjectFiles, readProject, writeProject,
+  PROGRESS_FILE, readProgress, writeProgress,
 } from '../src/projectfs.js';
 
 // 列挙用フェイクディレクトリ(values() のみ)
@@ -61,4 +62,21 @@ test('writeProject→readProject のラウンドトリップ', async () => {
   await writeProject(dir, 'p.sailviz.json', { version: 1, mode: 'absolute' });
   const got = await readProject(dir, 'p.sailviz.json');
   assert.deepEqual(got, { version: 1, mode: 'absolute' });
+});
+
+test('readProgress はファイルが無ければ {} を返す', async () => {
+  assert.deepEqual(await readProgress(fakeRWDir()), {});
+});
+
+test('writeProgress→readProgress のラウンドトリップ', async () => {
+  const dir = fakeRWDir();
+  await writeProgress(dir, { r1: { issueStage: 2, goalDone: true, text: { goal: '新目標' } } });
+  assert.equal(dir.files.has(PROGRESS_FILE), true);
+  assert.deepEqual(await readProgress(dir), { r1: { issueStage: 2, goalDone: true, text: { goal: '新目標' } } });
+});
+
+test('readProgress は壊れたJSONでも {} を返す', async () => {
+  const dir = fakeRWDir();
+  dir.files.set(PROGRESS_FILE, 'not json');
+  assert.deepEqual(await readProgress(dir), {});
 });

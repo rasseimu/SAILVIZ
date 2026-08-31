@@ -20,12 +20,24 @@ function fmtDate(ms) {
   }).format(new Date(ms));
 }
 
-export function createProgress({ loadEntries }) {
+// loadProgressData/saveProgressData を注入すると保存フォルダのファイルへ永続化できる。
+// 未指定時は従来どおり localStorage のみ(単体でも動く)。
+export function createProgress({
+  loadEntries,
+  loadProgressData = async () => loadProgress(),
+  saveProgressData = async (obj) => saveProgress(obj),
+} = {}) {
   let reflections = [];   // 全練習の反省を平坦化
   let progress = {};      // sailviz.progress
   let selected = 'all';   // 'all' | fullName
   let chart = null;
   let editing = null;     // 編集中の `${reflId}:${field}`(null=非編集)
+
+  // 進捗の保存はUIを止めないよう非同期・投げっぱなし(失敗はログのみ。
+  // saveProgressData 側で localStorage ミラーも行うため最低限は残る)。
+  function persist() {
+    Promise.resolve(saveProgressData(progress)).catch((e) => console.error('進捗の保存に失敗', e));
+  }
 
   // 全エントリの反省を平坦化。id で重複排除(先勝ち)＝保存済みファイルと
   // 現在の未保存 state を両方渡しても二重計上しない。
@@ -114,13 +126,13 @@ export function createProgress({ loadEntries }) {
     content.querySelectorAll('button[data-issue]').forEach((btn) =>
       btn.addEventListener('click', () => {
         progress = setIssueStage(progress, btn.dataset.issue, Number(btn.dataset.stage));
-        saveProgress(progress);
+        persist();
         renderBody();
       }));
     content.querySelectorAll('input[data-goal]').forEach((cb) =>
       cb.addEventListener('change', () => {
         progress = setGoalDone(progress, cb.dataset.goal, cb.checked);
-        saveProgress(progress);
+        persist();
         renderBody();
       }));
 
@@ -134,7 +146,7 @@ export function createProgress({ loadEntries }) {
       }));
     const commit = (input) => {
       progress = setTextOverride(progress, input.dataset.refl, input.dataset.field, input.value);
-      saveProgress(progress);
+      persist();
       editing = null;
       renderBody();
     };
@@ -172,7 +184,7 @@ export function createProgress({ loadEntries }) {
   async function render() {
     const entries = await loadEntries();
     reflections = allReflections(entries);
-    progress = loadProgress();
+    progress = await loadProgressData();
     renderNav();
     renderBody();
   }

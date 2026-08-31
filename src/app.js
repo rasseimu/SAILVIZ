@@ -21,11 +21,14 @@ import {
   previousRig, RIG_FIELDS, NOTE_FIELDS,
 } from './reflections.js';
 import { serializeProject, deserializeProject } from './project.js';
-import { projectFileName, listProjectFiles, readProject, writeProject } from './projectfs.js';
+import {
+  projectFileName, listProjectFiles, readProject, writeProject, readProgress, writeProgress,
+} from './projectfs.js';
 import { practiceSummary, earliestContentMs } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
 import { createDashboard } from './dashboard.js';
 import { createProgress } from './progress.js';
+import { loadProgress, saveProgress } from './progressstore.js';
 
 // トラック自動割当＆色変更メニューの共通パレット(識別しやすい12色)。
 const PALETTE = [
@@ -918,6 +921,22 @@ const progress = createProgress({
       entries.push({ name: '(現在の練習・未保存)', project: { reflections: state.reflections } });
     }
     return entries;
+  },
+  // 進捗オーバーレイは保存フォルダの sailviz-progress.json に永続化(フォルダごとDrive同期で引継可)。
+  // フォルダ未選択時は localStorage のみ。旧 localStorage データはファイルが空なら初回だけ移行。
+  loadProgressData: async () => {
+    const local = loadProgress();
+    if (!projectDir) return local;
+    const file = await readProgress(projectDir);
+    if (!Object.keys(file).length && Object.keys(local).length) {
+      await writeProgress(projectDir, local); // 初回移行
+      return local;
+    }
+    return file;
+  },
+  saveProgressData: async (obj) => {
+    saveProgress(obj); // localStorage ミラー(フォルダ未選択/書込失敗の保険)
+    if (projectDir) await writeProgress(projectDir, obj);
   },
 });
 
