@@ -46,3 +46,26 @@ export async function writeProject(dirHandle, name, obj) {
   await writable.write(JSON.stringify(obj));
   await writable.close();
 }
+
+// 進捗オーバーレイ(課題ステージ・目標達成・テキスト上書き)を保存フォルダ直下に置く。
+// 練習ファイル(*.sailviz.json)の命名にはマッチしないので listProjectFiles には出ない。
+export const PROGRESS_FILE = 'sailviz-progress.json';
+
+// 進捗ファイルを寛容に読む。無い/壊れている場合は {} を返す。
+export async function readProgress(dirHandle) {
+  try {
+    const fh = await dirHandle.getFileHandle(PROGRESS_FILE);
+    const file = await fh.getFile();
+    const obj = JSON.parse(await file.text());
+    return obj && typeof obj === 'object' ? obj : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function writeProgress(dirHandle, obj) {
+  const fh = await dirHandle.getFileHandle(PROGRESS_FILE, { create: true });
+  const writable = await fh.createWritable();
+  await writable.write(JSON.stringify(obj));
+  await writable.close();
+}

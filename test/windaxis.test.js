@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import {
   normalizeDeg, circDiffDeg, circMeanDeg, circMedianDeg, bisectorDeg, bearingDeg, computeCog,
   segmentLegs, classifyManeuver, estimateWindFromManeuver, learnPolarAngles,
-  assignLegKinds, fillLegEstimates, rejectMarkRoundings, smoothWindSeries,
-  estimateWindAxisSeries,
+  assignLegKinds, fillLegEstimates, rejectMarkRoundings, rejectMinorTurns,
+  foldAnchorsToHemisphere, rejectAnchorOutliers, smoothWindSeries,
+  estimateWindAxisSeries, windDirAt,
 } from '../src/windaxis.js';
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -219,6 +220,47 @@ test('rejectMarkRoundings: マーク近傍のマニューバを除外', () => {
   assert.equal(out[0].tMs, 2);
 });
 
+test('rejectMinorTurns: 微小な向き変化(実タック/ジャイブでない)を除外', () => {
+  const mans = [
+    { tMs: 0, turnDeg: 8 },    // 微小=進路微調整のノイズ
+    { tMs: 1, turnDeg: 90 },   // 本物のタック
+    { tMs: 2, turnDeg: 44 },   // 閾値未満は落とす
+    { tMs: 3, turnDeg: 120 },  // 本物のジャイブ
+  ];
+  const kept = rejectMinorTurns(mans, { minManeuverTurnDeg: 45 });
+  assert.deepEqual(kept.map((m) => m.tMs), [1, 3]);
+});
+
+test('foldAnchorsToHemisphere: 180°反転アンカーを大域風向の半球へ折り返す', () => {
+  const anchors = [
+    { tMs: 0, windFromDeg: 230 },
+    { tMs: 1, windFromDeg: 236 },
+    { tMs: 2, windFromDeg: 228 },
+    { tMs: 3, windFromDeg: 52 }, // タック/ジャイブ誤判別による180°反転
+  ];
+  const out = foldAnchorsToHemisphere(anchors);
+  nearCirc(out[3].windFromDeg, 232, 6); // +180 されて多数派の半球へ
+  nearCirc(out[0].windFromDeg, 230);    // 正常アンカーは不変
+  nearCirc(out[1].windFromDeg, 236);
+});
+
+test('rejectAnchorOutliers: 広窓中央値から大きく外れる孤立スパイクを除去', () => {
+  const anchors = [];
+  for (let i = 0; i < 10; i++) anchors.push({ tMs: i * 60000, windFromDeg: 235 + (i % 3 - 1) * 4 }); // 231〜239
+  anchors.push({ tMs: 5 * 60000 + 1, windFromDeg: 315 }); // 孤立スパイク(~80°外れ)
+  const kept = rejectAnchorOutliers(anchors, { outlierRefHalfMs: 900000, outlierRejectDeg: 45 });
+  assert.ok(!kept.some((a) => a.windFromDeg === 315), 'spike should be removed');
+  assert.equal(kept.length, anchors.length - 1); // 安定点は全て残る
+});
+
+test('rejectAnchorOutliers: 緩やかな連続シフトは残す', () => {
+  // 30分かけて 230→280 へ徐々にシフト（各点は近傍と近い＝孤立でない）
+  const anchors = [];
+  for (let i = 0; i < 20; i++) anchors.push({ tMs: i * 90000, windFromDeg: 230 + i * 2.5 });
+  const kept = rejectAnchorOutliers(anchors, { outlierRefHalfMs: 900000, outlierRejectDeg: 45 });
+  assert.equal(kept.length, anchors.length); // 連続シフトは1点も落とさない
+});
+
 test('rejectMarkRoundings: marks空なら素通し', () => {
   const mans = [{ tMs: 1, lat: 35.3, lon: 139.48 }];
   assert.equal(rejectMarkRoundings(mans, [], {}).length, 1);
@@ -303,9 +345,25 @@ test('estimateWindAxisSeries: ビートから風向≈0°(北)を復元', () => 
   // そのタックアンカーの風向が北付近（±8°以内）
   assert.ok(Math.abs(circDiffDeg(tackAnchor.windFromDeg, 0)) < 8,
     `tackAnchor.windFromDeg=${tackAnchor.windFromDeg} (expected ≈0°)`);
-  // レグ充填が動いていること: beat レグからの推定点が少なくとも1点存在する
+  // ノイズ低減のためレグ充填は出力しない（アンカーのみ）。leg由来点が無いこと。
   const legPoint = series.find((p) => p.source === 'leg');
-  assert.ok(legPoint, `leg estimate not found; series has ${series.length} points, sources=${JSON.stringify([...new Set(series.map(p=>p.source))])}`);
+  assert.ok(!legPoint, `leg estimates should be dropped; sources=${JSON.stringify([...new Set(series.map(p=>p.source))])}`);
+});
+
+test('windDirAt: 2点間を円周補間する(北またぎ)', () => {
+  const series = [{ tMs: 0, windFromDeg: 350 }, { tMs: 1000, windFromDeg: 10 }];
+  nearCirc(windDirAt(series, 500), 0);   // 中点=北
+  nearCirc(windDirAt(series, 250), 355); // 1/4地点
+});
+
+test('windDirAt: 範囲外は端点にクランプする', () => {
+  const series = [{ tMs: 100, windFromDeg: 200 }, { tMs: 1000, windFromDeg: 260 }];
+  nearCirc(windDirAt(series, -50), 200);  // 先頭より前
+  nearCirc(windDirAt(series, 5000), 260); // 末尾より後
+});
+
+test('windDirAt: 空配列は null', () => {
+  assert.equal(windDirAt([], 500), null);
 });
 
 test('estimateWindAxisSeries: アンカー無しなら空配列', () => {

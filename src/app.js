@@ -11,8 +11,11 @@ import { scanFolderVideos, collectVideoFiles } from './folderimport.js';
 import { drawScene } from './renderer.js';
 import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
+import { createWindStrip } from './windstripview.js';
+import { estimateWindAxisSeries, windDirAt } from './windaxis.js';
 import { nextRotation, rotatedFitBox } from './videoview.js';
 import { memberList, filterMembers } from './members.js';
+import { parseMinutes, matchMember } from './minutes.js';
 import { DIR_NAMES, fetchWind } from './wind.js';
 import { fetchWindFromCsv } from './windCsv.js';
 import {
@@ -20,10 +23,14 @@ import {
   previousRig, RIG_FIELDS, NOTE_FIELDS,
 } from './reflections.js';
 import { serializeProject, deserializeProject } from './project.js';
-import { projectFileName, listProjectFiles, readProject, writeProject } from './projectfs.js';
+import {
+  projectFileName, listProjectFiles, readProject, writeProject, readProgress, writeProgress,
+} from './projectfs.js';
 import { practiceSummary, earliestContentMs } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
 import { createDashboard } from './dashboard.js';
+import { createProgress } from './progress.js';
+import { loadProgress, saveProgress } from './progressstore.js';
 import { analyzeFleetVmg, unifyWindAxis, rankVmg } from './vmg.js';
 import { createVmgPanel } from './vmgview.js';
 import { estimateWindAxisSeries } from './windaxis.js';
@@ -70,7 +77,7 @@ const mapCtx = mapCanvas.getContext('2d');
 const statusEl = $('status');
 
 function resizeCanvas() {
-  for (const c of [mapCanvas, $('timeline')]) {
+  for (const c of [mapCanvas, $('timeline'), $('windstrip')]) {
     const r = c.getBoundingClientRect();
     c.width = Math.max(1, Math.floor(r.width));
     c.height = Math.max(1, Math.floor(r.height));
@@ -92,6 +99,23 @@ const timeline = createTimeline($('timeline'), {
   onPinRemove: (idx) => { state.pins.splice(idx, 1); draw(); },
 });
 
+const windstrip = createWindStrip($('windstrip'));
+
+// 風軸推定は重いので毎フレーム走らせない。可視トラックごとに一度だけ推定してキャッシュする。
+// tracks/marks/可視状態が変わったとき recomputeWindAxis() で作り直す。
+let windSeriesByTrack = new Map(); // trackId -> [{tMs,windFromDeg}]（絶対時刻）
+function recomputeWindAxis() {
+  windSeriesByTrack = new Map();
+  for (const tr of state.tracks) {
+    if (!tr.visible) continue;
+    try {
+      windSeriesByTrack.set(tr.id, estimateWindAxisSeries(tr, { marks: state.marks }));
+    } catch {
+      windSeriesByTrack.set(tr.id, []); // 推定失敗は空系列として扱い、落とさない
+    }
+  }
+}
+
 // elapsedモードでの軸オフセット(基準トラック開始)。軸時刻⇄絶対時刻の変換に使う。
 function currentBase() {
   const refTrack = state.tracks.find((t) => t.visible) || null;
@@ -99,6 +123,23 @@ function currentBase() {
 }
 
 let mapRot = 0; // マップ回転角(ラジアン、表示のみ・保存しない)。fitTransform後に再適用。
+let windUp = false; // 風軸を常に画面上へ向けるモード(再生時刻の推定風向に追従)。保存しない。
+
+// windUp時: 基準トラックの推定風向を現在時刻で引き、風向が真上を向く回転(rot=-風向)を適用する。
+// 風向データが無ければ回転は据え置き。スライダー/ラベル表示も同期する。
+function applyWindUpRotation(now) {
+  const ref = state.tracks.find((t) => t.visible) || null;
+  const series = ref ? windSeriesByTrack.get(ref.id) : null;
+  if (!ref || !series || series.length === 0) return;
+  const lookupT = state.mode === 'elapsed' ? ref.tRange.start + now : now;
+  const dir = windDirAt(series, lookupT);
+  if (dir == null) return;
+  mapRot = (-dir * Math.PI) / 180;
+  state.transform.rot = mapRot;
+  const d = Math.round(((-dir % 360) + 360) % 360);
+  $('rotate-slider').value = String(d);
+  $('rotate-label').textContent = `${d}°`;
+}
 
 function recomputeView() {
   const bounds = computeBounds(state.tracks);
@@ -107,6 +148,7 @@ function recomputeView() {
   const range = globalRange(state.tracks, state.mode);
   state.crop = { ...range };
   playback.setRange(range);
+  recomputeWindAxis();
 }
 
 function draw() {
@@ -126,6 +168,9 @@ function draw() {
   // ピンを軸時刻へ変換(タグ/動画と同様、絶対時刻で保持)
   const axisPins = remapEventsToAxis(state.pins.map((t) => ({ t })), state.mode, base).map((e) => e.t);
 
+  // 風軸を上に向けるモード: drawScene の前に回転を現在時刻の風向へ更新する。
+  if (windUp) applyWindUpRotation(now);
+
   drawScene(mapCtx, {
     transform: state.transform, tracks: state.tracks, events: state.events,
     marks: state.marks, videos: state.videos, activeVideoId: currentVideo?.id,
@@ -133,6 +178,18 @@ function draw() {
     vmgHighlights: state.vmgHighlights,
   });
   timeline.render({ range, crop: state.crop, now, events: axisEvents, pending: pendingStart, videos: axisVideos, pins: axisPins });
+  // 風軸ストリップ: 可視トラックの推定風向を軸時刻へ変換して重ね描き(色はマップと同じ)。
+  // elapsed では各トラックを自身の開始で0起点にする(start-together規約。map描画と同じ)。
+  const windSeries = state.tracks
+    .filter((t) => t.visible && (windSeriesByTrack.get(t.id) || []).length)
+    .map((t) => {
+      const off = state.mode === 'elapsed' ? t.tRange.start : 0;
+      return {
+        color: t.color,
+        series: windSeriesByTrack.get(t.id).map((p) => ({ tMs: p.tMs - off, windFromDeg: p.windFromDeg })),
+      };
+    });
+  windstrip.render({ range, series: windSeries, now });
   $('clock').textContent = range.end > range.start ? formatClock(now, state.mode) : '--:--:--';
   $('drop-zone').classList.toggle('hidden', state.tracks.length > 0 || state.events.length > 0);
 }
@@ -315,6 +372,16 @@ async function showDashboard() {
 }
 function backToHomeFromDashboard() {
   document.body.classList.remove('view-dashboard');
+  showHome();
+}
+async function showProgress() {
+  if (!projectDir && !(await ensureProjectDir())) return;
+  document.body.classList.remove('view-home');
+  document.body.classList.add('view-progress');
+  await progress.render();
+}
+function backToHomeFromProgress() {
+  document.body.classList.remove('view-progress');
   showHome();
 }
 function showTrack() {
@@ -540,7 +607,7 @@ function renderSidebar() {
   ml.querySelectorAll('button[data-delmark]').forEach((b) =>
     b.addEventListener('click', (e) => {
       state.marks.splice(+e.target.dataset.delmark, 1);
-      draw(); renderSidebar();
+      recomputeWindAxis(); draw(); renderSidebar();
     }));
 
   const vl = $('video-list'); vl.innerHTML = '';
@@ -623,6 +690,8 @@ $('practice-select').addEventListener('change', async (e) => {
 $('app-title').addEventListener('click', showHome); // タイトルクリックでホームへ
 $('home-dashboard-link').addEventListener('click', showDashboard);
 $('dashboard-home-link').addEventListener('click', backToHomeFromDashboard);
+$('home-progress-link').addEventListener('click', showProgress);
+$('progress-home-link').addEventListener('click', backToHomeFromProgress);
 $('home-new').addEventListener('click', startNewPractice);
 
 $('play-btn').addEventListener('click', () => {
@@ -681,6 +750,14 @@ function setMapRotationDeg(deg) {
 }
 $('rotate-slider').addEventListener('input', (e) => setMapRotationDeg(+e.target.value));
 $('rotate-reset').addEventListener('click', () => setMapRotationDeg(0));
+
+// 風軸↑トグル: ONで風向追従の自動回転、手動スライダー/リセットは無効化。OFFで現在角のまま手動へ戻す。
+$('windup-toggle').addEventListener('change', (e) => {
+  windUp = e.target.checked;
+  $('rotate-slider').disabled = windUp;
+  $('rotate-reset').disabled = windUp;
+  draw(); // ON時は即座に風向へ回転。OFF時はmapRotが現在角のまま維持される。
+});
 
 // 区間選択: 軌跡上の点を単クリック→1回目=始点, 2回目=終点でクロップを設定
 let pendingStart = null; // 選択軸上の時刻(絶対 or elapsed)
@@ -817,7 +894,7 @@ markMenu.querySelectorAll('button').forEach((b) =>
     const world = screenToWorld(menuPos, state.transform);
     const { lat, lon } = unproject(world.x, world.y, state.transform.proj);
     state.marks.push({ id: `mk${markSeq++}`, lat, lon, shape: b.dataset.shape, color: b.dataset.color });
-    hideMenu(); draw(); renderSidebar();
+    recomputeWindAxis(); hideMenu(); draw(); renderSidebar();
   }));
 window.addEventListener('pointerdown', (e) => { if (!markMenu.contains(e.target)) hideMenu(); });
 
@@ -890,23 +967,54 @@ const NOTE_LABELS = {
   slowFactor: '遅かった要因', fastFactor: '速かった要因',
 };
 
-// 全練習を deserialize して渡す(projectDir 前提)。
+// 保存フォルダの全練習ファイルを deserialize して {name, project}[] で返す(projectDir 前提)。
+// ダッシュボードと進捗画面で共有。
+async function loadProjectEntries() {
+  if (!projectDir) return [];
+  const files = await listProjectFiles(projectDir);
+  const entries = [];
+  for (const f of files) {
+    try { entries.push({ name: f.name, project: deserializeProject(await readProject(projectDir, f.name)) }); }
+    catch { /* 壊れたファイルはスキップ */ }
+  }
+  return entries;
+}
+
 // getTrack/getMarks: ダッシュボード表示時に現在読込中の最初の可視トラック/マークを渡す(風軸パネル用)。
 const dashboard = createDashboard({
   rigLabels: RIG_LABELS,
-  loadEntries: async () => {
-    if (!projectDir) return [];
-    const files = await listProjectFiles(projectDir);
-    const entries = [];
-    for (const f of files) {
-      try { entries.push({ name: f.name, project: deserializeProject(await readProject(projectDir, f.name)) }); }
-      catch { /* 壊れたファイルはスキップ */ }
-    }
-    return entries;
-  },
+  loadEntries: loadProjectEntries,
   getTrack: () => state.tracks.find((t) => t.visible) ?? null,
   getMarks: () => state.marks,
   getCrop: () => state.crop,
+});
+
+// 進捗画面: 保存済み全練習に加え、現在の未保存練習(取込直後の反省を含む)も渡す。
+// 反省 id で重複排除するため、保存済みと現在練習が同一でも二重計上しない(progress.js 側)。
+const progress = createProgress({
+  loadEntries: async () => {
+    const entries = await loadProjectEntries();
+    if (state.reflections.length) {
+      entries.push({ name: '(現在の練習・未保存)', project: { reflections: state.reflections } });
+    }
+    return entries;
+  },
+  // 進捗オーバーレイは保存フォルダの sailviz-progress.json に永続化(フォルダごとDrive同期で引継可)。
+  // フォルダ未選択時は localStorage のみ。旧 localStorage データはファイルが空なら初回だけ移行。
+  loadProgressData: async () => {
+    const local = loadProgress();
+    if (!projectDir) return local;
+    const file = await readProgress(projectDir);
+    if (!Object.keys(file).length && Object.keys(local).length) {
+      await writeProgress(projectDir, local); // 初回移行
+      return local;
+    }
+    return file;
+  },
+  saveProgressData: async (obj) => {
+    saveProgress(obj); // localStorage ミラー(フォルダ未選択/書込失敗の保険)
+    if (projectDir) await writeProgress(projectDir, obj);
+  },
 });
 
 // VMGキャッシュをクリアして無効化。トラック変更時に呼ぶ。
@@ -1248,6 +1356,83 @@ function saveReflection() {
 $('reflection-add').addEventListener('click', () => openReflectionEditor(null));
 $('refl-cancel').addEventListener('click', closeReflectionEditor);
 $('refl-save').addEventListener('click', saveReflection);
+
+// ================= 議事録一括インポート =================
+let importRows = []; // [{ block, memberFullName|null, include }]
+
+function openImportModal() {
+  if (!firstVisibleTrack()) { statusEl.textContent = '先に練習(GPS)を読み込んでください'; return; }
+  $('import-text').value = '';
+  $('import-preview').innerHTML = '';
+  $('import-wind').textContent = '';
+  importRows = [];
+  $('import-modal').classList.remove('hidden');
+}
+function closeImportModal() { $('import-modal').classList.add('hidden'); }
+
+// テキストをパースしてプレビュー行を構築。
+function rebuildImportPreview(text) {
+  const roster = memberList();
+  const blocks = parseMinutes(text);
+  importRows = blocks.map((b) => {
+    const { member } = matchMember(b.headerName, b.fullNameHint, roster);
+    return { block: b, memberFullName: member?.fullName ?? null, include: true };
+  });
+  renderImportPreview(roster);
+}
+
+function renderImportPreview(roster = memberList()) {
+  const el = $('import-preview');
+  if (!importRows.length) { el.innerHTML = '<p>議事録を入力するとプレビューされます。</p>'; return; }
+  const opts = (sel) => ['<option value="">(未割当)</option>']
+    .concat(roster.map((m) => `<option value="${escapeHtml(m.fullName)}"${m.fullName === sel ? ' selected' : ''}>${escapeHtml(m.fullName)}</option>`)).join('');
+  el.innerHTML = importRows.map((row, i) => {
+    const b = row.block;
+    return `<div class="import-row${row.memberFullName ? '' : ' unmatched'}">`
+      + `<label><input type="checkbox" data-inc="${i}" ${row.include ? 'checked' : ''} /> 取込</label>`
+      + `<span class="ir-head">${escapeHtml(b.headerName)}${b.fullNameHint ? '（' + escapeHtml(b.fullNameHint) + '）' : ''} →</span>`
+      + `<select data-member="${i}">${opts(row.memberFullName)}</select>`
+      + `<div class="ir-notes">目標: ${escapeHtml(b.goal || '—')}／課題: ${escapeHtml(b.issue || '—')}／発見: ${escapeHtml(b.discovery || '—')}</div>`
+      + `</div>`;
+  }).join('');
+  el.querySelectorAll('select[data-member]').forEach((s) =>
+    s.addEventListener('change', (e) => { importRows[+e.target.dataset.member].memberFullName = e.target.value || null; }));
+  el.querySelectorAll('input[data-inc]').forEach((cb) =>
+    cb.addEventListener('change', (e) => { importRows[+e.target.dataset.inc].include = e.target.checked; }));
+}
+
+// 取込実行: 練習の風を1回取得し、採用行を反省化して追加。
+async function runImport() {
+  const rows = importRows.filter((r) => r.include && r.memberFullName);
+  if (!rows.length) { statusEl.textContent = '取込対象がありません(部員を割り当ててください)'; return; }
+  const practice = practiceInfo();
+  const target = firstVisibleTrack() ? nowAbsolute() : Date.now();
+  const wind = await fetchWind(target) ?? await fetchWindFromCsv(target);
+  for (const row of rows) {
+    const b = row.block;
+    state.reflections.push(createReflection({
+      id: `refl${Date.now()}_${reflSeq++}`, createdAt: Date.now(),
+      text: b.raw, people: [row.memberFullName], wind, practice,
+      notes: { goal: b.goal, issue: b.issue, discovery: b.discovery },
+    }));
+  }
+  persistReflections();
+  renderReflectionList();
+  closeImportModal();
+  statusEl.textContent = `${rows.length}名分の反省を議事録から取込みました`;
+}
+
+$('reflection-import').addEventListener('click', openImportModal);
+$('import-cancel').addEventListener('click', closeImportModal);
+$('import-run').addEventListener('click', runImport);
+$('import-file').addEventListener('change', async (e) => {
+  const f = e.target.files?.[0];
+  if (!f) return;
+  const text = await f.text();
+  $('import-text').value = text;
+  rebuildImportPreview(text);
+});
+$('import-text').addEventListener('input', (e) => rebuildImportPreview(e.target.value));
 // 反省内の各セクション(details)を展開/折りたたむとエディタ高さが変わりステージが伸縮する
 // → canvasバッファは再計算(潰れ/伸び防止)。pan/zoom は保持(全体に戻さない)。
 document.querySelectorAll('#reflection-editor .refl-section').forEach((d) =>
