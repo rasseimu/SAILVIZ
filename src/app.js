@@ -13,6 +13,7 @@ import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
 import { createWindStrip } from './windstripview.js';
 import { estimateWindAxisSeries, windDirAt } from './windaxis.js';
+import { applyWindAxisOverrides } from './windaxisoverride.js';
 import { minuteWinners } from './vmgminute.js';
 import { nextRotation, rotatedFitBox } from './videoview.js';
 import { memberList, filterMembers } from './members.js';
@@ -111,7 +112,9 @@ function recomputeWindAxis() {
   for (const tr of state.tracks) {
     if (!tr.visible) continue;
     try {
-      windSeriesByTrack.set(tr, estimateWindAxisSeries(tr, { marks: state.marks }));
+      windSeriesByTrack.set(tr, applyWindAxisOverrides(tr, {
+        marks: state.marks, overrides: tr.windAxisOverrides,
+      }));
     } catch {
       windSeriesByTrack.set(tr, []); // 推定失敗は空系列として扱い、落とさない
     }
@@ -991,6 +994,7 @@ const dashboard = createDashboard({
   getTrack: () => state.tracks.find((t) => t.visible) ?? null,
   getMarks: () => state.marks,
   getCrop: () => state.crop,
+  onWindAxisChange: () => { recomputeWindAxis(); draw(); },
 });
 
 // 進捗画面: 保存済み全練習に加え、現在の未保存練習(取込直後の反省を含む)も渡す。
@@ -1062,7 +1066,10 @@ function recomputeVmgFull() {
   }
   let windSeries;
   try {
-    windSeries = unifyWindAxis(visibleTracks, { estimator: estimateWindAxisSeries, marks: state.marks });
+    windSeries = unifyWindAxis(visibleTracks, {
+      estimator: (t, o) => applyWindAxisOverrides(t, { ...o, overrides: t.windAxisOverrides }),
+      marks: state.marks,
+    });
   } catch {
     windSeries = [];
   }
