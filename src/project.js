@@ -12,6 +12,7 @@ export function serializeProject(state, { savedAt } = {}) {
     tracks: state.tracks.map((t) => ({
       id: t.id, name: t.name, color: t.color, visible: t.visible,
       points: t.points, bounds: t.bounds, tRange: t.tRange,
+      windAxisOverrides: Array.isArray(t.windAxisOverrides) ? t.windAxisOverrides : [],
     })),
     events: state.events.map((e) => ({ ...e })),
     marks: state.marks.map((m) => ({ ...m })),
@@ -35,7 +36,10 @@ export function deserializeProject(obj) {
     mode: obj.mode === 'elapsed' ? 'elapsed' : 'absolute',
     accuracyFilter: obj.accuracyFilter !== false,
     crop,
-    tracks: arr(obj.tracks),
+    tracks: arr(obj.tracks).map((t) => ({
+      ...t,
+      windAxisOverrides: arr(t && t.windAxisOverrides),
+    })),
     events: arr(obj.events),
     marks: arr(obj.marks),
     pins: arr(obj.pins),

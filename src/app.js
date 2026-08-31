@@ -12,7 +12,8 @@ import { drawScene } from './renderer.js';
 import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
 import { createWindStrip } from './windstripview.js';
-import { estimateWindAxisSeries, windDirAt } from './windaxis.js';
+import { windDirAt } from './windaxis.js';
+import { applyWindAxisOverrides } from './windaxisoverride.js';
 import { minuteWinners } from './vmgminute.js';
 import { nextRotation, rotatedFitBox } from './videoview.js';
 import { memberList, filterMembers } from './members.js';
@@ -34,7 +35,6 @@ import { createProgress } from './progress.js';
 import { loadProgress, saveProgress } from './progressstore.js';
 import { analyzeFleetVmg, unifyWindAxis, rankVmg } from './vmg.js';
 import { createVmgPanel } from './vmgview.js';
-import { estimateWindAxisSeries } from './windaxis.js';
 
 // トラック自動割当＆色変更メニューの共通パレット(識別しやすい12色)。
 const PALETTE = [
@@ -112,7 +112,9 @@ function recomputeWindAxis() {
   for (const tr of state.tracks) {
     if (!tr.visible) continue;
     try {
-      windSeriesByTrack.set(tr, estimateWindAxisSeries(tr, { marks: state.marks }));
+      windSeriesByTrack.set(tr, applyWindAxisOverrides(tr, {
+        marks: state.marks, overrides: tr.windAxisOverrides,
+      }));
     } catch {
       windSeriesByTrack.set(tr, []); // 推定失敗は空系列として扱い、落とさない
     }
@@ -273,38 +275,28 @@ async function addVideo(file) {
 
 // 保存フォルダハンドル(セッション内キャッシュ)。起動時に IndexedDB から復元。
 let projectDir = null;
-const PICK_SENTINEL = '__pick__';
 
-// 保存フォルダを確保する。未設定/権限切れなら選択させ、永続化する。
-async function ensureProjectDir() {
-  if (projectDir && await ensurePermission(projectDir)) return projectDir;
+// フォルダ選択ダイアログを毎回開き、選ばれたフォルダを保存フォルダにして永続化する。
+// startIn に前回フォルダを渡すことで、Finder が前回と同じ場所(反省データ)で開く。
+// 一度でも反省データを選べば IndexedDB に記憶され、以後はそこから開く。
+async function chooseProjectDir() {
   if (!window.showDirectoryPicker) {
     statusEl.textContent = 'このブラウザは非対応です（Chrome/Edge で開いてください）';
     return null;
   }
   let dir;
-  try { dir = await window.showDirectoryPicker(); } catch { return null; } // キャンセル
+  try {
+    dir = await window.showDirectoryPicker({ mode: 'readwrite', startIn: projectDir || 'documents' });
+  } catch { return null; } // キャンセル
   projectDir = dir;
   try { await saveDirHandle(dir); } catch { /* 永続化失敗は致命ではない */ }
   return projectDir;
 }
 
-// 「過去の練習」プルダウンを再構築する。
-async function refreshPracticeList() {
-  const sel = $('practice-select');
-  const items = projectDir ? await listProjectFiles(projectDir) : [];
-  sel.innerHTML = '';
-  const ph = document.createElement('option');
-  ph.value = ''; ph.textContent = projectDir ? '（練習を選択…）' : '（保存フォルダ未選択）';
-  sel.appendChild(ph);
-  const pick = document.createElement('option');
-  pick.value = PICK_SENTINEL; pick.textContent = '▶ 保存フォルダを選択…';
-  sel.appendChild(pick);
-  for (const it of items) {
-    const o = document.createElement('option');
-    o.value = it.name; o.textContent = it.label;
-    sel.appendChild(o);
-  }
+// 保存フォルダを確保する。未設定/権限切れなら選択ダイアログを開く。
+async function ensureProjectDir() {
+  if (projectDir && await ensurePermission(projectDir)) return projectDir;
+  return chooseProjectDir();
 }
 
 // 現在の状態を保存フォルダに書き出す。
@@ -322,21 +314,20 @@ async function saveProject() {
     statusEl.textContent = `保存に失敗: ${e.message}`; return;
   }
   cacheSummary(name, practiceSummary(obj, { name })); // ホームのカードに即反映
-  await refreshPracticeList();
   statusEl.textContent = `保存しました: ${name}`;
 }
 
 // 選択した練習ファイルを読み込み、state を置換する。成否を boolean で返す。
 async function loadPractice(name) {
   if (state.tracks.length && !window.confirm('現在の内容を破棄して読み込みますか？')) {
-    $('practice-select').value = ''; return false;
+    return false;
   }
   let data;
   try {
     data = deserializeProject(await readProject(projectDir, name));
   } catch (e) {
     statusEl.textContent = `読込に失敗: ${e.message}`;
-    $('practice-select').value = ''; return false;
+    return false;
   }
   closeVideoPanel(); // stale currentVideo を破棄（パネルが閉じていれば即 return）
   state.mode = data.mode;
@@ -446,12 +437,13 @@ async function renderHome() {
   const grid = $('home-cards');
   const folderEl = $('home-folder');
   folderEl.innerHTML = '';
-  if (!projectDir) {
-    const pick = document.createElement('button');
-    pick.className = 'btn'; pick.textContent = '▶ 保存フォルダを選択…';
-    pick.addEventListener('click', async () => { if (await ensureProjectDir()) renderHome(); });
-    folderEl.appendChild(pick);
-  }
+  // フォルダ選択はホーム画面に一本化。常に表示し、押すと Finder を開く。
+  const pick = document.createElement('button');
+  pick.className = 'btn';
+  pick.textContent = projectDir ? `📁 ${projectDir.name}（変更）` : '▶ 反省データフォルダを選択…';
+  pick.title = projectDir ? '別のフォルダに切り替える' : '練習データ(反省データ)のフォルダを選ぶ';
+  pick.addEventListener('click', async () => { if (await chooseProjectDir()) renderHome(); });
+  folderEl.appendChild(pick);
 
   grid.innerHTML = '';
   if (!projectDir) {
@@ -505,7 +497,8 @@ async function importFromVideoFolder() {
     statusEl.textContent = 'このブラウザは非対応です（Chrome/Edge で開いてください）'; return;
   }
   let dir;
-  try { dir = await window.showDirectoryPicker(); } catch { return; } // キャンセルは何もしない
+  // startIn で反省データフォルダから開く(前回選んだ保存フォルダを優先)
+  try { dir = await window.showDirectoryPicker({ startIn: projectDir || 'documents' }); } catch { return; } // キャンセルは何もしない
   setFolderBtn('loading', '⏳ 走査中…');
   statusEl.textContent = '動画フォルダを走査中…';
   const range = globalRange(state.tracks, 'absolute');
@@ -684,24 +677,14 @@ function deleteVideo(index) {
 $('file-input').addEventListener('change', (e) => loadFiles(e.target.files));
 $('folder-import').addEventListener('click', importFromVideoFolder);
 $('project-save').addEventListener('click', saveProject);
-$('practice-select').addEventListener('change', async (e) => {
-  const v = e.target.value;
-  if (v === PICK_SENTINEL) {
-    e.target.value = '';
-    if (await ensureProjectDir()) await refreshPracticeList();
-  } else if (v) {
-    await loadPractice(v);
-  }
-});
 
-// 起動時: 保存フォルダを IndexedDB から復元し、権限があれば一覧化。
+// 起動時: 保存フォルダを IndexedDB から復元し、ホームのカードに反映。
 (async () => {
   try {
     const h = await loadDirHandle();
     if (h && await ensurePermission(h)) { projectDir = h; }
   } catch { /* 復元失敗は無視 */ }
-  await refreshPracticeList();
-  showHome(); // 起動時はホーム画面
+  showHome(); // 起動時はホーム画面（renderHome が過去の練習を一覧化）
 })();
 
 $('app-title').addEventListener('click', showHome); // タイトルクリックでホームへ
@@ -777,7 +760,7 @@ $('windup-toggle').addEventListener('change', (e) => {
 });
 
 // VMG勝者ネオン トグル: ONで1分ごと最良VMG艇を発光表示。OFFで消灯。表示のみ・保存しない。
-$('vmg-toggle').addEventListener('change', (e) => {
+$('vmg-minute-toggle').addEventListener('change', (e) => {
   vmgOn = e.target.checked;
   recomputeVmgWinners();
   draw();
@@ -1011,6 +994,7 @@ const dashboard = createDashboard({
   getTrack: () => state.tracks.find((t) => t.visible) ?? null,
   getMarks: () => state.marks,
   getCrop: () => state.crop,
+  onWindAxisChange: () => { recomputeWindAxis(); draw(); },
 });
 
 // 進捗画面: 保存済み全練習に加え、現在の未保存練習(取込直後の反省を含む)も渡す。
@@ -1082,7 +1066,10 @@ function recomputeVmgFull() {
   }
   let windSeries;
   try {
-    windSeries = unifyWindAxis(visibleTracks, { estimator: estimateWindAxisSeries, marks: state.marks });
+    windSeries = unifyWindAxis(visibleTracks, {
+      estimator: (t, o) => applyWindAxisOverrides(t, { ...o, overrides: t.windAxisOverrides }),
+      marks: state.marks,
+    });
   } catch {
     windSeries = [];
   }
@@ -1112,23 +1099,8 @@ function recomputeVmgCrop() {
   if (vmgPanel) vmgPanel.render(state.vmgLegs, ranks, { colors: state.vmgColors });
 }
 
-// トグルボタン配線
-const vmgToggleBtn = $('vmg-toggle');
-if (vmgToggleBtn) {
-  vmgToggleBtn.addEventListener('click', () => {
-    state.vmgEnabled = !state.vmgEnabled;
-    vmgToggleBtn.classList.toggle('active', state.vmgEnabled);
-    if (!state.vmgEnabled) {
-      state.vmgHighlights = [];
-      if (vmgPanelEl) vmgPanelEl.querySelector('.vmg-mode-notice')?.remove();
-      if (vmgPanel) vmgPanel.render([], [], { colors: {} });
-      setVmgSectionVisible(false);
-    } else {
-      recomputeVmgFull();
-    }
-    draw();
-  });
-}
+// VMG勝ちレグの地図ハイライト（VMG強調ボタン）は、風軸横の🏆VMGチェックボックス
+// (vmg-minute-toggle) で代替されたため撤去。state.vmgEnabled は常に false のまま。
 
 // 反省エディタの艇セッティング(数値12項目)と反省内容(テキスト5項目)を動的生成。
 (function buildReflFields() {

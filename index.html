@@ -39,7 +39,11 @@
         <div id="dashboard-table"></div>
         <canvas id="dashboard-timebar"></canvas>
         <section id="windaxis-section" class="hidden">
-          <h3 id="windaxis-title">風軸（推定風向）</h3>
+          <div id="windaxis-head">
+            <h3 id="windaxis-title">風軸（推定風向）</h3>
+            <span id="windaxis-hint">グラフをドラッグした区間だけで風軸を推定し直します（帯クリックで解除）</span>
+            <button id="windaxis-clear" class="btn" type="button">風軸補正をクリア</button>
+          </div>
           <div id="windaxis-wrap">
             <canvas id="windaxis-chart"></canvas>
           </div>
@@ -66,6 +70,7 @@
     <header id="progress-bar">
       <a id="progress-home-link" class="home-link" title="ホームへ戻る">← ホーム</a>
       <strong id="progress-title">練習進捗管理</strong>
+      <label id="progress-hide-comments-label"><input type="checkbox" id="progress-hide-comments" />コメント非表示</label>
     </header>
     <nav id="progress-nav"></nav>
     <div id="progress-content"></div>
@@ -97,12 +102,6 @@
     </label>
     <button id="folder-import" class="btn" title="同期フォルダから、GPS範囲内の動画を自動取込">📁 動画フォルダ取込</button>
     <button id="project-save" class="btn" title="現在の状態を保存フォルダに書き出す">💾 保存</button>
-    <button id="vmg-toggle" class="btn" title="VMG勝ちレグを地図でハイライト（絶対時刻モードのみ）">VMG強調</button>
-    <label>過去の練習:
-      <select id="practice-select">
-        <option value="">（練習を選択…）</option>
-      </select>
-    </label>
     <label>整列:
       <select id="align-mode">
         <option value="absolute">絶対時刻</option>
@@ -137,7 +136,7 @@
           <input type="checkbox" id="windup-toggle" /> 風軸↑
         </label>
         <label id="vmg-label" title="1分ごとにVMG（風軸方向の前進成分）が最良だった艇をネオンで強調">
-          <input type="checkbox" id="vmg-toggle" /> 🏆VMG
+          <input type="checkbox" id="vmg-minute-toggle" /> 🏆VMG
         </label>
         <span id="rotate-label">0°</span>
         <input type="range" id="rotate-slider" min="0" max="360" step="1" value="0" />

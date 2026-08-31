@@ -22,10 +22,11 @@ export function buildChartDatasets({ series, boats, colors }) {
 // canvas に line チャートを生成して Chart インスタンスを返す。
 // x は linear(tMs)＝日付アダプタ依存を足さず、ticks を fmtX で MM-DD 整形。
 // mini=true は凡例/ツールチップ/アニメ off・小さめ。拡大時は on。
-export function renderChart(canvas, { datasets, from, to, mini = false, fmtX = null, yBeginAtZero = false }) {
+export function renderChart(canvas, { datasets, from, to, mini = false, fmtX = null, yBeginAtZero = false, plugins = [] }) {
   return new Chart(canvas, {
     type: 'line',
     data: { datasets },
+    plugins,
     options: {
       animation: false,
       responsive: true,
