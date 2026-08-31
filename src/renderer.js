@@ -86,8 +86,33 @@ function drawSpeedLabel(ctx, s, text, color) {
   ctx.fillText(text, x, y);
 }
 
+// 1分ごとVMG勝者のネオンハイライトを1本描く。艇自身の色で、太い低透過グロー＋明るいコアの2パス。
+// shadowBlur/shadowColor で発光させ、勝者トラック tr の [lo,hi] 区間だけを重ね描く。
+// 勝者は track オブジェクト参照で特定する(idは艇間で重複しうるため使わない)。
+function drawVmgNeon(ctx, tr, T, lo, hi) {
+  if (!(hi > lo)) return;
+  const include = (p) => p.t >= lo && p.t <= hi;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = tr.color;
+  ctx.shadowColor = tr.color;
+  // 外側グロー(太・低透過・強ブラー)
+  ctx.shadowBlur = 16;
+  ctx.globalAlpha = 0.35;
+  ctx.lineWidth = 10;
+  strokePolyline(ctx, tr.points, T, include);
+  // 内側コア(細・高透過・弱ブラー)
+  ctx.shadowBlur = 8;
+  ctx.globalAlpha = 0.95;
+  ctx.lineWidth = 3;
+  strokePolyline(ctx, tr.points, T, include);
+  ctx.shadowBlur = 0;
+  ctx.globalAlpha = 1;
+  ctx.lineCap = 'butt';
+}
+
 export function drawScene(ctx, state) {
-  const { transform: T, tracks, events, now, mode, crop, referenceTrack, marks = [], videos = [], activeVideoId = null } = state;
+  const { transform: T, tracks, events, now, mode, crop, referenceTrack, marks = [], videos = [], activeVideoId = null, vmgWinners = [] } = state;
   ctx.clearRect(0, 0, T.w, T.h);
   if (!T.proj) return;
 
@@ -104,6 +129,16 @@ export function drawScene(ctx, state) {
     ctx.setLineDash([]);
     ctx.globalAlpha = 1;
     strokePolyline(ctx, tr.points, T, inWin); // 範囲内のみ実線
+  }
+
+  // VMGネオン: 実線ポリラインの上、マーク/現在地マーカーの下に勝者区間を発光表示。
+  // 勝者区間は絶対epoch。各トラックの表示窓と交差させて実線区間に一致させる。
+  // 勝者は w.track(オブジェクト参照)で特定(idは艇間で重複しうる)。
+  for (const w of vmgWinners) {
+    const tr = w.track;
+    if (!tr || !tr.visible || tr.points.length < 2) continue;
+    const win = trackWindow(tr, crop, mode);
+    drawVmgNeon(ctx, tr, T, Math.max(win.lo, w.lo), Math.min(win.hi, w.hi));
   }
 
   // コースマーク(ポリラインの上・現在地マーカーの下)
