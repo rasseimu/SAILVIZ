@@ -11,6 +11,8 @@ import { scanFolderVideos, collectVideoFiles } from './folderimport.js';
 import { drawScene } from './renderer.js';
 import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
+import { createWindStrip } from './windstripview.js';
+import { estimateWindAxisSeries, windDirAt } from './windaxis.js';
 import { nextRotation, rotatedFitBox } from './videoview.js';
 import { memberList, filterMembers } from './members.js';
 import { parseMinutes, matchMember } from './minutes.js';
@@ -65,7 +67,7 @@ const mapCtx = mapCanvas.getContext('2d');
 const statusEl = $('status');
 
 function resizeCanvas() {
-  for (const c of [mapCanvas, $('timeline')]) {
+  for (const c of [mapCanvas, $('timeline'), $('windstrip')]) {
     const r = c.getBoundingClientRect();
     c.width = Math.max(1, Math.floor(r.width));
     c.height = Math.max(1, Math.floor(r.height));
@@ -87,6 +89,23 @@ const timeline = createTimeline($('timeline'), {
   onPinRemove: (idx) => { state.pins.splice(idx, 1); draw(); },
 });
 
+const windstrip = createWindStrip($('windstrip'));
+
+// 風軸推定は重いので毎フレーム走らせない。可視トラックごとに一度だけ推定してキャッシュする。
+// tracks/marks/可視状態が変わったとき recomputeWindAxis() で作り直す。
+let windSeriesByTrack = new Map(); // trackId -> [{tMs,windFromDeg}]（絶対時刻）
+function recomputeWindAxis() {
+  windSeriesByTrack = new Map();
+  for (const tr of state.tracks) {
+    if (!tr.visible) continue;
+    try {
+      windSeriesByTrack.set(tr.id, estimateWindAxisSeries(tr, { marks: state.marks }));
+    } catch {
+      windSeriesByTrack.set(tr.id, []); // 推定失敗は空系列として扱い、落とさない
+    }
+  }
+}
+
 // elapsedモードでの軸オフセット(基準トラック開始)。軸時刻⇄絶対時刻の変換に使う。
 function currentBase() {
   const refTrack = state.tracks.find((t) => t.visible) || null;
@@ -94,6 +113,23 @@ function currentBase() {
 }
 
 let mapRot = 0; // マップ回転角(ラジアン、表示のみ・保存しない)。fitTransform後に再適用。
+let windUp = false; // 風軸を常に画面上へ向けるモード(再生時刻の推定風向に追従)。保存しない。
+
+// windUp時: 基準トラックの推定風向を現在時刻で引き、風向が真上を向く回転(rot=-風向)を適用する。
+// 風向データが無ければ回転は据え置き。スライダー/ラベル表示も同期する。
+function applyWindUpRotation(now) {
+  const ref = state.tracks.find((t) => t.visible) || null;
+  const series = ref ? windSeriesByTrack.get(ref.id) : null;
+  if (!ref || !series || series.length === 0) return;
+  const lookupT = state.mode === 'elapsed' ? ref.tRange.start + now : now;
+  const dir = windDirAt(series, lookupT);
+  if (dir == null) return;
+  mapRot = (-dir * Math.PI) / 180;
+  state.transform.rot = mapRot;
+  const d = Math.round(((-dir % 360) + 360) % 360);
+  $('rotate-slider').value = String(d);
+  $('rotate-label').textContent = `${d}°`;
+}
 
 function recomputeView() {
   const bounds = computeBounds(state.tracks);
@@ -102,6 +138,7 @@ function recomputeView() {
   const range = globalRange(state.tracks, state.mode);
   state.crop = { ...range };
   playback.setRange(range);
+  recomputeWindAxis();
 }
 
 function draw() {
@@ -121,12 +158,27 @@ function draw() {
   // ピンを軸時刻へ変換(タグ/動画と同様、絶対時刻で保持)
   const axisPins = remapEventsToAxis(state.pins.map((t) => ({ t })), state.mode, base).map((e) => e.t);
 
+  // 風軸を上に向けるモード: drawScene の前に回転を現在時刻の風向へ更新する。
+  if (windUp) applyWindUpRotation(now);
+
   drawScene(mapCtx, {
     transform: state.transform, tracks: state.tracks, events: state.events,
     marks: state.marks, videos: state.videos, activeVideoId: currentVideo?.id,
     now, mode: state.mode, crop: state.crop, referenceTrack: refTrack,
   });
   timeline.render({ range, crop: state.crop, now, events: axisEvents, pending: pendingStart, videos: axisVideos, pins: axisPins });
+  // 風軸ストリップ: 可視トラックの推定風向を軸時刻へ変換して重ね描き(色はマップと同じ)。
+  // elapsed では各トラックを自身の開始で0起点にする(start-together規約。map描画と同じ)。
+  const windSeries = state.tracks
+    .filter((t) => t.visible && (windSeriesByTrack.get(t.id) || []).length)
+    .map((t) => {
+      const off = state.mode === 'elapsed' ? t.tRange.start : 0;
+      return {
+        color: t.color,
+        series: windSeriesByTrack.get(t.id).map((p) => ({ tMs: p.tMs - off, windFromDeg: p.windFromDeg })),
+      };
+    });
+  windstrip.render({ range, series: windSeries, now });
   $('clock').textContent = range.end > range.start ? formatClock(now, state.mode) : '--:--:--';
   $('drop-zone').classList.toggle('hidden', state.tracks.length > 0 || state.events.length > 0);
 }
@@ -538,7 +590,7 @@ function renderSidebar() {
   ml.querySelectorAll('button[data-delmark]').forEach((b) =>
     b.addEventListener('click', (e) => {
       state.marks.splice(+e.target.dataset.delmark, 1);
-      draw(); renderSidebar();
+      recomputeWindAxis(); draw(); renderSidebar();
     }));
 
   const vl = $('video-list'); vl.innerHTML = '';
@@ -682,6 +734,14 @@ function setMapRotationDeg(deg) {
 $('rotate-slider').addEventListener('input', (e) => setMapRotationDeg(+e.target.value));
 $('rotate-reset').addEventListener('click', () => setMapRotationDeg(0));
 
+// 風軸↑トグル: ONで風向追従の自動回転、手動スライダー/リセットは無効化。OFFで現在角のまま手動へ戻す。
+$('windup-toggle').addEventListener('change', (e) => {
+  windUp = e.target.checked;
+  $('rotate-slider').disabled = windUp;
+  $('rotate-reset').disabled = windUp;
+  draw(); // ON時は即座に風向へ回転。OFF時はmapRotが現在角のまま維持される。
+});
+
 // 区間選択: 軌跡上の点を単クリック→1回目=始点, 2回目=終点でクロップを設定
 let pendingStart = null; // 選択軸上の時刻(絶対 or elapsed)
 const PICK_PX = 8;
@@ -817,7 +877,7 @@ markMenu.querySelectorAll('button').forEach((b) =>
     const world = screenToWorld(menuPos, state.transform);
     const { lat, lon } = unproject(world.x, world.y, state.transform.proj);
     state.marks.push({ id: `mk${markSeq++}`, lat, lon, shape: b.dataset.shape, color: b.dataset.color });
-    hideMenu(); draw(); renderSidebar();
+    recomputeWindAxis(); hideMenu(); draw(); renderSidebar();
   }));
 window.addEventListener('pointerdown', (e) => { if (!markMenu.contains(e.target)) hideMenu(); });
 

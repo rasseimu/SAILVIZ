@@ -261,7 +261,63 @@ export function rejectMarkRoundings(maneuvers, marks, opts = {}) {
   return maneuvers.filter((m) => marks.every((mk) => haversineMeters(m, mk) > radiusM));
 }
 
-// 統合エントリ: COG→分割→判別→除去→アンカー→種別→学習→レグ充填→平滑化
+// 微小な向き変化を除外。本物のタック/ジャイブは大きく向きを変える(概ね>=45°)が、
+// 進路の微調整やGPSのふらつきも「マニューバ」として検出される。これらは風向推定を
+// コンパス全域にばらけさせる主要なノイズ源なので、旋回角の小さいものを足切りする。
+export function rejectMinorTurns(maneuvers, opts = {}) {
+  const minTurnDeg = opts.minManeuverTurnDeg ?? 45;
+  return maneuvers.filter((m) => m.turnDeg >= minTurnDeg);
+}
+
+// 広い参照窓の円周中央値から大きく外れる「孤立スパイク」を除去する。
+// 平滑化の窓が狭いとアンカーが疎な時間帯で外れ値が自分自身の局所中央値になり生き残るため、
+// 平滑化の前に、より広い窓(既定±15分)の中央値を基準に閾値(既定45°)超えのアンカーを落とす。
+// 緩やかな連続シフトは近傍中央値に追従するので残り、単発の飛び値だけが除かれる。
+export function rejectAnchorOutliers(anchors, opts = {}) {
+  const refHalf = opts.outlierRefHalfMs ?? 900000;
+  const rejDeg = opts.outlierRejectDeg ?? 45;
+  const s = [...anchors].sort((a, b) => a.tMs - b.tMs);
+  return s.filter((p) => {
+    const near = s.filter((q) => Math.abs(q.tMs - p.tMs) <= refHalf).map((q) => q.windFromDeg);
+    return Math.abs(circDiffDeg(p.windFromDeg, circMedianDeg(near))) <= rejDeg;
+  });
+}
+
+// タック/ジャイブの誤判別による180°反転を補正する。誤判別すると風向推定は正反対へ飛ぶ。
+// 全アンカーの円周中央値(=頑健な大域風向)を基準に、90°以上離れたアンカーは反対半球なので
+// +180°して折り返す。「セッション中の風向はほぼ一定(振れは小さい)」という前提に基づく。
+export function foldAnchorsToHemisphere(anchors) {
+  if (anchors.length === 0) return anchors;
+  const ref = circMedianDeg(anchors.map((a) => a.windFromDeg));
+  return anchors.map((a) => (
+    Math.abs(circDiffDeg(a.windFromDeg, ref)) > 90
+      ? { ...a, windFromDeg: normalizeDeg(a.windFromDeg + 180) }
+      : a
+  ));
+}
+
+// 平滑化済み風軸系列(絶対時刻でtMs昇順)から、時刻tMsの風向を返す。
+// 系列は疎(数分間隔)なので、前後2点を円周補間して滑らかな値にする。範囲外は端点にクランプ。
+export function windDirAt(series, tMs) {
+  if (!series || series.length === 0) return null;
+  if (tMs <= series[0].tMs) return series[0].windFromDeg;
+  const last = series[series.length - 1];
+  if (tMs >= last.tMs) return last.windFromDeg;
+  for (let i = 1; i < series.length; i++) {
+    const b = series[i];
+    if (tMs <= b.tMs) {
+      const a = series[i - 1];
+      const span = b.tMs - a.tMs;
+      const frac = span > 0 ? (tMs - a.tMs) / span : 0;
+      return normalizeDeg(a.windFromDeg + circDiffDeg(b.windFromDeg, a.windFromDeg) * frac);
+    }
+  }
+  return last.windFromDeg;
+}
+
+// 統合エントリ: COG→分割→判別→除去(マーク/微小旋回)→アンカー化→180°折返し→孤立スパイク除去→平滑化。
+// 風向がほぼ一定という前提で、微小旋回・誤判別・孤立飛び値というノイズ源を段階的に落とし、
+// 緩やかに漂う安定した風軸のみを残す(レグ充填は密で不安定なため出力しない)。
 export function estimateWindAxisSeries(track, options = {}) {
   const opts = options.opts ?? {};
   const marks = options.marks ?? [];
@@ -291,13 +347,17 @@ export function estimateWindAxisSeries(track, options = {}) {
   }
 
   for (const m of maneuvers) Object.assign(m, classifyManeuver(m, opts));
-  const kept = rejectMarkRoundings(maneuvers, marks, opts);
-  const anchors = kept.map(estimateWindFromManeuver);
+  // マーク近傍＋微小旋回(=実タック/ジャイブでない)を除外してからアンカー化。
+  const kept = rejectMinorTurns(rejectMarkRoundings(maneuvers, marks, opts), opts);
+  // 誤判別による180°反転を大域風向の半球へ折り返す。
+  const folded = foldAnchorsToHemisphere(kept.map(estimateWindFromManeuver));
+  if (folded.length === 0) return [];
+  // 広窓中央値から外れる孤立スパイクを除去。
+  const anchors = rejectAnchorOutliers(folded, opts);
   if (anchors.length === 0) return [];
-  assignLegKinds(legs, kept);
-  const polar = learnPolarAngles(anchors);
-  const legEstimates = fillLegEstimates(legs, anchors, polar, opts);
-  return smoothWindSeries([...anchors, ...legEstimates], opts);
+  // レグ充填は出力しない: 学習ポーラ角に依存し、1本ごとの瞬間COGを使うため密で不安定。
+  // アンカーのみを長めの窓(既定10分)で円周中央値平滑化し、緩やかに漂う安定した風軸を得る。
+  return smoothWindSeries(anchors, { smoothWindowMs: 600000, ...opts });
 }
 
 // 円周量の移動中央値＋MADで外れ値を除去し平滑化

@@ -128,6 +128,9 @@
     <section id="stage">
       <canvas id="map"></canvas>
       <div id="rotate-control" title="マップを回転">
+        <label id="windup-label" title="推定風軸を常に画面上に向ける（再生時刻に追従）">
+          <input type="checkbox" id="windup-toggle" /> 風軸↑
+        </label>
         <span id="rotate-label">0°</span>
         <input type="range" id="rotate-slider" min="0" max="360" step="1" value="0" />
         <button id="rotate-reset" title="北上に戻す">⟲</button>
@@ -197,7 +200,10 @@
       </select>
     </label>
     <span id="clock">--:--:--</span>
-    <canvas id="timeline"></canvas>
+    <div id="timeline-stack">
+      <canvas id="windstrip" title="推定風軸（可視トラックの推定風向）"></canvas>
+      <canvas id="timeline"></canvas>
+    </div>
   </footer>
 
   <script type="module" src="src/app.js"></script>

@@ -93,6 +93,9 @@ main { flex: 1; display: flex; min-height: 0; }
   display: flex; align-items: center; gap: 6px; padding: 5px 8px;
   background: rgba(255,255,255,0.85); border: 1px solid #c3d2de; border-radius: 6px;
   font-size: 12px; color: #33475a; }
+#rotate-control #windup-label { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; white-space: nowrap; }
+#rotate-control input[type=range]:disabled { opacity: 0.4; }
+#rotate-control #rotate-reset:disabled { opacity: 0.4; cursor: default; }
 #rotate-control #rotate-label { min-width: 30px; text-align: right; font-variant-numeric: tabular-nums; }
 #rotate-control input[type=range] { width: 120px; }
 #rotate-control #rotate-reset { border: none; background: #24313d; color: #fff;
@@ -106,7 +109,9 @@ main { flex: 1; display: flex; min-height: 0; }
   background: #eef2f5; border-top: 1px solid #d4dde5; }
 #play-btn { width: 40px; height: 32px; font-size: 16px; cursor: pointer; }
 #clock { font-variant-numeric: tabular-nums; min-width: 88px; }
-#timeline { flex: 1; height: 48px; cursor: pointer; }
+#timeline-stack { flex: 1; display: flex; flex-direction: column; }
+#windstrip { width: 100%; height: 40px; }
+#timeline { width: 100%; height: 48px; cursor: pointer; }
 .track-row, .tag-row { display: flex; align-items: center; gap: 6px; font-size: 13px;
   padding: 3px 0; }
 .swatch { width: 12px; height: 12px; border-radius: 2px; flex: 0 0 auto; }
