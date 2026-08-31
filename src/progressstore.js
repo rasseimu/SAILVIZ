@@ -47,6 +47,30 @@ export function setGoalDone(obj, reflId, done) {
   return updateEntry(obj, reflId, { goalDone: done });
 }
 
+// コメントは項目(reflId)×フィールド別に {text, ts} の配列で持つ。真実源は書き換えない。
+// field ∈ {goal,issue,discovery}。ts は投稿時刻(ms)。
+export function addComment(obj, reflId, field, text, ts) {
+  const t = String(text).trim();
+  if (t === '') return obj;
+  const prev = obj[reflId] || { issueStage: 0, goalDone: false };
+  const comments = { ...(prev.comments || {}) };
+  comments[field] = [...(comments[field] || []), { text: t, ts }];
+  return { ...obj, [reflId]: { issueStage: 0, goalDone: false, ...prev, comments } };
+}
+
+export function removeComment(obj, reflId, field, idx) {
+  const prev = obj[reflId];
+  if (!prev?.comments?.[field]) return obj;
+  const list = prev.comments[field].filter((_, i) => i !== idx);
+  const comments = { ...prev.comments };
+  if (list.length) comments[field] = list;
+  else delete comments[field];
+  const entry = { ...prev };
+  if (Object.keys(comments).length) entry.comments = comments;
+  else delete entry.comments;
+  return { ...obj, [reflId]: entry };
+}
+
 // 反省テキストのオーバーレイ上書き。field ∈ {goal,issue,discovery}。
 // 空文字/空白のみは上書き削除(元の反省テキストに戻す)。真実源は書き換えない。
 export function setTextOverride(obj, reflId, field, text) {
@@ -88,13 +112,14 @@ export function summarize(reflections, progress, { bins = WIND_BINS } = {}) {
     const st = progress[r.id] || {};
     const notes = r.notes || {};
     const ov = st.text || {};
+    const cm = st.comments || {};
     // 表示テキストはオーバーレイ優先。ただし元反省に存在する項目のみ対象(新規追加はしない)。
-    if (notes.goal) bucket.goals.push({ reflId: r.id, text: ov.goal ?? notes.goal, dateMs, done: !!st.goalDone });
-    if (notes.issue) bucket.issues.push({ reflId: r.id, text: ov.issue ?? notes.issue, dateMs, stage: st.issueStage ?? 0 });
+    if (notes.goal) bucket.goals.push({ reflId: r.id, text: ov.goal ?? notes.goal, dateMs, done: !!st.goalDone, comments: cm.goal || [] });
+    if (notes.issue) bucket.issues.push({ reflId: r.id, text: ov.issue ?? notes.issue, dateMs, stage: st.issueStage ?? 0, comments: cm.issue || [] });
     if (notes.discovery) {
       const speed = r.wind?.speed ?? null;
       const bk = windBinKey(speed);
-      (bucket.discoveriesByBin[bk] ||= []).push({ reflId: r.id, text: ov.discovery ?? notes.discovery, dateMs, speed });
+      (bucket.discoveriesByBin[bk] ||= []).push({ reflId: r.id, text: ov.discovery ?? notes.discovery, dateMs, speed, comments: cm.discovery || [] });
     }
     // 課題追加を累計(ステージ無関係)。課題を持つ反省のみ対象。
     if (notes.issue) {

@@ -347,10 +347,34 @@ body.view-progress #transport { display: none; }
 .et-name { color: #555; }
 .edit-btn { border: none; background: transparent; cursor: pointer; opacity: 0.55; padding: 0 4px; font-size: 13px; }
 .edit-btn:hover { opacity: 1; }
-.edit-input { font: inherit; padding: 2px 6px; border: 1px solid #1558d6; border-radius: 4px; min-width: 120px; }
+.edit-input { font: inherit; padding: 2px 6px; border: 1px solid #1558d6; border-radius: 4px;
+  box-sizing: border-box; width: 100%; min-width: 120px; resize: vertical; overflow: hidden;
+  line-height: 1.4; white-space: pre-wrap; word-break: break-word; vertical-align: top; }
 .edit-save, .edit-cancel { margin-left: 4px; font-size: 12px; padding: 2px 8px; cursor: pointer;
   border: 1px solid #ccc; border-radius: 4px; background: #fff; }
 .edit-save { background: #1558d6; color: #fff; border-color: #1558d6; }
+/* コメント非表示チェックボックス(ヘッダー右上) */
+#progress-hide-comments-label { margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 13px; color: #555; cursor: pointer; }
+/* コメント */
+.goal-card .gc-head-right { display: inline-flex; align-items: center; gap: 4px; }
+.comment-btn { border: none; background: transparent; cursor: pointer; opacity: 0.55; padding: 0 4px; font-size: 13px; }
+.comment-btn:hover { opacity: 1; }
+.comment-block { display: flex; flex-direction: column; gap: 4px; margin-top: 6px;
+  padding-top: 6px; border-top: 1px dashed #e0e0e0; }
+.comment-row { display: flex; align-items: baseline; gap: 6px; font-size: 13px; }
+.comment-when { color: #999; font-size: 11px; flex: 0 0 auto; }
+.comment-text { flex: 1; white-space: pre-wrap; word-break: break-word; }
+.comment-del { border: none; background: transparent; cursor: pointer; color: #c00; opacity: 0.5;
+  padding: 0 4px; font-size: 14px; line-height: 1; flex: 0 0 auto; }
+.comment-del:hover { opacity: 1; }
+.comment-input-row { display: flex; align-items: flex-start; gap: 4px; }
+.comment-input { flex: 1; font: inherit; font-size: 13px; padding: 2px 6px; border: 1px solid #1558d6;
+  border-radius: 4px; box-sizing: border-box; resize: vertical; overflow: hidden;
+  line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
+.comment-save, .comment-cancel { font-size: 12px; padding: 2px 8px; cursor: pointer;
+  border: 1px solid #ccc; border-radius: 4px; background: #fff; flex: 0 0 auto; }
+.comment-save { background: #1558d6; color: #fff; border-color: #1558d6; }
 @media (max-width: 720px) {
   #progress-content { grid-template-columns: 1fr; grid-template-rows: none; overflow: auto; }
   .progress-section { min-height: 220px; }
