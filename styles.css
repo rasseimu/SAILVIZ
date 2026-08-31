@@ -370,3 +370,7 @@ body.view-progress #transport { display: none; }
 .import-row.unmatched { border-color: #e0a030; background: #fff8ec; }
 .import-row .ir-head { margin: 0 6px; font-weight: 600; }
 .import-row .ir-notes { color: #555; font-size: 12px; margin-top: 4px; }
+
+#windaxis-head { display: flex; align-items: center; gap: 12px; }
+#windaxis-hint { color: #888; font-size: 12px; }
+#windaxis-clear { margin-left: auto; }
