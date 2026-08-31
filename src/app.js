@@ -12,7 +12,7 @@ import { drawScene } from './renderer.js';
 import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
 import { createWindStrip } from './windstripview.js';
-import { estimateWindAxisSeries, windDirAt } from './windaxis.js';
+import { windDirAt } from './windaxis.js';
 import { applyWindAxisOverrides } from './windaxisoverride.js';
 import { minuteWinners } from './vmgminute.js';
 import { nextRotation, rotatedFitBox } from './videoview.js';
