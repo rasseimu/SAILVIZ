@@ -34,7 +34,6 @@ import { createProgress } from './progress.js';
 import { loadProgress, saveProgress } from './progressstore.js';
 import { analyzeFleetVmg, unifyWindAxis, rankVmg } from './vmg.js';
 import { createVmgPanel } from './vmgview.js';
-import { estimateWindAxisSeries } from './windaxis.js';
 
 // トラック自動割当＆色変更メニューの共通パレット(識別しやすい12色)。
 const PALETTE = [
@@ -777,7 +776,7 @@ $('windup-toggle').addEventListener('change', (e) => {
 });
 
 // VMG勝者ネオン トグル: ONで1分ごと最良VMG艇を発光表示。OFFで消灯。表示のみ・保存しない。
-$('vmg-toggle').addEventListener('change', (e) => {
+$('vmg-minute-toggle').addEventListener('change', (e) => {
   vmgOn = e.target.checked;
   recomputeVmgWinners();
   draw();
@@ -1112,23 +1111,8 @@ function recomputeVmgCrop() {
   if (vmgPanel) vmgPanel.render(state.vmgLegs, ranks, { colors: state.vmgColors });
 }
 
-// トグルボタン配線
-const vmgToggleBtn = $('vmg-toggle');
-if (vmgToggleBtn) {
-  vmgToggleBtn.addEventListener('click', () => {
-    state.vmgEnabled = !state.vmgEnabled;
-    vmgToggleBtn.classList.toggle('active', state.vmgEnabled);
-    if (!state.vmgEnabled) {
-      state.vmgHighlights = [];
-      if (vmgPanelEl) vmgPanelEl.querySelector('.vmg-mode-notice')?.remove();
-      if (vmgPanel) vmgPanel.render([], [], { colors: {} });
-      setVmgSectionVisible(false);
-    } else {
-      recomputeVmgFull();
-    }
-    draw();
-  });
-}
+// VMG勝ちレグの地図ハイライト（VMG強調ボタン）は、風軸横の🏆VMGチェックボックス
+// (vmg-minute-toggle) で代替されたため撤去。state.vmgEnabled は常に false のまま。
 
 // 反省エディタの艇セッティング(数値12項目)と反省内容(テキスト5項目)を動的生成。
 (function buildReflFields() {
