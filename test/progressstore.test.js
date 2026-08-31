@@ -113,3 +113,28 @@ test('summarize.resolutionSeries は解決課題の累計を練習日昇順で�
   assert.deepEqual(s.resolutionSeries.all.map((p) => p.value), [1, 2, 3]); // 1000,1500,2000 で累計
   assert.deepEqual(s.resolutionSeries['本間 由真'].map((p) => p.value), [1, 2]);
 });
+
+test('summarize.issueAddedSeries は課題追加(ステージ無関係)の累計を練習日昇順で出す', () => {
+  const reflections = [
+    refl('r1', '本間 由真', 1000, { issue: 'a' }),
+    refl('r2', '本間 由真', 2000, { issue: 'b' }),
+    refl('r3', '風間 大煕', 1500, { issue: 'c' }),
+    refl('r4', '本間 由真', 3000, { goal: '目標のみ' }), // 課題なし→加算されない
+  ];
+  const progress = { r1: { issueStage: 2 } }; // 解決状況に依らず追加は数える
+  const s = summarize(reflections, progress);
+  assert.deepEqual(s.issueAddedSeries.all.map((p) => [p.dateMs, p.value]), [[1000, 1], [1500, 2], [2000, 3]]);
+  assert.deepEqual(s.issueAddedSeries['本間 由真'].map((p) => p.value), [1, 2]);
+});
+
+test('summarize.firstDateMs は scope ごとの最初の反省日(課題有無に依らない)', () => {
+  const reflections = [
+    refl('r1', '本間 由真', 2000, { goal: '目標のみ' }), // 課題なしでも最初の反省
+    refl('r2', '本間 由真', 3000, { issue: 'b' }),
+    refl('r3', '風間 大煕', 1500, { issue: 'c' }),
+  ];
+  const s = summarize(reflections, {});
+  assert.equal(s.firstDateMs.all, 1500);        // 全体では風間の1500が最古
+  assert.equal(s.firstDateMs['本間 由真'], 2000); // 本間は2000が最古
+  assert.equal(s.firstDateMs['風間 大煕'], 1500);
+});

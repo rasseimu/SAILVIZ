@@ -70,14 +70,21 @@ export function summarize(reflections, progress, { bins = WIND_BINS } = {}) {
   const ensure = (name) => (byMember[name] ||= { goals: [], issues: [], discoveriesByBin: {} });
   // 練習日昇順で走査(累計シリーズの単調性のため)。
   const sorted = [...reflections].sort((a, b) => reflDateMs(a) - reflDateMs(b));
-  const series = { all: [] };
+  const series = { all: [] };       // 解決日の累計
+  const addedSeries = { all: [] };  // 課題追加日の累計
+  const firstDateMs = {};           // scope ごとの最初の反省日(x軸左端)
   let allCum = 0;
+  let allAdded = 0;
   const memberCum = {};
+  const memberAdded = {};
   for (const r of sorted) {
     const name = r.people?.[0];
     if (!name) continue;
     const bucket = ensure(name);
     const dateMs = reflDateMs(r);
+    // 最初の反省日(課題有無に依らない)。sorted は昇順なので初出が最古。
+    if (firstDateMs.all == null) firstDateMs.all = dateMs;
+    if (firstDateMs[name] == null) firstDateMs[name] = dateMs;
     const st = progress[r.id] || {};
     const notes = r.notes || {};
     const ov = st.text || {};
@@ -89,6 +96,13 @@ export function summarize(reflections, progress, { bins = WIND_BINS } = {}) {
       const bk = windBinKey(speed);
       (bucket.discoveriesByBin[bk] ||= []).push({ reflId: r.id, text: ov.discovery ?? notes.discovery, dateMs, speed });
     }
+    // 課題追加を累計(ステージ無関係)。課題を持つ反省のみ対象。
+    if (notes.issue) {
+      allAdded += 1;
+      memberAdded[name] = (memberAdded[name] || 0) + 1;
+      addedSeries.all.push({ dateMs, value: allAdded });
+      (addedSeries[name] ||= []).push({ dateMs, value: memberAdded[name] });
+    }
     // 解決(stage=2)到達を累計。課題を持つ反省のみ対象。
     if (notes.issue && (st.issueStage ?? 0) === 2) {
       allCum += 1;
@@ -97,5 +111,5 @@ export function summarize(reflections, progress, { bins = WIND_BINS } = {}) {
       (series[name] ||= []).push({ dateMs, value: memberCum[name] });
     }
   }
-  return { byMember, resolutionSeries: series };
+  return { byMember, resolutionSeries: series, issueAddedSeries: addedSeries, firstDateMs };
 }

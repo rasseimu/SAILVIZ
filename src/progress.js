@@ -169,15 +169,32 @@ export function createProgress({
     if (!canvas) return;
     if (chart) { try { chart.destroy(); } catch { /* noop */ } chart = null; }
     const key = selected === 'all' ? 'all' : selected;
-    const pts = sum.resolutionSeries[key] || [];
-    if (!pts.length) return;
-    const datasets = [{
-      label: '解決課題(累計)',
-      data: pts.map((p) => ({ x: p.dateMs, y: p.value })),
-      borderColor: '#1558d6', backgroundColor: '#1558d6', stepped: true, tension: 0,
-    }];
-    const from = pts[0].dateMs;
-    const to = pts[pts.length - 1].dateMs;
+    const added = sum.issueAddedSeries[key] || [];
+    const resolved = sum.resolutionSeries[key] || [];
+    if (!added.length && !resolved.length) return;
+
+    // x範囲: 最初の反省 → 今日。累計線は from で y=0、末尾に to(今日)で最終値を足し、
+    // 階段線が最初の反省から今日まで伸びるようにする。
+    const to = Date.now();
+    const from = sum.firstDateMs[key]
+      ?? Math.min(...[added, resolved].flatMap((s) => (s.length ? [s[0].dateMs] : [])));
+    const toLine = (pts) => {
+      if (!pts.length) return [{ x: from, y: 0 }, { x: to, y: 0 }];
+      const body = pts.map((p) => ({ x: p.dateMs, y: p.value }));
+      return [{ x: from, y: 0 }, ...body, { x: to, y: pts[pts.length - 1].value }];
+    };
+    const datasets = [
+      {
+        label: '課題追加(累計)',
+        data: toLine(added),
+        borderColor: '#f59e0b', backgroundColor: '#f59e0b', stepped: true, tension: 0,
+      },
+      {
+        label: '課題解決(累計)',
+        data: toLine(resolved),
+        borderColor: '#1558d6', backgroundColor: '#1558d6', stepped: true, tension: 0,
+      },
+    ];
     chart = renderChart(canvas, { datasets, from, to, mini: false, yBeginAtZero: true, fmtX: (ms) => fmtDate(ms).slice(5) });
   }
 
