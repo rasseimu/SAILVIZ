@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   STORAGE_KEY, WIND_BINS, loadProgress, saveProgress,
-  setIssueStage, setGoalDone, windBinKey, summarize,
+  setIssueStage, setGoalDone, setTextOverride, windBinKey, summarize,
 } from '../src/progressstore.js';
 
 function memStorage(initial = {}) {
@@ -41,6 +41,42 @@ test('setIssueStage/setGoalDone は不変更新で新オブジェクトを返す
   const c = setGoalDone(b, 'r1', true);
   assert.deepEqual(c.r1, { issueStage: 1, goalDone: true });
   assert.deepEqual(b.r1, { issueStage: 1, goalDone: false }); // b は不変
+});
+
+test('setTextOverride は不変更新で reflId 単位に field を上書き保存', () => {
+  const a = {};
+  const b = setTextOverride(a, 'r1', 'goal', '直したい目標');
+  assert.notEqual(a, b);
+  assert.deepEqual(b, { r1: { issueStage: 0, goalDone: false, text: { goal: '直したい目標' } } });
+  // 既存の進捗トグルは保持しつつ別 field を足す
+  const c = setTextOverride(setIssueStage(b, 'r1', 2), 'r1', 'issue', '直した課題');
+  assert.equal(c.r1.issueStage, 2);
+  assert.deepEqual(c.r1.text, { goal: '直したい目標', issue: '直した課題' });
+  // 空文字は上書きを削除(元テキストに戻す)
+  const d = setTextOverride(c, 'r1', 'goal', '');
+  assert.deepEqual(d.r1.text, { issue: '直した課題' });
+  assert.deepEqual(b.r1.text, { goal: '直したい目標' }); // b は不変
+});
+
+test('summarize は text オーバーレイがあれば反省テキストより優先する', () => {
+  const reflections = [
+    refl('r1', '本間 由真', 1000, { goal: '元目標', issue: '元課題', discovery: '元発見', speed: 2 }),
+  ];
+  const progress = { r1: { text: { goal: '新目標', issue: '新課題', discovery: '新発見' } } };
+  const s = summarize(reflections, progress);
+  const b = s.byMember['本間 由真'];
+  assert.equal(b.goals[0].text, '新目標');
+  assert.equal(b.issues[0].text, '新課題');
+  assert.equal(b.discoveriesByBin[WIND_BINS[0].key][0].text, '新発見');
+});
+
+test('summarize は元反省に無い項目は text オーバーレイでも新規追加しない', () => {
+  const reflections = [refl('r1', '本間 由真', 1000, { goal: '目標のみ' })];
+  const progress = { r1: { text: { issue: '存在しない課題' } } };
+  const s = summarize(reflections, progress);
+  const b = s.byMember['本間 由真'];
+  assert.equal(b.goals.length, 1);
+  assert.equal(b.issues.length, 0);
 });
 
 test('windBinKey は境界とnullを正しく分類', () => {

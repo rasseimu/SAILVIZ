@@ -307,20 +307,49 @@ body.view-progress main,
 body.view-progress #transport { display: none; }
 #progress-bar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid #e5e5e5; }
 #progress-nav { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; border-bottom: 1px solid #eee; overflow-x: auto; }
-#progress-content { flex: 1; overflow: auto; padding: 16px; }
-.progress-section { margin-bottom: 24px; }
-.progress-section > h3 { margin: 0 0 8px; font-size: 15px; }
-.issue-card { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid #eee; border-radius: 6px; margin-bottom: 6px; }
+/* 十字4分割: 左上=目標 右上=課題 左下=発見 右下=推移。各象限は独立スクロール。 */
+#progress-content { flex: 1; overflow: hidden; padding: 16px; display: grid;
+  grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 16px; }
+.progress-section { min-width: 0; min-height: 0; display: flex; flex-direction: column;
+  border: 1px solid #e5e5e5; border-radius: 8px; padding: 10px 12px; overflow: hidden; }
+.progress-section > h3 { margin: 0 0 8px; font-size: 15px; flex: 0 0 auto; }
+/* 目標(左上): カードを横スクロール */
+.pq-goals .goal-cards { flex: 1; display: flex; gap: 10px; overflow-x: auto; overflow-y: hidden;
+  align-items: stretch; padding-bottom: 4px; }
+.goal-card { flex: 0 0 200px; display: flex; flex-direction: column; gap: 6px;
+  border: 1px solid #e5e5e5; border-radius: 8px; padding: 8px 10px; background: #fafbff; }
+.goal-card .gc-head { display: flex; align-items: center; justify-content: space-between; }
+.goal-card .gr-date { color: #888; font-size: 12px; }
+.goal-card .gc-body { flex: 1; font-size: 14px; }
+/* 課題/発見(下段): 縦スクロール */
+.pq-issues, .pq-disc { overflow-y: auto; }
+.pq-issues .issue-card + .issue-card { margin-top: 6px; }
+.issue-card { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px;
+  border: 1px solid #eee; border-radius: 6px; }
+.issue-card .ic-top { display: flex; align-items: baseline; gap: 8px; }
 .issue-card .ic-text { flex: 1; }
-.issue-card .ic-date { color: #888; font-size: 12px; }
-.stage-toggle { display: inline-flex; border: 1px solid #ccc; border-radius: 6px; overflow: hidden; }
+.issue-card .ic-date { color: #888; font-size: 12px; flex: 0 0 auto; }
+.stage-toggle { display: inline-flex; border: 1px solid #ccc; border-radius: 6px; overflow: hidden; align-self: flex-start; }
 .stage-toggle button { border: none; background: #fff; padding: 4px 8px; cursor: pointer; font-size: 12px; }
 .stage-toggle button.active { background: #1558d6; color: #fff; }
 .wind-bin { margin-bottom: 10px; }
 .wind-bin > strong { display: block; margin-bottom: 4px; color: #555; }
-.goal-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
-.goal-row .gr-date { color: #888; font-size: 12px; min-width: 84px; }
-#progress-chart-wrap { max-width: 720px; height: 260px; }
+.wind-bin ul { margin: 0; padding-left: 18px; }
+.wind-bin li { margin: 2px 0; }
+/* 推移(右下): 象限いっぱいにグラフ */
+.pq-chart #progress-chart-wrap { flex: 1; min-height: 0; }
+/* インライン編集 */
+.et-name { color: #555; }
+.edit-btn { border: none; background: transparent; cursor: pointer; opacity: 0.55; padding: 0 4px; font-size: 13px; }
+.edit-btn:hover { opacity: 1; }
+.edit-input { font: inherit; padding: 2px 6px; border: 1px solid #1558d6; border-radius: 4px; min-width: 120px; }
+.edit-save, .edit-cancel { margin-left: 4px; font-size: 12px; padding: 2px 8px; cursor: pointer;
+  border: 1px solid #ccc; border-radius: 4px; background: #fff; }
+.edit-save { background: #1558d6; color: #fff; border-color: #1558d6; }
+@media (max-width: 720px) {
+  #progress-content { grid-template-columns: 1fr; grid-template-rows: none; overflow: auto; }
+  .progress-section { min-height: 220px; }
+}
 
 /* 議事録インポートモーダル */
 #import-modal { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 60; display: flex; align-items: center; justify-content: center; }

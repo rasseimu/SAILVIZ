@@ -47,6 +47,19 @@ export function setGoalDone(obj, reflId, done) {
   return updateEntry(obj, reflId, { goalDone: done });
 }
 
+// 反省テキストのオーバーレイ上書き。field ∈ {goal,issue,discovery}。
+// 空文字/空白のみは上書き削除(元の反省テキストに戻す)。真実源は書き換えない。
+export function setTextOverride(obj, reflId, field, text) {
+  const prev = obj[reflId] || { issueStage: 0, goalDone: false };
+  const text0 = { ...(prev.text || {}) };
+  if (String(text).trim() === '') delete text0[field];
+  else text0[field] = text;
+  const entry = { issueStage: 0, goalDone: false, ...prev };
+  if (Object.keys(text0).length) entry.text = text0;
+  else delete entry.text;
+  return { ...obj, [reflId]: entry };
+}
+
 // 反省の練習日時(ms)。practice.startMs → createdAt の順。
 function reflDateMs(r) {
   return r.practice?.startMs ?? r.createdAt ?? 0;
@@ -67,12 +80,14 @@ export function summarize(reflections, progress, { bins = WIND_BINS } = {}) {
     const dateMs = reflDateMs(r);
     const st = progress[r.id] || {};
     const notes = r.notes || {};
-    if (notes.goal) bucket.goals.push({ reflId: r.id, text: notes.goal, dateMs, done: !!st.goalDone });
-    if (notes.issue) bucket.issues.push({ reflId: r.id, text: notes.issue, dateMs, stage: st.issueStage ?? 0 });
+    const ov = st.text || {};
+    // 表示テキストはオーバーレイ優先。ただし元反省に存在する項目のみ対象(新規追加はしない)。
+    if (notes.goal) bucket.goals.push({ reflId: r.id, text: ov.goal ?? notes.goal, dateMs, done: !!st.goalDone });
+    if (notes.issue) bucket.issues.push({ reflId: r.id, text: ov.issue ?? notes.issue, dateMs, stage: st.issueStage ?? 0 });
     if (notes.discovery) {
       const speed = r.wind?.speed ?? null;
       const bk = windBinKey(speed);
-      (bucket.discoveriesByBin[bk] ||= []).push({ reflId: r.id, text: notes.discovery, dateMs, speed });
+      (bucket.discoveriesByBin[bk] ||= []).push({ reflId: r.id, text: ov.discovery ?? notes.discovery, dateMs, speed });
     }
     // 解決(stage=2)到達を累計。課題を持つ反省のみ対象。
     if (notes.issue && (st.issueStage ?? 0) === 2) {
