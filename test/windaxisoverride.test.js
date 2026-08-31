@@ -9,7 +9,7 @@ import { parseCsv } from '../src/csv.js';
 import { parseGpsPoints, rejectOutliers } from '../src/gps.js';
 import { computeBounds } from '../src/projection.js';
 import { estimateWindAxisSeries } from '../src/windaxis.js';
-import { normalizeOverrides, applyWindAxisOverrides } from '../src/windaxisoverride.js';
+import { normalizeOverrides, applyWindAxisOverrides, pushOverrideRange } from '../src/windaxisoverride.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -106,4 +106,23 @@ test('applyWindAxisOverrides: 分離推定が空の範囲はギャップにな�
   const got = applyWindAxisOverrides(track, { marks: [], overrides: [r] });
   // 範囲内サンプルは存在しない(ギャップ)
   assert.equal(got.filter((s) => s.tMs >= r.start && s.tMs <= r.end).length, 0);
+});
+
+test('pushOverrideRange: 未定義配列に範囲を足すと正規化した1件になる', () => {
+  assert.deepEqual(pushOverrideRange(undefined, { start: 10, end: 20 }), [{ start: 10, end: 20 }]);
+});
+
+test('pushOverrideRange: 既存と重なる範囲はマージされる', () => {
+  const out = pushOverrideRange([{ start: 10, end: 20 }], { start: 15, end: 30 });
+  assert.deepEqual(out, [{ start: 10, end: 30 }]);
+});
+
+test('pushOverrideRange: 不正な範囲(start>=end)は無視される', () => {
+  assert.deepEqual(pushOverrideRange([{ start: 10, end: 20 }], { start: 40, end: 40 }), [{ start: 10, end: 20 }]);
+});
+
+test('pushOverrideRange: 元配列を破壊しない', () => {
+  const orig = [{ start: 10, end: 20 }];
+  pushOverrideRange(orig, { start: 30, end: 40 });
+  assert.deepEqual(orig, [{ start: 10, end: 20 }]);
 });

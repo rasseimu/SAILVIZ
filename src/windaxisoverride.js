@@ -21,6 +21,12 @@ export function normalizeOverrides(overrides) {
   return merged;
 }
 
+// 既存の補正範囲リストに1範囲を足し、正規化した新配列を返す(元配列は破壊しない)。
+// タイムライン右クリックの「風軸を再推定」で、選択範囲を各トラックへ追加するのに使う。
+export function pushOverrideRange(overrides, range) {
+  return normalizeOverrides([...(Array.isArray(overrides) ? overrides : []), range]);
+}
+
 // track 全体の推定に、各 override 範囲の分離推定を上書きした系列を返す。
 export function applyWindAxisOverrides(track, { marks = [], overrides = [] } = {}) {
   const base = estimateWindAxisSeries(track, { marks });

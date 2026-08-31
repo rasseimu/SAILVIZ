@@ -38,17 +38,6 @@
         </div>
         <div id="dashboard-table"></div>
         <canvas id="dashboard-timebar"></canvas>
-        <section id="windaxis-section" class="hidden">
-          <div id="windaxis-head">
-            <h3 id="windaxis-title">風軸（推定風向）</h3>
-            <span id="windaxis-hint">グラフをドラッグした区間だけで風軸を推定し直します（帯クリックで解除）</span>
-            <button id="windaxis-clear" class="btn" type="button">風軸補正をクリア</button>
-          </div>
-          <div id="windaxis-wrap">
-            <canvas id="windaxis-chart"></canvas>
-          </div>
-          <p id="windaxis-empty" class="hidden">タック・ジャイブが検出されませんでした（推定できませんでした）</p>
-        </section>
         <section id="vmg-section" class="hidden">
           <h3>VMG 比較</h3>
           <div id="vmg-panel"></div>
@@ -194,6 +183,11 @@
   </section>
 
   <div id="color-menu" class="hidden"></div>
+
+  <div id="windaxis-menu" class="hidden">
+    <button data-act="reestimate" title="選択範囲だけ、表示中の全艇の風軸を推定し直して上書き">🧭 風軸を再推定</button>
+    <button data-act="pin" title="タイムラインにピンを刺す／消す">📌 ピンを刺す/消す</button>
+  </div>
 
   <footer id="transport">
     <button id="play-btn">▶</button>
