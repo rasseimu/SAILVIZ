@@ -28,6 +28,7 @@ function mockCtx() {
     arcTo: rec('arcTo'), fillText: rec('fillText'), strokeText: rec('strokeText'),
     set strokeStyle(_v) {}, set fillStyle(_v) {}, set lineWidth(_v) {}, set globalAlpha(_v) {},
     set font(_v) {}, set textAlign(_v) {}, set textBaseline(_v) {}, set lineJoin(_v) {},
+    set lineCap(_v) {}, set shadowBlur(_v) {}, set shadowColor(_v) {},
   };
 }
 
@@ -125,6 +126,24 @@ test('renderer draws a per-track speed label at the current position', () => {
     mode: 'absolute', crop: { start: 0, end: 1000 },
   });
   assert.ok(!ctx2.calls.fillText, 'no label when now is out of range');
+});
+
+test('renderer overlays a neon glow on the VMG winner segment', () => {
+  const track = loadTrack('Location0807.csv', '#1c72b8');
+  const T = fitTransform(track.bounds, 800, 600);
+  const range = globalRange([track], 'absolute');
+  const base = mockCtx();
+  drawScene(base, {
+    transform: T, tracks: [track], events: [], now: range.start,
+    mode: 'absolute', crop: range, vmgWinners: [],
+  });
+  const neon = mockCtx();
+  drawScene(neon, {
+    transform: T, tracks: [track], events: [], now: range.start,
+    mode: 'absolute', crop: range,
+    vmgWinners: [{ track, boatId: track.id, color: '#1c72b8', lo: track.tRange.start, hi: track.tRange.end }],
+  });
+  assert.ok(neon.calls.stroke > base.calls.stroke, 'winner segment adds extra glow strokes');
 });
 
 test('playback advances now, clamps to range, and auto-pauses at end', () => {

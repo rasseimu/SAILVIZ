@@ -13,6 +13,7 @@ import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
 import { createWindStrip } from './windstripview.js';
 import { estimateWindAxisSeries, windDirAt } from './windaxis.js';
+import { minuteWinners } from './vmgminute.js';
 import { nextRotation, rotatedFitBox } from './videoview.js';
 import { memberList, filterMembers } from './members.js';
 import { parseMinutes, matchMember } from './minutes.js';
@@ -103,16 +104,32 @@ const windstrip = createWindStrip($('windstrip'));
 
 // 風軸推定は重いので毎フレーム走らせない。可視トラックごとに一度だけ推定してキャッシュする。
 // tracks/marks/可視状態が変わったとき recomputeWindAxis() で作り直す。
-let windSeriesByTrack = new Map(); // trackId -> [{tMs,windFromDeg}]（絶対時刻）
+// キーは「トラックオブジェクト」。各艇のGPSファイルが同名(例 Location.csv)でidが重複しうるため、
+// idをキーにすると別艇が1本に潰れる(風軸ストリップ/VMGが取り違える)。
+let windSeriesByTrack = new Map(); // track -> [{tMs,windFromDeg}]（絶対時刻）
 function recomputeWindAxis() {
   windSeriesByTrack = new Map();
   for (const tr of state.tracks) {
     if (!tr.visible) continue;
     try {
-      windSeriesByTrack.set(tr.id, estimateWindAxisSeries(tr, { marks: state.marks }));
+      windSeriesByTrack.set(tr, estimateWindAxisSeries(tr, { marks: state.marks }));
     } catch {
-      windSeriesByTrack.set(tr.id, []); // 推定失敗は空系列として扱い、落とさない
+      windSeriesByTrack.set(tr, []); // 推定失敗は空系列として扱い、落とさない
     }
+  }
+  recomputeVmgWinners();
+}
+
+// 1分ごとVMG勝者(ネオンハイライト用)。vmgOn時のみ算出。風軸再計算後に呼ぶ。
+let vmgOn = false; // VMG勝者ネオン表示。表示のみ・保存しない(windUpと同じ扱い)。
+let vmgWinners = []; // [{boatId,color,lo,hi,pointOfSail,vmg}]（絶対epoch ms）
+function recomputeVmgWinners() {
+  if (!vmgOn) { vmgWinners = []; return; }
+  const visible = state.tracks.filter((t) => t.visible);
+  try {
+    vmgWinners = minuteWinners(visible, windSeriesByTrack, {});
+  } catch {
+    vmgWinners = [];
   }
 }
 
@@ -129,7 +146,7 @@ let windUp = false; // 風軸を常に画面上へ向けるモード(再生時�
 // 風向データが無ければ回転は据え置き。スライダー/ラベル表示も同期する。
 function applyWindUpRotation(now) {
   const ref = state.tracks.find((t) => t.visible) || null;
-  const series = ref ? windSeriesByTrack.get(ref.id) : null;
+  const series = ref ? windSeriesByTrack.get(ref) : null;
   if (!ref || !series || series.length === 0) return;
   const lookupT = state.mode === 'elapsed' ? ref.tRange.start + now : now;
   const dir = windDirAt(series, lookupT);
@@ -175,18 +192,18 @@ function draw() {
     transform: state.transform, tracks: state.tracks, events: state.events,
     marks: state.marks, videos: state.videos, activeVideoId: currentVideo?.id,
     now, mode: state.mode, crop: state.crop, referenceTrack: refTrack,
-    vmgHighlights: state.vmgHighlights,
+    vmgWinners,
   });
   timeline.render({ range, crop: state.crop, now, events: axisEvents, pending: pendingStart, videos: axisVideos, pins: axisPins });
   // 風軸ストリップ: 可視トラックの推定風向を軸時刻へ変換して重ね描き(色はマップと同じ)。
   // elapsed では各トラックを自身の開始で0起点にする(start-together規約。map描画と同じ)。
   const windSeries = state.tracks
-    .filter((t) => t.visible && (windSeriesByTrack.get(t.id) || []).length)
+    .filter((t) => t.visible && (windSeriesByTrack.get(t) || []).length)
     .map((t) => {
       const off = state.mode === 'elapsed' ? t.tRange.start : 0;
       return {
         color: t.color,
-        series: windSeriesByTrack.get(t.id).map((p) => ({ tMs: p.tMs - off, windFromDeg: p.windFromDeg })),
+        series: windSeriesByTrack.get(t).map((p) => ({ tMs: p.tMs - off, windFromDeg: p.windFromDeg })),
       };
     });
   windstrip.render({ range, series: windSeries, now });
@@ -757,6 +774,13 @@ $('windup-toggle').addEventListener('change', (e) => {
   $('rotate-slider').disabled = windUp;
   $('rotate-reset').disabled = windUp;
   draw(); // ON時は即座に風向へ回転。OFF時はmapRotが現在角のまま維持される。
+});
+
+// VMG勝者ネオン トグル: ONで1分ごと最良VMG艇を発光表示。OFFで消灯。表示のみ・保存しない。
+$('vmg-toggle').addEventListener('change', (e) => {
+  vmgOn = e.target.checked;
+  recomputeVmgWinners();
+  draw();
 });
 
 // 区間選択: 軌跡上の点を単クリック→1回目=始点, 2回目=終点でクロップを設定
