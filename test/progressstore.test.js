@@ -3,7 +3,28 @@ import assert from 'node:assert/strict';
 import {
   STORAGE_KEY, WIND_BINS, loadProgress, saveProgress,
   setIssueStage, setGoalDone, setTextOverride, windBinKey, summarize,
+  addComment, hasAiComment,
 } from '../src/progressstore.js';
+
+test('addComment: metaなしは{text,ts}のまま(後方互換)', () => {
+  const o = addComment({}, 'r1', 'goal', 'やる', 111);
+  assert.deepEqual(o.r1.comments.goal, [{ text: 'やる', ts: 111 }]);
+});
+
+test('addComment: metaでai/url/titleを付与', () => {
+  const o = addComment({}, 'r1', 'issue', 'AI助言', 222, { ai: true, url: 'u', title: 't' });
+  assert.deepEqual(o.r1.comments.issue, [{ text: 'AI助言', ts: 222, ai: true, url: 'u', title: 't' }]);
+});
+
+test('hasAiComment: 同reflId×field×urlの既存AIコメントを検知', () => {
+  let o = addComment({}, 'r1', 'goal', 'x', 1, { ai: true, url: 'U1', title: 't' });
+  assert.equal(hasAiComment(o, 'r1', 'goal', 'U1'), true);
+  assert.equal(hasAiComment(o, 'r1', 'goal', 'U2'), false);
+  assert.equal(hasAiComment(o, 'r1', 'issue', 'U1'), false);
+  // 人間コメント(ai無し・url無し)は対象外
+  o = addComment(o, 'r1', 'goal', 'human', 2);
+  assert.equal(hasAiComment(o, 'r1', 'goal', undefined), false);
+});
 
 function memStorage(initial = {}) {
   const map = new Map(Object.entries(initial));

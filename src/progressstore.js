@@ -49,13 +49,20 @@ export function setGoalDone(obj, reflId, done) {
 
 // コメントは項目(reflId)×フィールド別に {text, ts} の配列で持つ。真実源は書き換えない。
 // field ∈ {goal,issue,discovery}。ts は投稿時刻(ms)。
-export function addComment(obj, reflId, field, text, ts) {
+export function addComment(obj, reflId, field, text, ts, meta = {}) {
   const t = String(text).trim();
   if (t === '') return obj;
   const prev = obj[reflId] || { issueStage: 0, goalDone: false };
   const comments = { ...(prev.comments || {}) };
-  comments[field] = [...(comments[field] || []), { text: t, ts }];
+  comments[field] = [...(comments[field] || []), { text: t, ts, ...meta }];
   return { ...obj, [reflId]: { issueStage: 0, goalDone: false, ...prev, comments } };
+}
+
+// 同じ reflId×field×url の AIコメントが既にあるか(一括生成の重複挿入防止)。
+export function hasAiComment(obj, reflId, field, url) {
+  if (url == null) return false;
+  const list = obj?.[reflId]?.comments?.[field] || [];
+  return list.some((c) => c.ai && c.url === url);
 }
 
 export function removeComment(obj, reflId, field, idx) {

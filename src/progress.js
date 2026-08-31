@@ -4,9 +4,11 @@
 import { memberList } from './members.js';
 import {
   loadProgress, saveProgress, setIssueStage, setGoalDone, setTextOverride,
-  addComment, removeComment, summarize, WIND_BINS,
+  addComment, removeComment, hasAiComment, summarize, WIND_BINS,
 } from './progressstore.js';
 import { renderChart } from './chartview.js';
+import { generateAiComments } from './aicomment.js';
+import { SOURCES } from './references/todaiyacht.js';
 
 const $ = (id) => document.getElementById(id);
 const STAGES = [{ v: 0, label: '未着手' }, { v: 1, label: '取組中' }, { v: 2, label: '解決' }];
@@ -28,6 +30,7 @@ function fmtDateTime(ms) {
   }).format(new Date(ms));
 }
 const HIDE_COMMENTS_KEY = 'sailviz.progress.hideComments';
+const API_KEY_STORE = 'sailviz.geminiKey';
 
 // loadProgressData/saveProgressData を注入すると保存フォルダのファイルへ永続化できる。
 // 未指定時は従来どおり localStorage のみ(単体でも動く)。
@@ -107,10 +110,20 @@ export function createProgress({
   // カード内容の下に積むコメント一覧＋(入力中なら)入力欄。field ∈ {goal,issue,discovery}。
   function commentSection(field, reflId, comments) {
     if (hideComments) return '';
-    const list = (comments || []).map((c, i) =>
-      `<div class="comment-row"><span class="comment-when">${fmtDateTime(c.ts)}</span>`
-      + `<span class="comment-text">${esc(c.text)}</span>`
-      + `<button class="comment-del" data-cfield="${field}" data-crefl="${esc(reflId)}" data-cidx="${i}" title="削除">×</button></div>`).join('');
+    const list = (comments || []).map((c, i) => {
+      const badge = c.ai ? '<span class="comment-ai-badge" title="AI生成">🤖</span>' : '';
+      // 出典: 新形式は refs 配列(複数可)、旧形式は単一 link/title。
+      const refs = c.refs || (c.ai && (c.link || c.title) ? [{ link: c.link || null, title: c.title }] : []);
+      let link = '';
+      if (c.ai && refs.length) {
+        const parts = refs.map((r) => (r.link
+          ? `<a class="comment-ref-link" href="${esc(r.link)}" target="_blank" rel="noopener">${esc(r.title || '参考')}</a>`
+          : `<span class="comment-ref-src">${esc(r.title || '参考')}</span>`));
+        link = ` <span class="comment-refs">（出典: ${parts.join('、')}）</span>`;
+      }
+      return `<div class="comment-row${c.ai ? ' comment-ai' : ''}"><span class="comment-when">${fmtDateTime(c.ts)}<button class="comment-del" data-cfield="${field}" data-crefl="${esc(reflId)}" data-cidx="${i}" title="削除">×</button></span>`
+        + `${badge}<span class="comment-text">${esc(c.text)}${link}</span></div>`;
+    }).join('');
     const input = commenting === `${reflId}:${field}`
       ? `<div class="comment-input-row"><textarea class="comment-input" rows="1" data-cfield="${field}" data-crefl="${esc(reflId)}" placeholder="コメントを入力"></textarea>`
         + `<button class="comment-save" data-cfield="${field}" data-crefl="${esc(reflId)}">追加</button>`
@@ -293,11 +306,75 @@ export function createProgress({
     });
   }
 
+  // ローカルPDFを取得して base64 化(Gemini inline 直送用)。日本語ファイル名は encodeURI。
+  async function loadPdfBase64(path) {
+    const res = await fetch(encodeURI(path));
+    if (!res.ok) throw new Error(`PDF取得失敗 ${res.status}: ${path}`);
+    const buf = new Uint8Array(await res.arrayBuffer());
+    let bin = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < buf.length; i += chunk) {
+      bin += String.fromCharCode.apply(null, buf.subarray(i, i + chunk));
+    }
+    return btoa(bin);
+  }
+
+  // AIコメント一括生成のコントロール(静的要素なので一度だけ配線)。
+  let aiWired = false;
+  function wireAiControls() {
+    if (aiWired) return;
+    const keyInput = $('progress-api-key');
+    const btn = $('progress-ai-generate');
+    const status = $('progress-ai-status');
+    if (!keyInput || !btn) return;
+    aiWired = true;
+    try { keyInput.value = globalThis.localStorage?.getItem(API_KEY_STORE) || ''; } catch { /* noop */ }
+    keyInput.addEventListener('change', () => {
+      try { globalThis.localStorage?.setItem(API_KEY_STORE, keyInput.value.trim()); } catch { /* noop */ }
+    });
+    btn.addEventListener('click', async () => {
+      const apiKey = keyInput.value.trim();
+      if (!apiKey) { status.textContent = 'Gemini APIキーを入力してください'; return; }
+      // 表示中バケットから走査対象を作る(選択メンバー/全て)。
+      const sum = summarize(reflections, progress);
+      const buckets = memberBuckets(sum);
+      const items = [];
+      for (const [, b] of buckets) {
+        for (const g of b.goals) items.push({ reflId: g.reflId, field: 'goal', text: g.text });
+        for (const it of b.issues) items.push({ reflId: it.reflId, field: 'issue', text: it.text });
+        for (const bin of Object.values(b.discoveriesByBin)) {
+          for (const d of bin) items.push({ reflId: d.reflId, field: 'discovery', text: d.text });
+        }
+      }
+      btn.disabled = true; status.textContent = '生成中…(PDF照合には少し時間がかかります)';
+      try {
+        const suggestions = await generateAiComments({ items, sources: SOURCES, apiKey, loadPdfBase64 });
+        let added = 0;
+        const now = Date.now();
+        for (const s of suggestions) {
+          if (hasAiComment(progress, s.reflId, s.field, s.url)) continue;
+          progress = addComment(progress, s.reflId, s.field, s.comment, now,
+            { ai: true, url: s.url, refs: s.refs });
+          added += 1;
+        }
+        if (added) persist();
+        status.textContent = `${added}件のコメントを追加しました`;
+        renderBody();
+      } catch (e) {
+        console.error('AIコメント生成に失敗', e);
+        status.textContent = '生成に失敗しました(キーや通信を確認)';
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+
   async function render() {
     const entries = await loadEntries();
     reflections = allReflections(entries);
     progress = await loadProgressData();
     wireHideComments();
+    wireAiControls();
     renderNav();
     renderBody();
   }

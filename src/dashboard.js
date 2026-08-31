@@ -2,30 +2,20 @@
 // 集計(tuning)・Chart.js描画(chartview)・ブラシ(timebrush)・表(tuningtable)を束ね、
 // #dashboard-screen に「4×3グリッドの推移グラフ＋数値表＋期間バー」を描画するDOMコントローラ。
 // ミニグラフはクリックで拡大(対話グラフ)。ブラシは各チャートのx範囲を更新して連動。
-// 風軸パネル: 現在読込中GPSトラック(1艇)から推定風向を時系列で表示（チューニンググリッドとは別セクション）。
 import { collectTuning, collectTuningRows, activeBoats, TUNING_PARAMS, FOCUS_BOATS, BOAT_COLORS } from './tuning.js';
 import { buildChartDatasets, renderChart } from './chartview.js';
 import { buildTuningTable } from './tuningtable.js';
 import { msToX, xToMs, clampRange } from './timebrush.js';
-import { applyWindAxisOverrides } from './windaxisoverride.js';
-import { buildWindAxisDatasets } from './windaxisview.js';
 
 const $ = (id) => document.getElementById(id);
 
-// getTrack: () => track|null — 現在読込中の最初の可視GPSトラック(app.js の state 参照)
-// getMarks: () => mark[]   — 現在のマーク一覧
-// getCrop:  () => {start,end}|null — 現在のクロップ範囲(epoch ms)。null/未設定は全体
-export function createDashboard({ loadEntries, rigLabels, getTrack = null, getMarks = null, getCrop = null, onWindAxisChange = null }) {
+export function createDashboard({ loadEntries, rigLabels }) {
   let data = null;       // collectTuning の結果
   let rows = [];         // collectTuningRows の結果(表用の平坦行)
   let view = null;       // { from, to } 現在の表示域
   let drag = null;       // ブラシのドラッグ状態
   let miniCharts = [];   // ミニ Chart.js インスタンス群(再描画時に destroy)
   let modalChart = null; // 拡大表示中の Chart.js インスタンス
-  let windAxisChart = null; // 風軸グラフの Chart.js インスタンス
-  let windAxisTrack = null;     // 風軸グラフの対象トラック(帯/ドラッグの参照先)
-  let windAxisDrag = null;      // ドラッグ中の {start,end}(ms) or null
-  let windAxisWired = false;    // canvas へのポインタ配線は一度だけ
   let selected = 'all';  // サイドメニューの選択('all' | 艇番号)
 
   // 現在の選択で実際に描画する艇。データ集計後の boats を基準に絞る。
@@ -211,156 +201,6 @@ export function createDashboard({ loadEntries, rigLabels, getTrack = null, getMa
     });
   }
 
-  // 保存済みオーバーライド範囲とドラッグ中矩形を chartArea に塗るプラグイン。
-  const windAxisBandsPlugin = {
-    id: 'windAxisBands',
-    afterDraw(chart) {
-      const x = chart.scales.x; const area = chart.chartArea;
-      if (!x || !area) return;
-      const paint = (start, end, fill) => {
-        const x0 = x.getPixelForValue(start); const x1 = x.getPixelForValue(end);
-        const lo = Math.max(area.left, Math.min(x0, x1));
-        const hi = Math.min(area.right, Math.max(x0, x1));
-        if (hi <= lo) return;
-        chart.ctx.save();
-        chart.ctx.fillStyle = fill;
-        chart.ctx.fillRect(lo, area.top, hi - lo, area.bottom - area.top);
-        chart.ctx.restore();
-      };
-      const ovs = (windAxisTrack && windAxisTrack.windAxisOverrides) || [];
-      for (const r of ovs) paint(r.start, r.end, 'rgba(230,126,34,0.15)');
-      if (windAxisDrag) paint(windAxisDrag.start, windAxisDrag.end, 'rgba(52,152,219,0.20)');
-    },
-  };
-
-  // px→ms 変換(トラック時間範囲にクランプ)。chart 未生成時は null。
-  function windAxisMsAtPixel(px) {
-    if (!windAxisChart || !windAxisTrack) return null;
-    const x = windAxisChart.scales.x;
-    const ms = x.getValueForPixel(px);
-    return Math.max(windAxisTrack.tRange.start, Math.min(windAxisTrack.tRange.end, ms));
-  }
-
-  // 風軸グラフを描画する。現在読込中のGPSトラックからタック/ジャイブを検出して風向を推定。
-  // amedas参考ライン: TODO — src/wind.js の fetchWind 結果を { obsMs, dirDeg }[] に整形して渡す
-  function renderWindAxis() {
-    const canvas = $('windaxis-chart');
-    const emptyEl = $('windaxis-empty');
-    if (!canvas) return;
-
-    // 既存のChart.jsインスタンスを破棄
-    if (windAxisChart) { try { windAxisChart.destroy(); } catch { /* 破棄済みは無視 */ } windAxisChart = null; }
-
-    const track = getTrack ? getTrack() : null;
-    if (!track) {
-      // トラック未読込: パネルは非表示
-      $('windaxis-section').classList.add('hidden');
-      return;
-    }
-    $('windaxis-section').classList.remove('hidden');
-
-    const marks = getMarks ? getMarks() : [];
-
-    // クロップ範囲内の点のみを対象とする(spec §2)。crop が null/不正な場合は全体を使う。
-    const crop = getCrop ? getCrop() : null;
-    let analysisTrack = track;
-    if (crop && crop.start != null && crop.end != null && crop.end > crop.start) {
-      const croppedPoints = track.points.filter((p) => p.t >= crop.start && p.t <= crop.end);
-      analysisTrack = { ...track, points: croppedPoints };
-    }
-
-    windAxisTrack = track; // 帯/ドラッグの参照先(state.tracks と同一オブジェクト)
-
-    let series;
-    try {
-      series = applyWindAxisOverrides(analysisTrack, {
-        marks, overrides: track.windAxisOverrides,
-      });
-    } catch (e) {
-      series = [];
-    }
-
-    if (series.length === 0) {
-      // タック/ジャイブ不検出: 空グラフではなくメッセージを表示
-      canvas.style.display = 'none';
-      if (emptyEl) emptyEl.classList.remove('hidden');
-      return;
-    }
-    canvas.style.display = '';
-    if (emptyEl) emptyEl.classList.add('hidden');
-
-    const { datasets } = buildWindAxisDatasets({ series, amedas: [] });
-    // x範囲はトラック全体。fmtXはHH:MM(JST)。
-    const from = track.tRange.start;
-    const to = track.tRange.end;
-    const fmtX = (ms) => new Date(ms).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-    windAxisChart = renderChart(canvas, { datasets, from, to, mini: false, fmtX, plugins: [windAxisBandsPlugin] });
-    wireWindAxisInteraction(canvas);
-  }
-
-  // canvas のポインタ操作を一度だけ配線する。chart/track は closure 変数を都度参照。
-  function wireWindAxisInteraction(canvas) {
-    if (windAxisWired) return;
-    windAxisWired = true;
-    const DRAG_PX = 4; // これ未満はクリック扱い
-
-    let downPx = null;
-    const rectLeft = () => canvas.getBoundingClientRect().left;
-
-    canvas.addEventListener('pointerdown', (e) => {
-      if (!windAxisChart || !windAxisTrack) return;
-      downPx = e.clientX - rectLeft();
-      const ms = windAxisMsAtPixel(downPx);
-      windAxisDrag = { start: ms, end: ms };
-      canvas.setPointerCapture(e.pointerId);
-    });
-
-    canvas.addEventListener('pointermove', (e) => {
-      if (downPx == null || !windAxisDrag) return;
-      windAxisDrag.end = windAxisMsAtPixel(e.clientX - rectLeft());
-      windAxisChart.draw();
-    });
-
-    canvas.addEventListener('pointerup', (e) => {
-      if (downPx == null) return;
-      const upPx = e.clientX - rectLeft();
-      const movedPx = Math.abs(upPx - downPx);
-      const drag = windAxisDrag;
-      windAxisDrag = null;
-      downPx = null;
-      try { canvas.releasePointerCapture(e.pointerId); } catch { /* 無視 */ }
-      if (!windAxisTrack) return;
-      const ovs = windAxisTrack.windAxisOverrides || (windAxisTrack.windAxisOverrides = []);
-
-      if (movedPx >= DRAG_PX && drag) {
-        // 範囲追加
-        const start = Math.min(drag.start, drag.end);
-        const end = Math.max(drag.start, drag.end);
-        if (end > start) { ovs.push({ start, end }); afterWindAxisChange(); }
-      } else {
-        // クリック: カーソル位置の帯を解除
-        const ms = windAxisMsAtPixel(upPx);
-        const idx = ovs.findIndex((r) => ms >= r.start && ms <= r.end);
-        if (idx >= 0) { ovs.splice(idx, 1); afterWindAxisChange(); }
-      }
-    });
-
-    const clearBtn = $('windaxis-clear');
-    if (clearBtn) {
-      clearBtn.addEventListener('click', () => {
-        if (!windAxisTrack) return;
-        windAxisTrack.windAxisOverrides = [];
-        afterWindAxisChange();
-      });
-    }
-  }
-
-  // 補正変更後: 風軸グラフを再描画し、地図/VMG へ通知する。
-  function afterWindAxisChange() {
-    renderWindAxis();
-    if (typeof onWindAxisChange === 'function') onWindAxisChange();
-  }
-
   async function render() {
     const entries = await loadEntries();
     data = collectTuning(entries);
@@ -373,7 +213,6 @@ export function createDashboard({ loadEntries, rigLabels, getTrack = null, getMa
     renderTable();
     wireTimebar();
     wireModal();
-    renderWindAxis();
   }
 
   return { render };

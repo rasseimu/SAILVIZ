@@ -28,7 +28,7 @@ export function pinHitIndex(pinXs, x, tol) {
   return best;
 }
 
-export function createTimeline(canvas, { onCropChange, onScrub, onVideoClick, onPinAdd, onPinRemove }) {
+export function createTimeline(canvas, { onCropChange, onScrub, onVideoClick, onPinAdd, onPinRemove, onContextMenu }) {
   const ctx = canvas.getContext('2d');
   let state = { range: { start: 0, end: 0 }, crop: { start: 0, end: 0 }, now: 0, events: [], pins: [] };
   let drag = null; // 'left' | 'right' | 'scrub' | 'inside'
@@ -211,8 +211,11 @@ export function createTimeline(canvas, { onCropChange, onScrub, onVideoClick, on
     e.preventDefault();
     const x = localX(e);
     const idx = pinHitIndex(pinXs(), x, HANDLE_PX);
-    if (idx >= 0) onPinRemove?.(idx);
-    else onPinAdd?.(clamp(xToT(x), state.range.start, state.range.end));
+    const t = clamp(xToT(x), state.range.start, state.range.end);
+    // メニューハンドラがあれば小メニューを開く。無ければ従来のピン即時操作にフォールバック。
+    if (onContextMenu) onContextMenu({ clientX: e.clientX, clientY: e.clientY, t, pinIdx: idx });
+    else if (idx >= 0) onPinRemove?.(idx);
+    else onPinAdd?.(t);
   });
 
   function handleDrag(e) {

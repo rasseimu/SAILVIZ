@@ -9,7 +9,7 @@ import { parseCsv } from '../src/csv.js';
 import { parseGpsPoints, rejectOutliers } from '../src/gps.js';
 import { computeBounds } from '../src/projection.js';
 import { estimateWindAxisSeries } from '../src/windaxis.js';
-import { normalizeOverrides, applyWindAxisOverrides } from '../src/windaxisoverride.js';
+import { normalizeOverrides, applyWindAxisOverrides, pushOverride } from '../src/windaxisoverride.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -33,14 +33,22 @@ test('normalizeOverrides: start<end のみ採用しソートする', () => {
   assert.deepEqual(out, [{ start: 10, end: 20 }, { start: 30, end: 35 }]);
 });
 
-test('normalizeOverrides: 重なり/接触する範囲をマージする', () => {
+test('normalizeOverrides: 重なりはマージせず・manualDeg を保持', () => {
   const out = normalizeOverrides([
+    { start: 30, end: 35, manualDeg: 200 },
     { start: 10, end: 20 },
-    { start: 15, end: 25 }, // 重なり
-    { start: 25, end: 30 }, // 接触(next.start == cur.end)
-    { start: 40, end: 50 }, // 独立
+    { start: 15, end: 25 }, // 30と重なるがマージしない(supersede は pushOverride の役割)
   ]);
-  assert.deepEqual(out, [{ start: 10, end: 30 }, { start: 40, end: 50 }]);
+  assert.deepEqual(out, [
+    { start: 10, end: 20 },
+    { start: 15, end: 25 },
+    { start: 30, end: 35, manualDeg: 200 },
+  ]);
+});
+
+test('normalizeOverrides: manualDeg は [0,360) に正規化', () => {
+  assert.deepEqual(normalizeOverrides([{ start: 0, end: 1, manualDeg: 370 }]), [{ start: 0, end: 1, manualDeg: 10 }]);
+  assert.deepEqual(normalizeOverrides([{ start: 0, end: 1, manualDeg: -10 }]), [{ start: 0, end: 1, manualDeg: 350 }]);
 });
 
 test('normalizeOverrides: 空/未定義は空配列', () => {
@@ -106,4 +114,40 @@ test('applyWindAxisOverrides: 分離推定が空の範囲はギャップにな�
   const got = applyWindAxisOverrides(track, { marks: [], overrides: [r] });
   // 範囲内サンプルは存在しない(ギャップ)
   assert.equal(got.filter((s) => s.tMs >= r.start && s.tMs <= r.end).length, 0);
+});
+
+test('pushOverride: 未定義配列にエントリを足すと1件', () => {
+  assert.deepEqual(pushOverride(undefined, { start: 10, end: 20 }), [{ start: 10, end: 20 }]);
+});
+
+test('pushOverride: 重なる既存を外して新エントリで置換(supersede)', () => {
+  const out = pushOverride([{ start: 10, end: 20 }], { start: 15, end: 30, manualDeg: 200 });
+  assert.deepEqual(out, [{ start: 15, end: 30, manualDeg: 200 }]);
+});
+
+test('pushOverride: 重ならない既存は残す', () => {
+  const out = pushOverride([{ start: 10, end: 20 }], { start: 30, end: 40 });
+  assert.deepEqual(out, [{ start: 10, end: 20 }, { start: 30, end: 40 }]);
+});
+
+test('pushOverride: 不正な範囲(start>=end)は追加されず既存を保持', () => {
+  assert.deepEqual(pushOverride([{ start: 10, end: 20 }], { start: 40, end: 40 }), [{ start: 10, end: 20 }]);
+});
+
+test('pushOverride: 元配列を破壊しない', () => {
+  const orig = [{ start: 10, end: 20 }];
+  pushOverride(orig, { start: 30, end: 40 });
+  assert.deepEqual(orig, [{ start: 10, end: 20 }]);
+});
+
+test('applyWindAxisOverrides: manualDeg は区間内を固定角にする', () => {
+  const track = loadTrack('Location0807.csv');
+  const span = track.tRange.end - track.tRange.start;
+  const r = { start: track.tRange.start + span * 0.3, end: track.tRange.start + span * 0.7, manualDeg: 123 };
+  const got = applyWindAxisOverrides(track, { marks: [], overrides: [r] });
+  const inR = got.filter((s) => s.tMs >= r.start && s.tMs <= r.end);
+  assert.ok(inR.length >= 2, '区間内に手動サンプルがある');
+  for (const s of inR) assert.equal(s.windFromDeg, 123); // 区間内は全部固定角
+  assert.ok(got.some((s) => s.tMs === r.start && s.windFromDeg === 123));
+  assert.ok(got.some((s) => s.tMs === r.end && s.windFromDeg === 123));
 });

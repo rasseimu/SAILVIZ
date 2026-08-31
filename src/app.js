@@ -13,7 +13,7 @@ import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
 import { createWindStrip } from './windstripview.js';
 import { windDirAt } from './windaxis.js';
-import { applyWindAxisOverrides } from './windaxisoverride.js';
+import { applyWindAxisOverrides, pushOverride } from './windaxisoverride.js';
 import { minuteWinners } from './vmgminute.js';
 import { nextRotation, rotatedFitBox } from './videoview.js';
 import { memberList, filterMembers } from './members.js';
@@ -98,6 +98,7 @@ const timeline = createTimeline($('timeline'), {
   onVideoClick: (id) => { const v = state.videos.find((x) => x.id === id); if (v) openVideoPanel(v); },
   onPinAdd: (axisT) => { state.pins.push(axisT + currentBase()); draw(); },
   onPinRemove: (idx) => { state.pins.splice(idx, 1); draw(); },
+  onContextMenu: (info) => openTimelineMenu(info),
 });
 
 const windstrip = createWindStrip($('windstrip'));
@@ -905,6 +906,68 @@ markMenu.querySelectorAll('button').forEach((b) =>
   }));
 window.addEventListener('pointerdown', (e) => { if (!markMenu.contains(e.target)) hideMenu(); });
 
+// タイムライン右クリック小メニュー: [風軸を再推定] / [ピンを刺す/消す]。
+const windaxisMenu = $('windaxis-menu');
+let tlMenu = null; // { t, pinIdx }（右クリック時の軸時刻とヒットしたピン番号）
+function hideTimelineMenu() { windaxisMenu.classList.add('hidden'); tlMenu = null; }
+function openTimelineMenu({ clientX, clientY, t, pinIdx }) {
+  if (!state.tracks.length) { statusEl.textContent = '先にGPS軌跡を読み込んでください'; return; }
+  tlMenu = { t, pinIdx };
+  windaxisMenu.style.left = `${clientX}px`;
+  windaxisMenu.style.top = `${clientY}px`;
+  windaxisMenu.classList.remove('hidden');
+}
+// 現在の選択範囲(crop)を絶対epochへ変換して返す。未選択なら null(ステータス表示)。
+function cropAbsRange() {
+  const base = currentBase();
+  const range = { start: state.crop.start + base, end: state.crop.end + base };
+  if (!(range.end > range.start)) { statusEl.textContent = '先に下バーで区間を選択してください'; return null; }
+  return range;
+}
+
+// 選択範囲(crop)を、表示中の全艇の windAxisOverrides に entry(再推定 or 手動固定角)で適用。
+function applyOverrideToVisible(entry, doneMsg) {
+  const visible = state.tracks.filter((t) => t.visible);
+  if (visible.length === 0) { statusEl.textContent = '表示中の艇がありません'; return; }
+  for (const tr of visible) tr.windAxisOverrides = pushOverride(tr.windAxisOverrides, entry);
+  recomputeWindAxis(); // 上書き後データで風軸ストリップ・風軸↑・VMGを再計算
+  draw();
+  statusEl.textContent = `${doneMsg}（${visible.length}艇）`;
+}
+
+function reestimateWindAxisForCrop() {
+  const range = cropAbsRange();
+  if (!range) return;
+  applyOverrideToVisible(range, '選択区間の風軸を再推定しました');
+}
+
+// 選択区間の風軸を手動角度(0–360°)で固定する。
+function setManualWindAxisForCrop() {
+  const range = cropAbsRange();
+  if (!range) return;
+  const input = window.prompt('この区間の風向を度で入力 (0–360)');
+  if (input == null) return; // キャンセル
+  const deg = Number(input.trim());
+  if (!Number.isFinite(deg)) { statusEl.textContent = '数値を入力してください'; return; }
+  applyOverrideToVisible({ ...range, manualDeg: deg }, `選択区間の風軸を ${Math.round(((deg % 360) + 360) % 360)}° に設定しました`);
+}
+
+windaxisMenu.querySelectorAll('button').forEach((b) =>
+  b.addEventListener('click', () => {
+    const act = b.dataset.act;
+    if (act === 'reestimate') {
+      reestimateWindAxisForCrop();
+    } else if (act === 'manual') {
+      setManualWindAxisForCrop();
+    } else if (act === 'pin' && tlMenu) {
+      if (tlMenu.pinIdx >= 0) state.pins.splice(tlMenu.pinIdx, 1);
+      else state.pins.push(tlMenu.t + currentBase());
+      draw();
+    }
+    hideTimelineMenu();
+  }));
+window.addEventListener('pointerdown', (e) => { if (!windaxisMenu.contains(e.target)) hideTimelineMenu(); });
+
 // トラック色変更: スウォッチ→パレット12色ポップアップ→クリックで変更
 const colorMenu = $('color-menu');
 let colorTargetIdx = null;
@@ -987,14 +1050,9 @@ async function loadProjectEntries() {
   return entries;
 }
 
-// getTrack/getMarks: ダッシュボード表示時に現在読込中の最初の可視トラック/マークを渡す(風軸パネル用)。
 const dashboard = createDashboard({
   rigLabels: RIG_LABELS,
   loadEntries: loadProjectEntries,
-  getTrack: () => state.tracks.find((t) => t.visible) ?? null,
-  getMarks: () => state.marks,
-  getCrop: () => state.crop,
-  onWindAxisChange: () => { recomputeWindAxis(); draw(); },
 });
 
 // 進捗画面: 保存済み全練習に加え、現在の未保存練習(取込直後の反省を含む)も渡す。
