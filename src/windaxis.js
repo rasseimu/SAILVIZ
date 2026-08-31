@@ -18,19 +18,6 @@ export function circDiffDeg(a, b) {
   return d === -180 ? 180 : d;
 }
 
-// 気象台(アメダス)基準で風軸推定を安全側に丸める。
-// stationDeg から円周差が tol(既定10°)を超えるサンプルは「推定が外れている」とみなし、
-// windFromDeg を stationDeg に置換。tol以内はGPS推定を維持。stationDeg が null なら素通し。
-// 常に新配列を返す(非破壊)。
-export function clampSeriesToStation(series, stationDeg, tol = 10) {
-  if (stationDeg == null) return (series || []).map((s) => ({ ...s }));
-  return (series || []).map((s) => (
-    Math.abs(circDiffDeg(s.windFromDeg, stationDeg)) > tol
-      ? { ...s, windFromDeg: stationDeg }
-      : { ...s }
-  ));
-}
-
 export function circMeanDeg(degs) {
   let x = 0, y = 0;
   for (const d of degs) { x += Math.cos(d * DEG); y += Math.sin(d * DEG); }

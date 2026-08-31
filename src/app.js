@@ -12,13 +12,13 @@ import { drawScene } from './renderer.js';
 import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
 import { createWindStrip } from './windstripview.js';
-import { windDirAt, clampSeriesToStation } from './windaxis.js';
+import { windDirAt } from './windaxis.js';
 import { applyWindAxisOverrides, pushOverrideRange } from './windaxisoverride.js';
 import { minuteWinners } from './vmgminute.js';
 import { nextRotation, rotatedFitBox } from './videoview.js';
 import { memberList, filterMembers } from './members.js';
 import { parseMinutes, matchMember } from './minutes.js';
-import { DIR_NAMES, fetchWind, dirIdxToDeg } from './wind.js';
+import { DIR_NAMES, fetchWind } from './wind.js';
 import { fetchWindFromCsv } from './windCsv.js';
 import {
   createReflection, loadReflections, saveReflections, windLabel, formatVideoPos,
@@ -108,35 +108,19 @@ const windstrip = createWindStrip($('windstrip'));
 // キーは「トラックオブジェクト」。各艇のGPSファイルが同名(例 Location.csv)でidが重複しうるため、
 // idをキーにすると別艇が1本に潰れる(風軸ストリップ/VMGが取り違える)。
 let windSeriesByTrack = new Map(); // track -> [{tMs,windFromDeg}]（絶対時刻）
-// 気象台(アメダス)基準の風向(度)。練習読込時に1回取得。null=未取得/静穏でクランプ無効。
-let stationWindDeg = null;
 function recomputeWindAxis() {
   windSeriesByTrack = new Map();
   for (const tr of state.tracks) {
     if (!tr.visible) continue;
     try {
-      const series = applyWindAxisOverrides(tr, { marks: state.marks, overrides: tr.windAxisOverrides });
-      // 気象台から10°超ずれたサンプルは推定ミスとみなし気象台値へ置換(安全側)。
-      windSeriesByTrack.set(tr, clampSeriesToStation(series, stationWindDeg));
+      windSeriesByTrack.set(tr, applyWindAxisOverrides(tr, {
+        marks: state.marks, overrides: tr.windAxisOverrides,
+      }));
     } catch {
       windSeriesByTrack.set(tr, []); // 推定失敗は空系列として扱い、落とさない
     }
   }
   recomputeVmgWinners();
-}
-
-// 練習の中央時刻で気象台(アメダス→CSV)の風向を1回取得し stationWindDeg に格納。
-// 取得後に風軸を再計算＋再描画してクランプを反映。失敗/静穏なら null のまま(クランプ無効)。
-async function refreshStationWind() {
-  const range = globalRange(state.tracks, 'absolute');
-  if (!(range.end > range.start)) { stationWindDeg = null; return; }
-  const midMs = Math.round((range.start + range.end) / 2);
-  let w = null;
-  try { w = await fetchWind(midMs) ?? await fetchWindFromCsv(midMs); } catch { w = null; }
-  stationWindDeg = w ? dirIdxToDeg(w.dirIdx) : null;
-  recomputeWindAxis();
-  if (state.vmgEnabled) recomputeVmgFull();
-  draw();
 }
 
 // 1分ごとVMG勝者(ネオンハイライト用)。vmgOn時のみ算出。風軸再計算後に呼ぶ。
@@ -255,7 +239,6 @@ async function loadFiles(fileList) {
   recomputeView();
   draw();
   renderSidebar();
-  refreshStationWind(); // 非同期: 気象台風向を取得後にクランプ反映
 }
 
 // ドロップされた動画を、その瞬間の再生位置(絶対時刻)に紐付けて登録。
@@ -370,7 +353,6 @@ async function loadPractice(name) {
   renderSidebar();
   if (state.vmgEnabled) recomputeVmgFull();
   draw();
-  refreshStationWind(); // 非同期: 気象台風向を取得後にクランプ反映
   const n = state.videos.length;
   statusEl.textContent = n
     ? `読込: ${name}。動画${n}本は未リンク（📁 動画フォルダ取込で再リンク）`
@@ -1119,9 +1101,7 @@ function recomputeVmgFull() {
   let windSeries;
   try {
     windSeries = unifyWindAxis(visibleTracks, {
-      estimator: (t, o) => clampSeriesToStation(
-        applyWindAxisOverrides(t, { ...o, overrides: t.windAxisOverrides }), stationWindDeg,
-      ),
+      estimator: (t, o) => applyWindAxisOverrides(t, { ...o, overrides: t.windAxisOverrides }),
       marks: state.marks,
     });
   } catch {

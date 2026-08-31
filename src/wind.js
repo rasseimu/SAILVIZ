@@ -17,13 +17,6 @@ export function windDirName(idx) {
     ? DIR_NAMES[idx] : '不明';
 }
 
-// アメダスの16方位インデックス(1=北北東…16=北)を「風の吹いてくる向き」の度に変換。
-// 0=静穏は方向なし(null)。16=北=0°。範囲外も null。
-export function dirIdxToDeg(idx) {
-  if (typeof idx !== 'number' || !Number.isInteger(idx) || idx < 1 || idx > 16) return null;
-  return (idx % 16) * 22.5;
-}
-
 // epoch(ms) を Asia/Tokyo の {yyyy, MM, dd, HH, mm} に分解。
 function jstParts(ms) {
   const fmt = new Intl.DateTimeFormat('en-CA', {

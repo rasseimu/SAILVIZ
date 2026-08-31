@@ -5,41 +5,8 @@ import {
   segmentLegs, classifyManeuver, estimateWindFromManeuver, learnPolarAngles,
   assignLegKinds, fillLegEstimates, rejectMarkRoundings, rejectMinorTurns,
   foldAnchorsToHemisphere, rejectAnchorOutliers, smoothWindSeries,
-  estimateWindAxisSeries, windDirAt, clampSeriesToStation,
+  estimateWindAxisSeries, windDirAt,
 } from '../src/windaxis.js';
-
-test('clampSeriesToStation: 10°以内はGPS維持・超過は気象台値に置換', () => {
-  const series = [
-    { tMs: 0, windFromDeg: 205 }, // station200から+5 → 維持
-    { tMs: 1, windFromDeg: 230 }, // +30 → 置換
-    { tMs: 2, windFromDeg: 190 }, // -10ちょうど → 維持(>10のみ置換)
-  ];
-  const out = clampSeriesToStation(series, 200, 10);
-  assert.equal(out[0].windFromDeg, 205);
-  assert.equal(out[1].windFromDeg, 200);
-  assert.equal(out[2].windFromDeg, 190);
-});
-
-test('clampSeriesToStation: 北またぎ(350 vs 10)は円周差で判定', () => {
-  // station=10°, サンプル350° は円周差20°>10 → 置換
-  const out = clampSeriesToStation([{ tMs: 0, windFromDeg: 350 }], 10, 10);
-  assert.equal(out[0].windFromDeg, 10);
-  // station=5°, サンプル358° は円周差7°<=10 → 維持
-  const keep = clampSeriesToStation([{ tMs: 0, windFromDeg: 358 }], 5, 10);
-  assert.equal(keep[0].windFromDeg, 358);
-});
-
-test('clampSeriesToStation: station が null なら素通し(非破壊)', () => {
-  const series = [{ tMs: 0, windFromDeg: 230 }];
-  const out = clampSeriesToStation(series, null, 10);
-  assert.deepEqual(out, series);
-  assert.notEqual(out, series); // 新配列
-});
-
-test('clampSeriesToStation: 他フィールドは保持する', () => {
-  const out = clampSeriesToStation([{ tMs: 5, windFromDeg: 300, source: 'x' }], 200, 10);
-  assert.deepEqual(out[0], { tMs: 5, windFromDeg: 200, source: 'x' });
-});
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
 // 円周量の近さ（北またぎ対応）

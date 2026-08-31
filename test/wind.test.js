@@ -1,15 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { windDirName, blockHour, amedasUrl, parseWind, fetchWind, AMEDAS_NAME, dirIdxToDeg } from '../src/wind.js';
-
-test('dirIdxToDeg: 16方位を度に変換(北=0/静穏=null)', () => {
-  assert.equal(dirIdxToDeg(0), null);   // 静穏は方向なし
-  assert.equal(dirIdxToDeg(16), 0);     // 北=0°(360→0)
-  assert.equal(dirIdxToDeg(1), 22.5);   // 北北東
-  assert.equal(dirIdxToDeg(4), 90);     // 東
-  assert.equal(dirIdxToDeg(8), 180);    // 南
-  assert.equal(dirIdxToDeg(12), 270);   // 西
-});
+import { windDirName, blockHour, amedasUrl, parseWind, fetchWind, AMEDAS_NAME } from '../src/wind.js';
 
 test('windDirName は16方位＋静穏＋範囲外', () => {
   assert.equal(windDirName(0), '静穏');
