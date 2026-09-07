@@ -229,8 +229,9 @@ export function createProgress({
       }));
 
     // ロードマップ表示の下の「変更」→ 編集画面へ遷移(閲覧は誰でも、保存は編集モード)。
+    // 特定部員を選択中ならその部員を、全て表示なら未指定で開く。
     content.querySelectorAll('[data-roadmap-edit]').forEach((btn) =>
-      btn.addEventListener('click', () => onEditRoadmap()));
+      btn.addEventListener('click', () => onEditRoadmap(selected === 'all' ? null : selected)));
 
     // カードの余白クリックでAIコメント対象を選択トグル。既存の操作要素
     // (ボタン・入力欄・リンク)へのクリックは選択に影響しない。

@@ -387,12 +387,12 @@ function backToHomeFromProgress() {
   document.body.classList.remove('view-progress');
   showHome();
 }
-async function showRoadmap() {
-  // ロードマップは自己完結データ(目標/段階)なので保存フォルダは必須にしない。
-  // フォルダ選択済みなら sailviz-roadmap.json に永続化、未選択なら localStorage のみ。
+// member を渡すと、その部員を選択して編集画面を開く(進捗画面の導線用)。
+async function showRoadmap(member) {
+  // ロードマップは自己完結データ(目標/段階)。永続化は API(store)。
   document.body.classList.remove('view-home');
   document.body.classList.add('view-roadmap');
-  await roadmap.render();
+  await roadmap.render(typeof member === 'string' ? member : undefined);
 }
 function backToHomeFromRoadmap() {
   document.body.classList.remove('view-roadmap');
