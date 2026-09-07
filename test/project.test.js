@@ -50,6 +50,26 @@ test('version 不一致は throw', () => {
   assert.throws(() => deserializeProject(null));
 });
 
+test('basemap: image/bounds/z が round-trip し、実行時フィールド(img)は落ちる', () => {
+  const st = sampleState();
+  const bounds = { minLat: 35, maxLat: 35.1, minLon: 139, maxLon: 139.1 };
+  st.basemap = { image: 'data:image/png;base64,AAAA', bounds, z: 15, img: { fake: true } };
+  const saved = serializeProject(st, { savedAt: 's' });
+  assert.equal('img' in saved.basemap, false);
+  assert.equal(saved.basemap.image, 'data:image/png;base64,AAAA');
+  assert.equal(saved.basemap.z, 15);
+  const back = deserializeProject(saved);
+  assert.deepEqual(back.basemap.bounds, bounds);
+  assert.equal(back.basemap.image, 'data:image/png;base64,AAAA');
+});
+
+test('basemap: 未設定/不正は null', () => {
+  const st = sampleState();
+  assert.equal(serializeProject(st).basemap, null); // basemap未設定
+  assert.equal(deserializeProject({ version: 1 }).basemap, null);
+  assert.equal(deserializeProject({ version: 1, basemap: { image: 'x' } }).basemap, null); // bounds欠落
+});
+
 function baseState() {
   return {
     mode: 'absolute', accuracyFilter: true,

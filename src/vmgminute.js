@@ -1,11 +1,30 @@
 // src/vmgminute.js
-// 複数艇のGPS軌跡を新風軸(windaxis)基準で「時計の毎分」ごとにVMG比較し、
-// その分の勝者(最良VMG艇)区間を返す純関数群。DOM/副作用なし。
+// 複数艇のGPS軌跡を新風軸(windaxis)基準で「集計バケット(既定30秒、opts.bucketMs)」ごとに
+// VMG比較し、そのバケットの勝者(最良VMG艇)区間を返す純関数群。DOM/副作用なし。
 // マップのネオンハイライト(renderer)へ渡す前段の集計に使う。
+// (歴史的経緯で関数名は minute/Minute のままだが、実際のバケット幅は BUCKET_MS)
 import { circDiffDeg, computeCog, windDirAt } from './windaxis.js';
+import { detectHeightAdjustWindowsByTrack } from './vmg.js';
 
 const DEG = Math.PI / 180;
-const MINUTE = 60_000;
+// VMG集計バケット(既定30秒=旧1分の半分)。opts.bucketMs で上書き可。
+// boatMinuteVmg と minuteWinners で必ず同じ値を使うこと(バケット境界を一致させるため)。
+const BUCKET_MS = 30_000;
+
+// [lo,hi) から exclude 区間群を差し引き、残った断片 [[a,b],...] を返す(重なりで分割されうる)。
+function subtractIntervals(lo, hi, exclude) {
+  let pieces = [[lo, hi]];
+  for (const e of exclude) {
+    const next = [];
+    for (const [a, b] of pieces) {
+      if (e.hi <= a || e.lo >= b) { next.push([a, b]); continue; } // 重なりなし
+      if (e.lo > a) next.push([a, Math.min(e.lo, b)]);            // 除外前の断片
+      if (e.hi < b) next.push([Math.max(e.hi, a), b]);            // 除外後の断片
+    }
+    pieces = next;
+  }
+  return pieces.filter(([a, b]) => b > a);
+}
 
 // レグ代表方位/瞬時COGと風向から走種を判定。90°±deadband をリーチとして除外。
 export function classifyPointOfSail(headingDeg, windDeg, deadband = 12) {
@@ -40,13 +59,14 @@ function markShortRuns(items, pos, maxSec) {
   }
 }
 
-// 1艇の、時計の毎分バケットごとの (走種, 平均VMG)。リーチ主体の分は載せない。
+// 1艇の、集計バケット(既定30秒)ごとの (走種, 平均VMG)。リーチ主体のバケットは載せない。
 // リーチ(横移動)はサンプル単位で除外し、短い風下ラン(クローズ間の一時的な下り)は
 // markShortRuns で除外してから集計する(概算=残りのクリーン区間だけで平均)。
-// 返り値: Map<minuteIndex, {pointOfSail, vmg, n}>
+// 返り値: Map<bucketIndex, {pointOfSail, vmg, n}>
 export function boatMinuteVmg(track, windSeries, opts = {}) {
   const deadband = opts.deadband ?? 12;
   const minSamples = opts.minSamples ?? 3;
+  const bucketMs = opts.bucketMs ?? BUCKET_MS;
   const excursionMaxSec = opts.excursionMaxSec ?? 60; // これ以下の風下ランは除外(クローズ中の10秒〜1分ぐらいの下り)
   const upwindExcursionMaxSec = opts.upwindExcursionMaxSec ?? 30; // これ以下のクローズは除外(ランニング中の5〜30秒の登り)
   const samples = computeCog(track.points, opts.cogOpts ?? {});
@@ -69,7 +89,7 @@ export function boatMinuteVmg(track, windSeries, opts = {}) {
   const buckets = new Map(); // minuteIndex -> {up:[], down:[]}
   for (const it of items) {
     if (!it || it.drop || it.pos === 'reach') continue;
-    const mi = Math.floor(it.t / MINUTE);
+    const mi = Math.floor(it.t / bucketMs);
     let b = buckets.get(mi);
     if (!b) { b = { up: [], down: [] }; buckets.set(mi, b); }
     (it.pos === 'upwind' ? b.up : b.down).push(it.value);
@@ -85,16 +105,21 @@ export function boatMinuteVmg(track, windSeries, opts = {}) {
   return out;
 }
 
-// 全艇×毎分バケットから、各分の最良VMG艇(勝者)区間を返す。
+// 全艇×集計バケット(既定30秒)から、各バケットの最良VMG艇(勝者)区間を返す。
 // - windSeriesByTrack は「トラックオブジェクト」をキーにしたMap。
 //   各艇のGPSファイルが同名(例 Location.csv)でidが重複しうるため、idでは区別しない。
 // - 対象は風上/風下の艇のみ(リーチは boatMinuteVmg で除外済み)
 // - その分に対象艇が minBoats 未満なら勝者なし
 // - 走種をまたいでVMG(風軸方向の前進成分の大きさ)最大の1艇を勝者に
-// - 隣接する同一(トラック,走種)の分は1区間に結合
-// 返り値: [{track, boatId, color, lo, hi, pointOfSail, vmg}]（lo/hi は絶対epoch ms・分境界）
+// - 隣接する同一(トラック,走種)のバケットは1区間に結合
+// 返り値: [{track, boatId, color, lo, hi, pointOfSail, vmg}]（lo/hi は絶対epoch ms・バケット境界）
 export function minuteWinners(tracks, windSeriesByTrack, opts = {}) {
   const minBoats = opts.minBoats ?? 2;
+  const bucketMs = opts.bucketMs ?? BUCKET_MS; // boatMinuteVmg と同じバケット幅を使う
+
+  // 高さ調整局面(1艇クローズ・他艇過半数が下り)を全艇まとめてネオンから除外する。
+  const exclude = opts.excludeHeightAdjust === false
+    ? [] : detectHeightAdjustWindowsByTrack(tracks, windSeriesByTrack, opts);
 
   // minuteIndex -> [{track, pointOfSail, vmg}]
   const byMinute = new Map();
@@ -123,16 +148,23 @@ export function minuteWinners(tracks, windSeriesByTrack, opts = {}) {
   for (const m of perMinute) {
     const last = segs[segs.length - 1];
     if (last && last.track === m.track && last.pointOfSail === m.pointOfSail && last._mi + 1 === m.mi) {
-      last.hi = (m.mi + 1) * MINUTE;
+      last.hi = (m.mi + 1) * bucketMs;
       last._mi = m.mi;
       last.vmg = Math.max(last.vmg, m.vmg);
     } else {
       segs.push({
         track: m.track, boatId: m.track.id, color: m.track.color || '#888',
-        lo: m.mi * MINUTE, hi: (m.mi + 1) * MINUTE,
+        lo: m.mi * bucketMs, hi: (m.mi + 1) * bucketMs,
         pointOfSail: m.pointOfSail, vmg: m.vmg, _mi: m.mi,
       });
     }
   }
-  return segs.map(({ _mi, ...s }) => s);
+  const result = segs.map(({ _mi, ...s }) => s);
+  if (exclude.length === 0) return result;
+  // 除外区間で各勝者帯をクリップ(帯が分割されうる)。
+  const clipped = [];
+  for (const s of result) {
+    for (const [lo, hi] of subtractIntervals(s.lo, s.hi, exclude)) clipped.push({ ...s, lo, hi });
+  }
+  return clipped;
 }

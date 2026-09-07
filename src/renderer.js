@@ -20,6 +20,41 @@ function trackWindow(track, crop, mode) {
   return { lo: crop.start, hi: crop.end };
 }
 
+// 背景地図(合成済みラスタ)を軌跡の下敷きに敷く。被覆boundsの矩形を project→screen で
+// 平行四辺形に写し、その基底ベクトルから画像px→画面のアフィン変換を作って貼る。
+// これでパン・ズーム・回転に軌跡と完全追従する。未ロード/未設定なら何もしない。
+function drawBasemap(ctx, basemap, T) {
+  const img = basemap && basemap.img;
+  if (!img || !img.complete || !img.naturalWidth) return;
+  const b = basemap.bounds;
+  const tl = toScreen(b.maxLat, b.minLon, T); // 画像左上 = 高緯度・小経度
+  const tr = toScreen(b.maxLat, b.maxLon, T); // 右上
+  const bl = toScreen(b.minLat, b.minLon, T); // 左下
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  // origin=tl, u軸(画像右方向)=(tr-tl)/iw, v軸(画像下方向)=(bl-tl)/ih
+  const a = (tr.px - tl.px) / iw, bcoef = (tr.py - tl.py) / iw;
+  const c = (bl.px - tl.px) / ih, d = (bl.py - tl.py) / ih;
+  ctx.save();
+  ctx.setTransform(a, bcoef, c, d, tl.px, tl.py);
+  ctx.drawImage(img, 0, 0);
+  ctx.restore();
+}
+
+// 地理院タイル利用時の帰属表示(右下・小さく)。
+function drawAttribution(ctx, T) {
+  const txt = '地理院タイル';
+  ctx.save();
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'bottom';
+  const w = ctx.measureText(txt).width;
+  ctx.fillStyle = 'rgba(255,255,255,0.72)';
+  ctx.fillRect(T.w - w - 8, T.h - 15, w + 8, 15);
+  ctx.fillStyle = '#333';
+  ctx.fillText(txt, T.w - 4, T.h - 3);
+  ctx.restore();
+}
+
 // 点列を折れ線で描く。include(p) が真の点だけを繋ぐ(偽の点で線を切る)。
 function strokePolyline(ctx, points, T, include) {
   ctx.beginPath();
@@ -117,9 +152,17 @@ function drawVmgNeon(ctx, tr, T, lo, hi) {
 }
 
 export function drawScene(ctx, state) {
-  const { transform: T, tracks, events, now, mode, crop, referenceTrack, marks = [], videos = [], activeVideoId = null, vmgWinners = [] } = state;
+  const { transform: T, tracks, events, now, mode, crop, referenceTrack, marks = [], videos = [], activeVideoId = null, vmgWinners = [], basemap = null } = state;
   ctx.clearRect(0, 0, T.w, T.h);
   if (!T.proj) return;
+
+  // 背景地図があれば、まずキャンバス全体を画像の海の色で塗る。これで回転隅や地図外も
+  // 白ではなく海色になり、軌跡が通る場所は常に背景を持つ。その上に地図画像→軌跡を重ねる。
+  if (basemap && basemap.img && basemap.img.complete && basemap.img.naturalWidth) {
+    ctx.fillStyle = basemap.seaColor || '#bfd3ff';
+    ctx.fillRect(0, 0, T.w, T.h);
+  }
+  drawBasemap(ctx, basemap, T);
 
   // ポリライン: 範囲外は点線(文脈として残す)、範囲内は実線。重複描画しないので破線が隠れない。
   for (const tr of tracks) {
@@ -203,5 +246,10 @@ export function drawScene(ctx, state) {
     const pos = positionOnTracksAt(tracks, referenceTrack, v.t);
     if (!pos) continue;
     drawVideoBadge(ctx, toScreen(pos.lat, pos.lon, T), v.id === activeVideoId);
+  }
+
+  // 帰属表示(背景地図があるときのみ・最前面)。
+  if (basemap && basemap.img && basemap.img.complete && basemap.img.naturalWidth) {
+    drawAttribution(ctx, T);
   }
 }

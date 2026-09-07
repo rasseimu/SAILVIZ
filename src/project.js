@@ -22,6 +22,20 @@ export function serializeProject(state, { savedAt } = {}) {
     })),
     reflections: state.reflections.map((r) => ({ ...r })),
     practiceDate: typeof state.practiceDate === 'number' ? state.practiceDate : null,
+    // 背景地図(初回CSV取込時に1枚合成した地理院タイル)。dataURL/被覆bounds/ズームのみ保存。
+    basemap: serializeBasemap(state.basemap),
+  };
+}
+
+// 実行時フィールド(img 等)は落とし、保存対象の image/bounds/z/seaColor のみ残す。
+function serializeBasemap(bm) {
+  if (!bm || typeof bm.image !== 'string' || !bm.bounds) return null;
+  const b = bm.bounds;
+  return {
+    image: bm.image,
+    bounds: { minLat: b.minLat, maxLat: b.maxLat, minLon: b.minLon, maxLon: b.maxLon },
+    z: typeof bm.z === 'number' ? bm.z : null,
+    seaColor: typeof bm.seaColor === 'string' ? bm.seaColor : null,
   };
 }
 
@@ -49,5 +63,19 @@ export function deserializeProject(obj) {
     })),
     reflections: arr(obj.reflections),
     practiceDate: typeof obj.practiceDate === 'number' ? obj.practiceDate : null,
+    basemap: deserializeBasemap(obj.basemap),
+  };
+}
+
+function deserializeBasemap(bm) {
+  if (!bm || typeof bm.image !== 'string' || !bm.bounds) return null;
+  const b = bm.bounds;
+  const ok = ['minLat', 'maxLat', 'minLon', 'maxLon'].every((k) => typeof b[k] === 'number');
+  if (!ok) return null;
+  return {
+    image: bm.image,
+    bounds: { minLat: b.minLat, maxLat: b.maxLat, minLon: b.minLon, maxLon: b.maxLon },
+    z: typeof bm.z === 'number' ? bm.z : null,
+    seaColor: typeof bm.seaColor === 'string' ? bm.seaColor : null,
   };
 }
