@@ -173,7 +173,8 @@ let mapRot = 0; // マップ回転角(ラジアン、表示のみ・保存しな
 let windUp = false; // 風軸を常に画面上へ向けるモード(再生時刻の推定風向に追従)。保存しない。
 
 // windUp時: 基準トラックの推定風向を現在時刻で引き、風向が真上を向く回転(rot=-風向)を適用する。
-// 風向データが無ければ回転は据え置き。スライダー/ラベル表示も同期する。
+// 風向データが無ければ回転は据え置き。ラベル/スライダーは「風向そのもの」を表示する
+// (回転角=-風向ではなく、ユーザーが向けている風向を見せる。例: 風160°→160°表示)。
 function applyWindUpRotation(now) {
   const ref = state.tracks.find((t) => t.visible) || null;
   const series = ref ? windSeriesByTrack.get(ref) : null;
@@ -181,9 +182,17 @@ function applyWindUpRotation(now) {
   const lookupT = state.mode === 'elapsed' ? ref.tRange.start + now : now;
   const dir = windDirAt(series, lookupT);
   if (dir == null) return;
-  mapRot = (-dir * Math.PI) / 180;
+  mapRot = (-dir * Math.PI) / 180; // 回転は従来どおり(風を真上へ)
   state.transform.rot = mapRot;
-  const d = Math.round(((-dir % 360) + 360) % 360);
+  const d = Math.round(((dir % 360) + 360) % 360); // 表示は風向そのもの
+  $('rotate-slider').value = String(d);
+  $('rotate-label').textContent = `${d}°`;
+}
+
+// 回転ラベル/スライダーを、現在の上向き方位(= -mapRot)に同期する。
+// windUp を解除して手動へ戻すときに使う。上向き方位で統一しているので数字は据え置きになる。
+function syncRotateControlToMapRot() {
+  const d = ((Math.round((-mapRot * 180) / Math.PI) % 360) + 360) % 360;
   $('rotate-slider').value = String(d);
   $('rotate-label').textContent = `${d}°`;
 }
@@ -915,10 +924,12 @@ mapCanvas.addEventListener('wheel', (e) => {
   draw();
 }, { passive: false });
 
-// マップ回転スライダー(0–360°)。表示のみ・保存しない。
+// マップ回転コントロール(0–360°)。表示のみ・保存しない。
+// 数字は「画面の上に来ている方位」= 上向き方位。風軸↑と同じ基準にして、
+// トグルしても数字が入れ替わらないようにする(上向き方位 B ⟺ mapRot = -B)。
 function setMapRotationDeg(deg) {
   const d = ((deg % 360) + 360) % 360;
-  mapRot = (d * Math.PI) / 180;
+  mapRot = (-d * Math.PI) / 180; // 上向き方位dを真上に持ってくる回転
   state.transform.rot = mapRot;
   $('rotate-slider').value = String(d);
   $('rotate-label').textContent = `${d}°`;
@@ -932,7 +943,9 @@ $('windup-toggle').addEventListener('change', (e) => {
   windUp = e.target.checked;
   $('rotate-slider').disabled = windUp;
   $('rotate-reset').disabled = windUp;
-  draw(); // ON時は即座に風向へ回転。OFF時はmapRotが現在角のまま維持される。
+  // OFFに戻すときは表示を実回転角へ戻す(windUp中は風向表示のため、手動ドラッグ時のジャンプ防止)。
+  if (!windUp) syncRotateControlToMapRot();
+  draw(); // ON時は applyWindUpRotation が風向を表示。OFF時はmapRotが現在角のまま維持される。
 });
 
 // VMG勝者ネオン トグル: ONで1分ごと最良VMG艇を発光表示。OFFで消灯。表示のみ・保存しない。
