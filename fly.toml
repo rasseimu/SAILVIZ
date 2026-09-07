@@ -1,0 +1,26 @@
+# Fly.io デプロイ設定。app 名は fly launch/apps create で決めた一意名に置き換える。
+# 東京リージョン(nrt)、/data に永続ボリュームをマウント、HTTPS 強制。
+app = "sailviz-sit"
+primary_region = "nrt"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8000"
+  DATA_DIR = "/data"
+  # NODE_ENV=production で認証 Cookie に Secure 属性が付く(HTTPS 前提)
+  NODE_ENV = "production"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  # 小規模クラブ用: アクセスが無ければマシンを休止しコスト削減。次アクセスで自動起動。
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+# 練習JSON/オーバーレイを保存する永続ボリューム。1台構成(単一書き込み・last-write-wins)。
+[mounts]
+  source = "sailviz_data"
+  destination = "/data"

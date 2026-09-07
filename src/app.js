@@ -26,17 +26,13 @@ import {
   previousRig, RIG_FIELDS, NOTE_FIELDS,
 } from './reflections.js';
 import { serializeProject, deserializeProject } from './project.js';
-import {
-  projectFileName, listProjectFiles, readProject, writeProject, readProgress, writeProgress,
-  uniqueProjectName,
-} from './projectfs.js';
-import { practiceSummary, earliestContentMs } from './summary.js';
+import { uniqueProjectName } from './projectfs.js';
+import { store } from './store.js';
+import { earliestContentMs } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
 import { createDashboard } from './dashboard.js';
 import { createProgress } from './progress.js';
-import { loadProgress, saveProgress } from './progressstore.js';
 import { createRoadmap } from './roadmap.js';
-import { loadRoadmap, saveRoadmap, readRoadmapFile, writeRoadmapFile } from './roadmapstore.js';
 import { analyzeFleetVmg, unifyWindAxis, rankVmg } from './vmg.js';
 import { createVmgPanel } from './vmgview.js';
 
@@ -306,26 +302,23 @@ async function ensureProjectDir() {
   return chooseProjectDir();
 }
 
-// 現在の状態を保存フォルダに書き出す。
+// 現在の状態を store(API)へ書き出す。
 async function saveProject() {
-  const dir = await ensureProjectDir();
-  if (!dir) return;
   const obj = serializeProject(state, { savedAt: new Date().toISOString() });
   // 既存ファイルを開いている/一度保存済みなら同名に上書き(後付けGPSでファイルを増やさない)。
   // 新規は練習日時(ユーザー指定→データ時刻→now)から採番し、衝突は分単位でずらす。
   let name = state.currentFileName;
   if (!name) {
     const baseMs = state.practiceDate ?? earliestContentMs(obj) ?? Date.now();
-    const existing = (await listProjectFiles(dir)).map((f) => f.name);
+    const existing = (await store.listProjects()).map((f) => f.name);
     name = uniqueProjectName(baseMs, existing);
     state.currentFileName = name;
   }
   try {
-    await writeProject(dir, name, obj);
+    await store.writeProject(name, obj);
   } catch (e) {
     statusEl.textContent = `保存に失敗: ${e.message}`; return;
   }
-  cacheSummary(name, practiceSummary(obj, { name })); // ホームのカードに即反映
   statusEl.textContent = `保存しました: ${name}`;
 }
 
@@ -336,7 +329,7 @@ async function loadPractice(name) {
   }
   let data;
   try {
-    data = deserializeProject(await readProject(projectDir, name));
+    data = deserializeProject(await store.readProject(name));
   } catch (e) {
     statusEl.textContent = `読込に失敗: ${e.message}`;
     return false;
@@ -374,20 +367,9 @@ async function loadPractice(name) {
 }
 
 // ================= ホーム画面(カード型ランチャー) =================
-const SUMMARY_KEY = 'sailviz.summaries.v3'; // v3: 練習日をトラック＋動画の最古時刻に変更(旧キャッシュ破棄)
-// 要約キャッシュ: { ファイル名: 要約 }。ファイル名はタイムスタンプで不変なので陳腐化しない。
-function loadSummaryCache() {
-  try { return JSON.parse(localStorage.getItem(SUMMARY_KEY)) || {}; } catch { return {}; }
-}
-function cacheSummary(name, summary) {
-  const c = loadSummaryCache();
-  c[name] = summary;
-  try { localStorage.setItem(SUMMARY_KEY, JSON.stringify(c)); } catch { /* quota は無視 */ }
-}
 
 function showHome() { document.body.classList.add('view-home'); renderHome(); }
 async function showDashboard() {
-  if (!projectDir && !(await ensureProjectDir())) return;
   document.body.classList.remove('view-home');
   document.body.classList.add('view-dashboard');
   await dashboard.render();
@@ -397,7 +379,6 @@ function backToHomeFromDashboard() {
   showHome();
 }
 async function showProgress() {
-  if (!projectDir && !(await ensureProjectDir())) return;
   document.body.classList.remove('view-home');
   document.body.classList.add('view-progress');
   await progress.render();
@@ -464,37 +445,39 @@ async function renderHome() {
   const grid = $('home-cards');
   const folderEl = $('home-folder');
   folderEl.innerHTML = '';
-  // フォルダ選択はホーム画面に一本化。常に表示し、押すと Finder を開く。
+  // 動画フォルダ選択ボタン。動画走査専用(JSON保存には不要)。
   const pick = document.createElement('button');
   pick.className = 'btn';
-  pick.textContent = projectDir ? `📁 ${projectDir.name}（変更）` : '▶ 反省データフォルダを選択…';
-  pick.title = projectDir ? '別のフォルダに切り替える' : '練習データ(反省データ)のフォルダを選ぶ';
+  pick.textContent = projectDir ? `📁 ${projectDir.name}（動画フォルダ・変更）` : '▶ 動画フォルダを選択（任意）';
+  pick.title = projectDir ? '動画フォルダを変更する' : '動画フォルダ取込に使うフォルダを選ぶ（任意）';
   pick.addEventListener('click', async () => { if (await chooseProjectDir()) renderHome(); });
   folderEl.appendChild(pick);
 
   grid.innerHTML = '';
-  if (!projectDir) {
+  // サーバーから要約一覧を取得してカードを描画(全件ダウンロード不要)。
+  let items;
+  try {
+    items = await store.listSummaries();
+  } catch (e) {
+    const err = document.createElement('div');
+    err.id = 'home-empty';
+    err.textContent = `練習一覧の取得に失敗しました: ${e.message}`;
+    grid.appendChild(err);
+    return;
+  }
+  if (!items.length) {
     const empty = document.createElement('div');
     empty.id = 'home-empty';
-    empty.textContent = '保存フォルダを選択すると、過去の練習がここに並びます。';
+    empty.textContent = '保存済みの練習がありません。GPS を読み込んで保存ボタンで保存できます。';
     grid.appendChild(empty);
     return;
   }
-
-  const items = await listProjectFiles(projectDir);
-  const cache = loadSummaryCache();
   for (const it of items) {
     const card = document.createElement('button');
     card.className = 'home-card';
-    renderCard(card, it, cache[it.name] ?? null);
+    renderCard(card, it, it);
     card.addEventListener('click', () => openPractice(it.name));
     grid.appendChild(card);
-    // 未キャッシュはその1件だけ読んで要約(初回のみ。以後は即時)。
-    if (!cache[it.name]) {
-      readProject(projectDir, it.name)
-        .then((proj) => { const s = practiceSummary(proj, { name: it.name }); cacheSummary(it.name, s); renderCard(card, it, s); })
-        .catch(() => { renderCard(card, it, { trackCount: '?', reflectionCount: '?', videoCount: '?', wind: null }); });
-    }
   }
 }
 
@@ -705,8 +688,37 @@ $('file-input').addEventListener('change', (e) => loadFiles(e.target.files));
 $('folder-import').addEventListener('click', importFromVideoFolder);
 $('project-save').addEventListener('click', saveProject);
 
-// 起動時: 保存フォルダを IndexedDB から復元し、ホームのカードに反映。
+// ================= 編集モード(共有パスワード)ゲート =================
+const editModeBtn = $('editModeBtn');
+const loginDialog = $('loginDialog');
+const loginForm = $('loginForm');
+const loginPassword = $('loginPassword');
+const loginError = $('loginError');
+
+function applyEditableState() {
+  const on = store.isUnlocked();
+  editModeBtn.textContent = on ? 'ログアウト' : '編集モード';
+  document.body.classList.toggle('readonly', !on);
+  document.querySelectorAll('.writes-json').forEach((el) => { el.disabled = !on; });
+}
+
+editModeBtn.addEventListener('click', async () => {
+  if (store.isUnlocked()) { await store.lock(); applyEditableState(); return; }
+  loginError.hidden = true; loginPassword.value = ''; loginDialog.showModal();
+});
+
+loginForm.addEventListener('submit', async (e) => {
+  if (e.submitter && e.submitter.value !== 'ok') return;
+  e.preventDefault();
+  const ok = await store.unlock(loginPassword.value);
+  if (ok) { loginDialog.close(); applyEditableState(); }
+  else { loginError.hidden = false; }
+});
+
+// 起動時: 認証状態を取得し、動画フォルダを IndexedDB から復元してホームを表示。
 (async () => {
+  try { await store.refreshAuth(); } catch { /* 認証取得失敗は無視(未ログイン扱い) */ }
+  applyEditableState();
   try {
     const h = await loadDirHandle();
     if (h && await ensurePermission(h)) { projectDir = h; }
@@ -1065,14 +1077,13 @@ const NOTE_LABELS = {
   slowFactor: '遅かった要因', fastFactor: '速かった要因',
 };
 
-// 保存フォルダの全練習ファイルを deserialize して {name, project}[] で返す(projectDir 前提)。
+// 保存済み全練習を deserialize して {name, project}[] で返す。
 // ダッシュボードと進捗画面で共有。
 async function loadProjectEntries() {
-  if (!projectDir) return [];
-  const files = await listProjectFiles(projectDir);
+  const names = (await store.listProjects()).map((f) => f.name);
   const entries = [];
-  for (const f of files) {
-    try { entries.push({ name: f.name, project: deserializeProject(await readProject(projectDir, f.name)) }); }
+  for (const name of names) {
+    try { entries.push({ name, project: deserializeProject(await store.readProject(name)) }); }
     catch { /* 壊れたファイルはスキップ */ }
   }
   return entries;
@@ -1093,48 +1104,17 @@ const progress = createProgress({
     }
     return entries;
   },
-  // 進捗オーバーレイは保存フォルダの sailviz-progress.json に永続化(フォルダごとDrive同期で引継可)。
-  // フォルダ未選択時は localStorage のみ。旧 localStorage データはファイルが空なら初回だけ移行。
-  loadProgressData: async () => {
-    const local = loadProgress();
-    if (!projectDir) return local;
-    const file = await readProgress(projectDir);
-    if (!Object.keys(file).length && Object.keys(local).length) {
-      await writeProgress(projectDir, local); // 初回移行
-      return local;
-    }
-    return file;
-  },
-  saveProgressData: async (obj) => {
-    saveProgress(obj); // localStorage ミラー(フォルダ未選択/書込失敗の保険)
-    if (projectDir) await writeProgress(projectDir, obj);
-  },
+  // 進捗オーバーレイは API(store) に永続化。
+  loadProgressData: async () => store.readProgress(),
+  saveProgressData: async (obj) => { await store.writeProgress(obj); },
   // 目標の変化枠の「ロードマップ」表示(読み取り専用)用。編集は roadmap 画面。
-  loadRoadmapData: async () => {
-    const local = loadRoadmap();
-    if (!projectDir) return local;
-    const file = await readRoadmapFile(projectDir);
-    return Object.keys(file).length ? file : local;
-  },
+  loadRoadmapData: async () => store.readRoadmap(),
 });
 
-// 目標ロードマップ: 進捗と同じく保存フォルダの sailviz-roadmap.json に永続化。
-// フォルダ未選択時は localStorage のみ。旧 localStorage データはファイルが空なら初回だけ移行。
+// 目標ロードマップ: API(store) に永続化。
 const roadmap = createRoadmap({
-  loadRoadmapData: async () => {
-    const local = loadRoadmap();
-    if (!projectDir) return local;
-    const file = await readRoadmapFile(projectDir);
-    if (!Object.keys(file).length && Object.keys(local).length) {
-      await writeRoadmapFile(projectDir, local); // 初回移行
-      return local;
-    }
-    return file;
-  },
-  saveRoadmapData: async (obj) => {
-    saveRoadmap(obj); // localStorage ミラー(フォルダ未選択/書込失敗の保険)
-    if (projectDir) await writeRoadmapFile(projectDir, obj);
-  },
+  loadRoadmapData: async () => store.readRoadmap(),
+  saveRoadmapData: async (obj) => { await store.writeRoadmap(obj); },
 });
 
 // VMGキャッシュをクリアして無効化。トラック変更時に呼ぶ。
