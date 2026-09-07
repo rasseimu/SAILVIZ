@@ -81,3 +81,19 @@ test('practiceSummary: トラックと動画の両方があれば最古を採用
   }, {});
   assert.equal(s.trackedAt, base);
 });
+
+test('practiceSummary: practiceDate があればデータ時刻より優先', () => {
+  const project = {
+    practiceDate: Date.UTC(2026, 8, 7, 4, 30), // 13:30 JST
+    tracks: [{ tRange: { start: Date.UTC(2020, 0, 1, 0, 0) } }],
+  };
+  const s = practiceSummary(project, { name: 'sailviz-20200101-0900.sailviz.json' });
+  assert.equal(s.label, '2026-09-07 13:30');
+  assert.equal(s.trackedAt, Date.UTC(2026, 8, 7, 4, 30));
+});
+
+test('practiceSummary: practiceDate 無しはデータ時刻に従来どおりフォールバック', () => {
+  const project = { tracks: [{ tRange: { start: Date.UTC(2026, 7, 23, 2, 0) } }] };
+  const s = practiceSummary(project, {});
+  assert.equal(s.label, '2026-08-23 11:00');
+});

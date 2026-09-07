@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   projectFileName, projectLabel, listProjectFiles, readProject, writeProject,
-  PROGRESS_FILE, readProgress, writeProgress,
+  PROGRESS_FILE, readProgress, writeProgress, uniqueProjectName,
 } from '../src/projectfs.js';
 
 // 列挙用フェイクディレクトリ(values() のみ)
@@ -79,4 +79,25 @@ test('readProgress は壊れたJSONでも {} を返す', async () => {
   const dir = fakeRWDir();
   dir.files.set(PROGRESS_FILE, 'not json');
   assert.deepEqual(await readProgress(dir), {});
+});
+
+test('uniqueProjectName: 衝突なしはそのまま', () => {
+  const base = Date.UTC(2026, 8, 7, 4, 30); // 13:30 JST
+  const name = uniqueProjectName(base, []);
+  assert.equal(name, 'sailviz-20260907-1330.sailviz.json');
+});
+
+test('uniqueProjectName: 衝突したら分をずらす', () => {
+  const base = Date.UTC(2026, 8, 7, 4, 30);
+  const taken = ['sailviz-20260907-1330.sailviz.json'];
+  assert.equal(uniqueProjectName(base, taken), 'sailviz-20260907-1331.sailviz.json');
+});
+
+test('uniqueProjectName: 連続衝突は空くまでずらす(Set可)', () => {
+  const base = Date.UTC(2026, 8, 7, 4, 30);
+  const taken = new Set([
+    'sailviz-20260907-1330.sailviz.json',
+    'sailviz-20260907-1331.sailviz.json',
+  ]);
+  assert.equal(uniqueProjectName(base, taken), 'sailviz-20260907-1332.sailviz.json');
 });

@@ -17,7 +17,8 @@ import { applyWindAxisOverrides, pushOverride } from './windaxisoverride.js';
 import { minuteWinners } from './vmgminute.js';
 import { nextRotation, rotatedFitBox } from './videoview.js';
 import { memberList, filterMembers } from './members.js';
-import { parseMinutes, matchMember } from './minutes.js';
+import { parseMinutes, matchMember, parseMinutesDate } from './minutes.js';
+import { jstWallToMs, msToJstWall } from './time.js';
 import { DIR_NAMES, fetchWind } from './wind.js';
 import { fetchWindFromCsv } from './windCsv.js';
 import {
@@ -27,12 +28,15 @@ import {
 import { serializeProject, deserializeProject } from './project.js';
 import {
   projectFileName, listProjectFiles, readProject, writeProject, readProgress, writeProgress,
+  uniqueProjectName,
 } from './projectfs.js';
 import { practiceSummary, earliestContentMs } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
 import { createDashboard } from './dashboard.js';
 import { createProgress } from './progress.js';
 import { loadProgress, saveProgress } from './progressstore.js';
+import { createRoadmap } from './roadmap.js';
+import { loadRoadmap, saveRoadmap, readRoadmapFile, writeRoadmapFile } from './roadmapstore.js';
 import { analyzeFleetVmg, unifyWindAxis, rankVmg } from './vmg.js';
 import { createVmgPanel } from './vmgview.js';
 
@@ -59,6 +63,8 @@ const state = {
   videos: [],
   pins: [], // タイムライン上に自由に刺すピン(絶対時刻)。クリックでcrop開始を移動。
   reflections: loadReflections(),
+  practiceDate: null,      // ページ(練習)の日時(絶対ms)。ダイアログで取得。保存対象。
+  currentFileName: null,   // 現在ロード/保存中のファイル名。後付け紐付けで同一ファイル上書き。
   mode: 'absolute',
   accuracyFilter: true,
   crop: { start: 0, end: 0 },
@@ -305,10 +311,15 @@ async function saveProject() {
   const dir = await ensureProjectDir();
   if (!dir) return;
   const obj = serializeProject(state, { savedAt: new Date().toISOString() });
-  // ファイル名は練習の実データ時刻(トラックGPS開始/動画配置の最小)で命名。
-  // 実データが無い練習は従来どおり保存時刻へフォールバック。
-  const dataMs = earliestContentMs(obj);
-  const name = projectFileName(new Date(dataMs ?? Date.now()));
+  // 既存ファイルを開いている/一度保存済みなら同名に上書き(後付けGPSでファイルを増やさない)。
+  // 新規は練習日時(ユーザー指定→データ時刻→now)から採番し、衝突は分単位でずらす。
+  let name = state.currentFileName;
+  if (!name) {
+    const baseMs = state.practiceDate ?? earliestContentMs(obj) ?? Date.now();
+    const existing = (await listProjectFiles(dir)).map((f) => f.name);
+    name = uniqueProjectName(baseMs, existing);
+    state.currentFileName = name;
+  }
   try {
     await writeProject(dir, name, obj);
   } catch (e) {
@@ -340,6 +351,8 @@ async function loadPractice(name) {
   for (const v of state.videos) if (v.url) URL.revokeObjectURL(v.url); // blob URL リーク防止
   state.videos = data.videos; // url なし=未リンク
   state.reflections = data.reflections;
+  state.practiceDate = data.practiceDate ?? null;
+  state.currentFileName = name;
   saveReflections(state.reflections); // localStorage にも反映
   $('align-mode').value = state.mode;
   $('accuracy-filter').checked = state.accuracyFilter;
@@ -393,6 +406,17 @@ function backToHomeFromProgress() {
   document.body.classList.remove('view-progress');
   showHome();
 }
+async function showRoadmap() {
+  // ロードマップは自己完結データ(目標/段階)なので保存フォルダは必須にしない。
+  // フォルダ選択済みなら sailviz-roadmap.json に永続化、未選択なら localStorage のみ。
+  document.body.classList.remove('view-home');
+  document.body.classList.add('view-roadmap');
+  await roadmap.render();
+}
+function backToHomeFromRoadmap() {
+  document.body.classList.remove('view-roadmap');
+  showHome();
+}
 function showTrack() {
   document.body.classList.remove('view-home');
   // ホーム中は stage が display:none だった → canvas バッファを再計算しないと潰れる
@@ -406,6 +430,8 @@ function resetState() {
   state.tracks = []; state.events = []; state.marks = []; state.pins = [];
   state.videos = []; state.reflections = [];
   state.crop = { start: 0, end: 0 };
+  state.practiceDate = null;
+  state.currentFileName = null;
   saveReflections(state.reflections);
   invalidateVmgCache();
   recomputeView(); renderSidebar(); draw();
@@ -693,6 +719,8 @@ $('home-dashboard-link').addEventListener('click', showDashboard);
 $('dashboard-home-link').addEventListener('click', backToHomeFromDashboard);
 $('home-progress-link').addEventListener('click', showProgress);
 $('progress-home-link').addEventListener('click', backToHomeFromProgress);
+$('home-roadmap-link').addEventListener('click', showRoadmap);
+$('roadmap-home-link').addEventListener('click', backToHomeFromRoadmap);
 $('home-new').addEventListener('click', startNewPractice);
 
 $('play-btn').addEventListener('click', () => {
@@ -1081,6 +1109,32 @@ const progress = createProgress({
     saveProgress(obj); // localStorage ミラー(フォルダ未選択/書込失敗の保険)
     if (projectDir) await writeProgress(projectDir, obj);
   },
+  // 目標の変化枠の「ロードマップ」表示(読み取り専用)用。編集は roadmap 画面。
+  loadRoadmapData: async () => {
+    const local = loadRoadmap();
+    if (!projectDir) return local;
+    const file = await readRoadmapFile(projectDir);
+    return Object.keys(file).length ? file : local;
+  },
+});
+
+// 目標ロードマップ: 進捗と同じく保存フォルダの sailviz-roadmap.json に永続化。
+// フォルダ未選択時は localStorage のみ。旧 localStorage データはファイルが空なら初回だけ移行。
+const roadmap = createRoadmap({
+  loadRoadmapData: async () => {
+    const local = loadRoadmap();
+    if (!projectDir) return local;
+    const file = await readRoadmapFile(projectDir);
+    if (!Object.keys(file).length && Object.keys(local).length) {
+      await writeRoadmapFile(projectDir, local); // 初回移行
+      return local;
+    }
+    return file;
+  },
+  saveRoadmapData: async (obj) => {
+    saveRoadmap(obj); // localStorage ミラー(フォルダ未選択/書込失敗の保険)
+    if (projectDir) await writeRoadmapFile(projectDir, obj);
+  },
 });
 
 // VMGキャッシュをクリアして無効化。トラック変更時に呼ぶ。
@@ -1185,14 +1239,19 @@ function getNotesInputs() {
   return out;
 }
 
-// 練習日時(絶対時刻の全体範囲, JST日付)。トラック未読込なら null。
+// 練習日時(絶対時刻の全体範囲, JST日付)。トラック未読込なら practiceDate から補完。
 function practiceInfo() {
-  const range = globalRange(state.tracks, 'absolute');
-  if (!(range.end > range.start)) return null;
-  const date = new Intl.DateTimeFormat('ja-JP', {
+  const fmt = (ms) => new Intl.DateTimeFormat('ja-JP', {
     timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date(range.start));
-  return { date, startMs: range.start, endMs: range.end };
+  }).format(new Date(ms));
+  const range = globalRange(state.tracks, 'absolute');
+  if (range.end > range.start) {
+    return { date: fmt(range.start), startMs: range.start, endMs: range.end };
+  }
+  if (state.practiceDate != null) {
+    return { date: fmt(state.practiceDate), startMs: state.practiceDate, endMs: state.practiceDate };
+  }
+  return null;
 }
 
 // 保存済み反省の一覧をサイドバーに描画。
@@ -1248,6 +1307,10 @@ async function openReflectionEditor(existing = null) {
   windEdited = false;
   const members = memberList();
   $('refl-text').value = existing?.text ?? '';
+  {
+    const ms = state.practiceDate ?? existing?.practice?.startMs ?? practiceInfo()?.startMs ?? null;
+    $('refl-date').value = ms != null ? msToJstWall(ms) : '';
+  }
   pendingPeople = (existing?.people ?? []).map((full) => {
     const m = members.find((x) => x.fullName === full);
     return { fullName: full, given: m?.given ?? full.split(' ').pop() };
@@ -1281,7 +1344,7 @@ async function openReflectionEditor(existing = null) {
     currentWind = null;
     setWindInputs(null);
     $('refl-wind-src').textContent = '風取得中…';
-    const target = firstVisibleTrack() ? nowAbsolute() : Date.now();
+    const target = firstVisibleTrack() ? nowAbsolute() : (state.practiceDate ?? Date.now());
     // アメダスAPIで取れないとき(取得失敗/配信範囲外の過去日)は辻堂の時別CSVへ。
     const w = await fetchWind(target) ?? await fetchWindFromCsv(target);
     // 取得中にユーザーが手入力/別操作したら上書きしない。
@@ -1369,6 +1432,11 @@ function chooseMention(i) {
 
 function saveReflection() {
   const text = $('refl-text').value.trim();
+  // 日時が入力/変更されていればページ練習日時に反映(最初に入った値を採用、変更は上書き)。
+  const dateMs = jstWallToMs($('refl-date').value);
+  if (Number.isFinite(dateMs) && (state.practiceDate == null || dateMs !== state.practiceDate)) {
+    state.practiceDate = dateMs;
+  }
   const dir = $('refl-wind-dir').value;
   const speedRaw = $('refl-wind-speed').value;
   const speed = speedRaw === '' ? null : Number(speedRaw);
@@ -1392,7 +1460,7 @@ function saveReflection() {
     if (idx >= 0) {
       const prev = state.reflections[idx];
       state.reflections[idx] = createReflection({
-        id: prev.id, createdAt: prev.createdAt, practice: prev.practice, ...fields,
+        id: prev.id, createdAt: prev.createdAt, practice: practiceInfo() ?? prev.practice, ...fields,
       });
     }
   } else {
@@ -1415,17 +1483,30 @@ $('refl-save').addEventListener('click', saveReflection);
 let importRows = []; // [{ block, memberFullName|null, include }]
 
 function openImportModal() {
-  if (!firstVisibleTrack()) { statusEl.textContent = '先に練習(GPS)を読み込んでください'; return; }
   $('import-text').value = '';
   $('import-preview').innerHTML = '';
   $('import-wind').textContent = '';
+  $('import-date').value = state.practiceDate != null ? msToJstWall(state.practiceDate) : '';
   importRows = [];
   $('import-modal').classList.remove('hidden');
 }
 function closeImportModal() { $('import-modal').classList.add('hidden'); }
 
+// 現在のJST年(議事録に年が無い場合の補完に使う)。
+function currentJstYear() {
+  return Number(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric' }).format(new Date()));
+}
+
 // テキストをパースしてプレビュー行を構築。
 function rebuildImportPreview(text) {
+  // 議事録本文から日時を抽出(取れれば #import-date が空のときだけプリフィル。上書きしない)。
+  if (!$('import-date').value) {
+    const dt = parseMinutesDate(text, { defaultYear: currentJstYear() });
+    if (dt) {
+      const two = (n) => String(n).padStart(2, '0');
+      $('import-date').value = `${dt.y}-${two(dt.mo)}-${two(dt.d)}T${two(dt.h)}:${two(dt.mi)}`;
+    }
+  }
   const roster = memberList();
   const blocks = parseMinutes(text);
   importRows = blocks.map((b) => {
@@ -1459,8 +1540,13 @@ function renderImportPreview(roster = memberList()) {
 async function runImport() {
   const rows = importRows.filter((r) => r.include && r.memberFullName);
   if (!rows.length) { statusEl.textContent = '取込対象がありません(部員を割り当ててください)'; return; }
+  // ダイアログ日時をページ練習日時へ反映(未設定なら設定、変更なら上書き)。
+  const dImp = jstWallToMs($('import-date').value);
+  if (Number.isFinite(dImp) && (state.practiceDate == null || dImp !== state.practiceDate)) {
+    state.practiceDate = dImp;
+  }
   const practice = practiceInfo();
-  const target = firstVisibleTrack() ? nowAbsolute() : Date.now();
+  const target = firstVisibleTrack() ? nowAbsolute() : (state.practiceDate ?? Date.now());
   const wind = await fetchWind(target) ?? await fetchWindFromCsv(target);
   for (const row of rows) {
     const b = row.block;

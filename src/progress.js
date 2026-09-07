@@ -8,6 +8,8 @@ import {
 } from './progressstore.js';
 import { renderChart } from './chartview.js';
 import { generateAiComments } from './aicomment.js';
+import { loadRoadmap } from './roadmapstore.js';
+import { stepperHtml } from './roadmap.js';
 import { SOURCES } from './references/todaiyacht.js';
 
 const $ = (id) => document.getElementById(id);
@@ -38,13 +40,16 @@ export function createProgress({
   loadEntries,
   loadProgressData = async () => loadProgress(),
   saveProgressData = async (obj) => saveProgress(obj),
+  loadRoadmapData = async () => loadRoadmap(),
 } = {}) {
   let reflections = [];   // 全練習の反省を平坦化
   let progress = {};      // sailviz.progress
+  let roadmapData = {};   // sailviz.roadmap(目標の変化枠の「ロードマップ」表示用・読み取り専用)
   let selected = 'all';   // 'all' | fullName
   let chart = null;
   let editing = null;     // 編集中の `${reflId}:${field}`(null=非編集)
   let commenting = null;  // コメント入力中の `${reflId}:${field}`(null=非入力)
+  let goalView = 'changes'; // 目標の変化枠の表示 'changes'(目標の変化) | 'roadmap'(現在地ステッパー・一時状態)
   const selectedCards = new Set(); // AIコメント対象に選んだカード `${reflId}:${field}`(一時的・保存しない)
   let hideComments = (() => { try { return globalThis.localStorage?.getItem(HIDE_COMMENTS_KEY) === '1'; } catch { return false; } })();
 
@@ -89,6 +94,25 @@ export function createProgress({
   function memberBuckets(sum) {
     if (selected === 'all') return Object.entries(sum.byMember); // [ [name, bucket], ... ]
     return sum.byMember[selected] ? [[selected, sum.byMember[selected]]] : [];
+  }
+
+  // 目標の変化枠の「ロードマップ」表示(読み取り専用)。編集は「目標ロードマップの変更」画面で。
+  // 特定部員=その人の大目標＋現在地ステッパー。全て=段階を持つ部員のみ名前付きで縦に並べる。
+  function roadmapPanelHtml() {
+    const one = (name, withName) => {
+      const e = roadmapData[name] || {};
+      const ms = e.milestones || [];
+      const goal = e.goal ? `<span class="pq-rm-goal">🎯 ${esc(e.goal)}</span>` : '';
+      const head = withName
+        ? `<div class="pq-rm-name">${esc(name)}${goal}</div>`
+        : (goal ? `<div class="pq-rm-name">${goal}</div>` : '');
+      return `<div class="pq-rm-member">${head}${stepperHtml(ms)}</div>`;
+    };
+    if (selected === 'all') {
+      const names = memberList().map((m) => m.fullName).filter((n) => (roadmapData[n]?.milestones || []).length);
+      return names.length ? names.map((n) => one(n, true)).join('') : '<p>(ロードマップ未設定)</p>';
+    }
+    return one(selected, false);
   }
 
   // 名前接頭辞＋編集可能テキスト(表示 or 入力)を返す。field ∈ {goal,issue,discovery}。
@@ -174,8 +198,15 @@ export function createProgress({
       return items.length ? `<div class="wind-bin"><strong>${bin.label}</strong><ul>${items.join('')}</ul></div>` : '';
     }).join('') || '<p>(発見なし)</p>';
 
+    const goalToggle = '<span class="pq-goal-toggle">'
+      + `<button class="pq-gv-btn${goalView === 'changes' ? ' active' : ''}" data-goalview="changes">目標の変化</button>`
+      + `<button class="pq-gv-btn${goalView === 'roadmap' ? ' active' : ''}" data-goalview="roadmap">ロードマップ</button></span>`;
+    const goalBody = goalView === 'roadmap'
+      ? `<div class="pq-roadmap">${roadmapPanelHtml()}</div>`
+      : `<div class="goal-cards">${goalsHtml || '<p>(目標なし)</p>'}</div>`;
+
     content.innerHTML =
-      `<section class="progress-section pq-goals"><h3>目標の変化</h3><div class="goal-cards">${goalsHtml || '<p>(目標なし)</p>'}</div></section>`
+      `<section class="progress-section pq-goals"><div class="pq-goals-head"><h3>目標の変化</h3>${goalToggle}</div>${goalBody}</section>`
       + `<section class="progress-section pq-issues"><h3>課題の進捗</h3>${issuesHtml}</section>`
       + `<section class="progress-section pq-disc"><h3>風速別の発見</h3>${discHtml}</section>`
       + `<section class="progress-section pq-chart"><h3>解決量の推移</h3><div id="progress-chart-wrap"><canvas id="progress-chart"></canvas></div></section>`;
@@ -186,6 +217,14 @@ export function createProgress({
 
   function wireBody() {
     const content = $('progress-content');
+
+    // 目標の変化枠の「目標の変化 / ロードマップ」表示切替(一時状態・保存しない)。
+    content.querySelectorAll('.pq-gv-btn').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        if (goalView === btn.dataset.goalview) return;
+        goalView = btn.dataset.goalview;
+        renderBody();
+      }));
 
     // カードの余白クリックでAIコメント対象を選択トグル。既存の操作要素
     // (ボタン・入力欄・リンク)へのクリックは選択に影響しない。
@@ -411,6 +450,7 @@ export function createProgress({
     const entries = await loadEntries();
     reflections = allReflections(entries);
     progress = await loadProgressData();
+    roadmapData = await loadRoadmapData();
     wireHideComments();
     wireAiControls();
     renderNav();

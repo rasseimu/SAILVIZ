@@ -17,3 +17,27 @@ export function parseTime(value) {
   const parsed = Date.parse(s);
   return Number.isNaN(parsed) ? NaN : parsed;
 }
+
+// JST(UTC+9, DST無し)の壁時計 'YYYY-MM-DDTHH:mm'(datetime-local 値) ⇄ 絶対ms。
+// datetime-local はマシンローカルTZだが、アプリは Asia/Tokyo 固定表示のため
+// 入力値を常に JST 壁時計として解釈する(マシンTZ非依存)。
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+export function jstWallToMs(wall) {
+  if (typeof wall !== 'string') return NaN;
+  const m = wall.trim().match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!m) return NaN;
+  const [, y, mo, d, h, mi] = m.map(Number);
+  return Date.UTC(y, mo - 1, d, h, mi) - JST_OFFSET_MS;
+}
+
+export function msToJstWall(ms) {
+  if (!Number.isFinite(ms)) return '';
+  const parts = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(new Date(ms));
+  const g = (t) => parts.find((p) => p.type === t).value;
+  return `${g('year')}-${g('month')}-${g('day')}T${g('hour')}:${g('minute')}`;
+}

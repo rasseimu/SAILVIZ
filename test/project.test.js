@@ -18,6 +18,7 @@ function sampleState() {
     pins: [250, 750],
     videos: [{ id: 'vid0', t: 300, url: 'blob:xyz', name: 'v.mp4', durationMs: 5000 }],
     reflections: [{ id: 'r1', createdAt: 1, text: 'メモ', people: [], videos: [], wind: null, practice: null }],
+    practiceDate: 1757217000000,
     // 直列化されてはいけないもの
     transform: { scale: 1, cx: 0, cy: 0, w: 800, h: 600, proj: () => {} },
   };
@@ -74,4 +75,19 @@ test('deserialize: 旧データ(フィールド無し)は windAxisOverrides=[] �
   delete obj.tracks[0].windAxisOverrides; // 旧形式を模す
   const back = deserializeProject(obj);
   assert.deepEqual(back.tracks[0].windAxisOverrides, []);
+});
+
+test('practiceDate が往復で保たれる', () => {
+  const out = deserializeProject(serializeProject(sampleState(), { savedAt: 's' }));
+  assert.equal(out.practiceDate, 1757217000000);
+});
+
+test('practiceDate 欠落(旧ファイル)は null', () => {
+  const out = deserializeProject({ version: 1 });
+  assert.equal(out.practiceDate, null);
+});
+
+test('practiceDate が数値でなければ null', () => {
+  const out = deserializeProject({ version: 1, practiceDate: 'bad' });
+  assert.equal(out.practiceDate, null);
 });

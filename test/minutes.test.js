@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMinutes, matchMember } from '../src/minutes.js';
+import { parseMinutes, matchMember, parseMinutesDate } from '../src/minutes.js';
 import { memberList } from '../src/members.js';
 
 const SAMPLE = `# 練習振り返り 議事録
@@ -93,4 +93,32 @@ test('parseMinutes は全角半角コロン両対応、未知ラベルは無視'
   assert.equal(b.goal, '半角コロン');
   assert.equal(b.issue, '');
   assert.equal(b.discovery, '');
+});
+
+test('parseMinutesDate: 年ありスラッシュ + 時刻', () => {
+  assert.deepEqual(parseMinutesDate('練習 2026/9/7 13:30 の記録'),
+    { y: 2026, mo: 9, d: 7, h: 13, mi: 30 });
+});
+
+test('parseMinutesDate: ISO ハイフン(時刻なしは0:0)', () => {
+  assert.deepEqual(parseMinutesDate('日付：2026-09-07'),
+    { y: 2026, mo: 9, d: 7, h: 0, mi: 0 });
+});
+
+test('parseMinutesDate: 和暦表記 2026年9月7日 13時30分', () => {
+  assert.deepEqual(parseMinutesDate('2026年9月7日 13時30分〜'),
+    { y: 2026, mo: 9, d: 7, h: 13, mi: 30 });
+});
+
+test('parseMinutesDate: 年なしは defaultYear を補う', () => {
+  assert.deepEqual(parseMinutesDate('9月7日の練習', { defaultYear: 2026 }),
+    { y: 2026, mo: 9, d: 7, h: 0, mi: 0 });
+});
+
+test('parseMinutesDate: 年なしで defaultYear 無しは null', () => {
+  assert.equal(parseMinutesDate('9月7日の練習'), null);
+});
+
+test('parseMinutesDate: 日付が無ければ null', () => {
+  assert.equal(parseMinutesDate('今日は良い風でした', { defaultYear: 2026 }), null);
 });

@@ -37,10 +37,11 @@ export function practiceSummary(project, { name } = {}) {
   const p = project || {};
   const reflections = Array.isArray(p.reflections) ? p.reflections : [];
   const firstWind = reflections.find((r) => r && r.wind)?.wind ?? null;
-  const trackedAt = earliestContentMs(p);
+  // 練習日時は practiceDate(ユーザー入力/議事録抽出)を最優先。無ければデータ時刻。
+  const trackedAt = typeof p.practiceDate === 'number' ? p.practiceDate : earliestContentMs(p);
   return {
     name: name ?? null,
-    // 表示日時は練習の実データ時刻を優先。無ければファイル名/savedAt にフォールバック。
+    // 表示日時は practiceDate(上で最優先)→実データ時刻。無ければファイル名/savedAt にフォールバック。
     label: trackedAt != null ? formatTrackingLabel(trackedAt)
       : (name ? projectLabel(name) : (p.savedAt ?? '')),
     trackedAt: trackedAt ?? null,

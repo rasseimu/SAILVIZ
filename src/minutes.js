@@ -87,3 +87,27 @@ export function matchMember(headerName, fullNameHint, roster = memberList()) {
   if (byGiven) return { member: byGiven, how: 'given' };
   return { member: null, how: 'none' };
 }
+
+// 議事録本文から練習日時を抽出する決定的パーサ。
+// 年が無い形式(9月7日 等)は defaultYear(投稿年=現在のJST年)で補う。
+// 返り値 { y, mo, d, h, mi } または null。純関数(現在時刻に依存しない)。
+export function parseMinutesDate(text, { defaultYear } = {}) {
+  const s = String(text);
+  const validMd = (mo, d) => mo >= 1 && mo <= 12 && d >= 1 && d <= 31;
+  let y = null, mo = null, d = null;
+  // 年あり: 2026/9/7, 2026-09-07, 2026.9.7, 2026年9月7日
+  let m = s.match(/(\d{4})\s*[/年.\-]\s*(\d{1,2})\s*[/月.\-]\s*(\d{1,2})\s*日?/);
+  if (m) { y = +m[1]; mo = +m[2]; d = +m[3]; }
+  else {
+    // 年なし: 9月7日 / 9/7 → defaultYear を補う
+    m = s.match(/(\d{1,2})\s*[/月]\s*(\d{1,2})\s*日?/);
+    if (m && defaultYear != null) { y = defaultYear; mo = +m[1]; d = +m[2]; }
+  }
+  if (y == null || !validMd(mo, d)) return null;
+  // 時刻(任意): 13:30 / 13時30分。無ければ 0:0。範囲外は 0:0 に丸める。
+  let h = 0, mi = 0;
+  const t = s.match(/(\d{1,2})\s*[:時]\s*(\d{1,2})\s*分?/);
+  if (t) { h = +t[1]; mi = +t[2]; }
+  if (h > 23 || mi > 59) { h = 0; mi = 0; }
+  return { y, mo, d, h, mi };
+}
