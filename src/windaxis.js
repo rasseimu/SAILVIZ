@@ -296,6 +296,19 @@ export function foldAnchorsToHemisphere(anchors) {
   ));
 }
 
+// クローズ(タック)由来の風軸を主とする。ランニング(ジャイブ)は帆走角の幅が広く(10〜90°)風の強弱で
+// 変わり二等分由来の風軸がバイアスしやすいので、前後をタックに挟まれたジャイブアンカーは落とし、
+// その区間の風軸は前後のタックからの内挿(windDirAt)で埋める＝「前後のクローズから推定」。
+// 片側にもタックが無い区間(セッション端の風下のみ等)のジャイブだけ、推定の空白を防ぐフォールバックとして残す。
+// タックが1本も無ければ全ジャイブを残す。
+export function preferCloseHauledAnchors(anchors) {
+  const tackTs = anchors.filter((a) => a.type === 'tack').map((a) => a.tMs);
+  if (tackTs.length === 0) return anchors;
+  const minT = Math.min(...tackTs);
+  const maxT = Math.max(...tackTs);
+  return anchors.filter((a) => a.type === 'tack' || a.tMs < minT || a.tMs > maxT);
+}
+
 // 平滑化済み風軸系列(絶対時刻でtMs昇順)から、時刻tMsの風向を返す。
 // 系列は疎(数分間隔)なので、前後2点を円周補間して滑らかな値にする。範囲外は端点にクランプ。
 export function windDirAt(series, tMs) {
@@ -315,9 +328,11 @@ export function windDirAt(series, tMs) {
   return last.windFromDeg;
 }
 
-// 統合エントリ: COG→分割→判別→除去(マーク/微小旋回)→アンカー化→180°折返し→孤立スパイク除去→平滑化。
+// 統合エントリ: COG→分割→判別→除去(マーク/微小旋回)→アンカー化→クローズ優先→180°折返し→孤立スパイク除去→平滑化。
 // 風向がほぼ一定という前提で、微小旋回・誤判別・孤立飛び値というノイズ源を段階的に落とし、
 // 緩やかに漂う安定した風軸のみを残す(レグ充填は密で不安定なため出力しない)。
+// 風軸は安定なクローズ(タック)を主に推定し、前後をタックに挟まれたランニング(ジャイブ)は落として
+// 前後のタックからの内挿で埋める。片側にもタックが無い区間のジャイブのみフォールバックで残す。
 export function estimateWindAxisSeries(track, options = {}) {
   const opts = options.opts ?? {};
   const marks = options.marks ?? [];
@@ -349,8 +364,10 @@ export function estimateWindAxisSeries(track, options = {}) {
   for (const m of maneuvers) Object.assign(m, classifyManeuver(m, opts));
   // マーク近傍＋微小旋回(=実タック/ジャイブでない)を除外してからアンカー化。
   const kept = rejectMinorTurns(rejectMarkRoundings(maneuvers, marks, opts), opts);
+  // クローズ(タック)を主に、前後をタックに挟まれたランニング(ジャイブ)アンカーは落とす。
+  const preferred = preferCloseHauledAnchors(kept.map(estimateWindFromManeuver));
   // 誤判別による180°反転を大域風向の半球へ折り返す。
-  const folded = foldAnchorsToHemisphere(kept.map(estimateWindFromManeuver));
+  const folded = foldAnchorsToHemisphere(preferred);
   if (folded.length === 0) return [];
   // 広窓中央値から外れる孤立スパイクを除去。
   const anchors = rejectAnchorOutliers(folded, opts);

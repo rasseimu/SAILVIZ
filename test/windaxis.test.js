@@ -5,7 +5,7 @@ import {
   segmentLegs, classifyManeuver, estimateWindFromManeuver, learnPolarAngles,
   assignLegKinds, fillLegEstimates, rejectMarkRoundings, rejectMinorTurns,
   foldAnchorsToHemisphere, rejectAnchorOutliers, smoothWindSeries,
-  estimateWindAxisSeries, windDirAt,
+  preferCloseHauledAnchors, estimateWindAxisSeries, windDirAt,
 } from '../src/windaxis.js';
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -370,4 +370,29 @@ test('estimateWindAxisSeries: アンカー無しなら空配列', () => {
   const points = samplesToPoints(straightSamples(1_787_000_000_000, 45, 40)); // 1レグのみ=マニューバ無し
   const series = estimateWindAxisSeries({ points }, { opts: { minLegSec: 5, windowMs: 1000, minSpeedMps: 1 } });
   assert.deepEqual(series, []);
+});
+
+// --- 項目26: クローズ(タック)由来の風軸を主とし、風下(ランニング)は前後のタックから内挿 ---
+// ランニングのジャイブ角は幅が広く(10〜90°)風の強弱で変わるため、ジャイブ二等分由来の風軸は
+// バイアスを持ちやすい。安定なクローズ(タック)を主に、前後をタックに挟まれたジャイブは落として
+// windDirAt の内挿で埋める。片側にもタックが無い区間のジャイブのみ空白防止で残す。
+
+test('preferCloseHauledAnchors: タック区間内のジャイブを落とし、外側のジャイブは残す', () => {
+  const anchors = [
+    { tMs: 0,  type: 'tack', windFromDeg: 10 },
+    { tMs: 10, type: 'gybe', windFromDeg: 200 }, // タック区間内 → 落とす(前後タックで内挿)
+    { tMs: 20, type: 'tack', windFromDeg: 12 },
+    { tMs: 30, type: 'gybe', windFromDeg: 205 }, // 最終タック以降 → 残す(フォールバック)
+  ];
+  const out = preferCloseHauledAnchors(anchors);
+  assert.deepEqual(out.map((a) => a.tMs), [0, 20, 30]);
+});
+
+test('preferCloseHauledAnchors: タックが1本も無ければ全ジャイブを残す(フォールバック)', () => {
+  const anchors = [
+    { tMs: 0,  type: 'gybe', windFromDeg: 200 },
+    { tMs: 10, type: 'gybe', windFromDeg: 205 },
+  ];
+  const out = preferCloseHauledAnchors(anchors);
+  assert.equal(out.length, 2);
 });
