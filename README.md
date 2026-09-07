@@ -46,11 +46,13 @@ SAILVIZ_WRITE_TOKEN=test npm start
 ```bash
 docker build -t sailviz .
 docker run -it -p 8000:8000 \
+  -e NODE_ENV=production \
   -e SAILVIZ_WRITE_TOKEN=<secret-password> \
   -v /persistent/data:/data \
   sailviz
 ```
 
+- `NODE_ENV=production` を設定すると認証 Cookie に `Secure` 属性が付き、HTTPS 前提で安全になります
 - 永続ボリュームを `/data` にマウント
 - `SAILVIZ_WRITE_TOKEN` は秘密管理ツールで設定
 - 本番環境は HTTPS 前提（リバースプロキシ経由）
@@ -58,10 +60,13 @@ docker run -it -p 8000:8000 \
 ### データ移行
 既存のプロジェクトフォルダを新インスタンスに移行：
 ```bash
+# 取込先データディレクトリは第2引数で指定（既定は ./data）
 npm run import -- <既存フォルダ> ./data
-# または DATA_DIR を指定して実行
-DATA_DIR=/persistent/data npm run import -- <既存フォルダ>
+# 永続ボリュームへ取り込む場合は第2引数にそのパスを渡す
+npm run import -- <既存フォルダ> /persistent/data
 ```
+
+注：`import` コマンドは `DATA_DIR` 環境変数を見ず、取込先は第2引数で決まります。
 
 ### 認証・動画
 - **閲覧**：誰でも可（パスワード不要）
