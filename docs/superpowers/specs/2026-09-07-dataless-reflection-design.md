@@ -68,13 +68,15 @@ GPS/動画を紐付けられるようにする（1練習=1カード。データ�
 - **GPS必須ガードを撤去**: `openImportModal` 冒頭の
   `if (!firstVisibleTrack()) { … return; }` を削除し、データなしでも開けるようにする。
 - 日時入力 `#import-date`（`datetime-local`）をモーダルに追加。
-- `src/minutes.js` に純関数 `parseMinutesDate(text)` を追加:
+- `src/minutes.js` に純関数 `parseMinutesDate(text, { defaultYear })` を追加:
   - 議事録本文から日時を抽出する決定的パーサ。
   - 対応パターン（例）: `2026/9/7`, `2026-09-07`, `2026年9月7日`, `9月7日`,
     `日付：2026/9/7`, 併記された時刻 `13:30` / `13時30分`。
   - 返り値: `{ y, mo, d, h, mi }`（時刻が無ければ h=0, mi=0）または null。
-  - 最初に見つかった妥当な日付を採用。年が無い場合は解釈が曖昧なので **年必須**
-    （年の無い `9月7日` 単独は「取れなかった」扱いにしてユーザー入力に委ねる）。
+  - 最初に見つかった妥当な日付を採用。
+  - **年の補完**: 年が無い形式（`9月7日` 等）は `defaultYear`（投稿年＝現在のJST年）で
+    補う。投稿年でほぼ間違いないという運用前提。`defaultYear` は呼び出し側から注入し
+    （純関数の決定性を保つ）、テストは固定年を渡す。呼び出し側は現在のJST年を渡す。
 - 取込フロー:
   - テキスト入力/ファイル読込時に `parseMinutesDate` を試し、取れれば `#import-date` を
     プリフィル（ユーザーが上書き可）。取れなければ空のままユーザーが入力。
@@ -149,7 +151,8 @@ uniqueProjectName(baseMs, existingNames) -> string
 
 ## テスト（node --test）
 
-- `minutes.test.js`: `parseMinutesDate` の各対応パターン＋抽出失敗（年なし単独等）。
+- `minutes.test.js`: `parseMinutesDate` の各対応パターン、時刻あり/なし、年補完
+  （`defaultYear` 適用）、抽出失敗（日付なし）。
 - `project.test.js`: `practiceDate` の直列化往復、旧ファイル（欠落）→null。
 - `summary.test.js`: `practiceDate` 優先のラベル／並びキー、フォールバック。
 - 一意化: `uniqueProjectName(baseMs, existing)` の衝突ずらし。
