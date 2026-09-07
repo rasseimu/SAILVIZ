@@ -1,7 +1,7 @@
 // server/static.js
 // 静的ファイル配信。text 系は charset=utf-8 を明示(serve.py と同じ理由)。
 import { readFile, stat } from 'node:fs/promises';
-import { join, normalize, extname } from 'node:path';
+import { join, normalize, extname, sep } from 'node:path';
 
 const TYPES = {
   '.js': 'text/javascript; charset=utf-8',
@@ -25,8 +25,9 @@ export async function serveStatic(req, res, rootDir) {
   const url = new URL(req.url, 'http://localhost');
   let rel = decodeURIComponent(url.pathname);
   if (rel === '/' || rel === '') rel = '/index.html';
+  const root = normalize(rootDir);
   const full = normalize(join(rootDir, rel));
-  if (!full.startsWith(normalize(rootDir))) { res.writeHead(403).end('forbidden'); return; }
+  if (full !== root && !full.startsWith(root.endsWith(sep) ? root : root + sep)) { res.writeHead(403).end('forbidden'); return; }
   try {
     const s = await stat(full);
     if (s.isDirectory()) { res.writeHead(403).end('forbidden'); return; }
