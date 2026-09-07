@@ -93,16 +93,16 @@ export function parseGroundObject(rawText) {
 // items: [{reflId, field, text}]、sources: SOURCES、loadPdfBase64: (path)=>Promise<base64>。
 // 戻り値: [{reflId, field, comment, url, refs:[{link,title}]}]。関連なし/失敗は含めない。
 export async function generateAiComments({
-  items, sources, apiKey, loadPdfBase64,
+  items, sources, loadPdfBase64,
   model = 'gemini-3.6-flash', fetchImpl = globalThis.fetch, maxSourcesPerItem = 3,
 }) {
-  if (!apiKey || !items || items.length === 0) return [];
+  if (!items || items.length === 0) return [];
   const byId = new Map(sources.map((s) => [s.id, s]));
 
   // (1) スクリーニング: 反省ごとに関連ソース(複数可)を選ぶ
   const sc = buildScreenPrompt(items, sources);
   const screenText = await geminiGenerate({
-    apiKey, model, system: sc.system, parts: [{ text: sc.user }],
+    model, system: sc.system, parts: [{ text: sc.user }],
     responseMimeType: 'application/json', fetchImpl,
   });
   const matches = parseScreen(screenText, sources);
@@ -134,7 +134,7 @@ export async function generateAiComments({
     let res;
     try {
       const text = await geminiGenerate({
-        apiKey, model, system: gp.system,
+        model, system: gp.system,
         parts: [{ text: gp.user }, ...loaded.map((x) => pdfPart(x.base64))],
         responseMimeType: 'application/json', fetchImpl,
       });

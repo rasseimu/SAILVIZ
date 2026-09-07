@@ -10,8 +10,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT) || 8000;
 const DATA_DIR = process.env.DATA_DIR || join(ROOT, 'data');
 const TOKEN = process.env.SAILVIZ_WRITE_TOKEN || '';
+const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 
-const api = createApi({ dataDir: DATA_DIR, token: TOKEN });
+const api = createApi({ dataDir: DATA_DIR, token: TOKEN, geminiKey: GEMINI_KEY });
 
 const server = createServer(async (req, res) => {
   try {
@@ -23,5 +24,5 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`SailViz on http://localhost:${PORT}  data=${DATA_DIR}  write=${TOKEN ? 'on' : 'OFF'}`);
+  console.log(`SailViz on http://localhost:${PORT}  data=${DATA_DIR}  write=${TOKEN ? 'on' : 'OFF'}  ai=${GEMINI_KEY ? 'on' : 'OFF'}`);
 });

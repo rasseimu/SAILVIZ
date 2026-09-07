@@ -81,3 +81,46 @@ test('overlay put/get', async () => {
   const got = await (await fetch(`${base}/api/overlays/progress`)).json();
   assert.deepEqual(got, { r1: { issueStage: 2 } });
 });
+
+test('ai-comment requires auth (401)', async () => {
+  const r = await fetch(`${base}/api/ai-comment`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ parts: [{ text: 'x' }] }),
+  });
+  assert.equal(r.status, 401);
+});
+
+test('ai-comment returns 503 when GEMINI_API_KEY is unset', async () => {
+  // メインサーバは geminiKey 未設定なので、認証済みでも 503。
+  const r = await fetch(`${base}/api/ai-comment`, {
+    method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ parts: [{ text: 'x' }] }),
+  });
+  assert.equal(r.status, 503);
+});
+
+test('ai-comment proxies to Gemini and returns text (auth + key)', async () => {
+  // geminiKey 付きの別サーバ。Gemini ホストへの fetch だけスタブし、テスト自身のリクエストは実通信。
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).includes('generativelanguage.googleapis.com')) {
+      return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: 'AIコメント' }] } }] }), text: async () => '' };
+    }
+    return realFetch(url, opts);
+  };
+  const api2 = createApi({ dataDir, token: TOKEN, geminiKey: 'gkey' });
+  const srv = createServer(async (req, res) => { if (await api2(req, res)) return; res.writeHead(404).end(); });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const b2 = `http://127.0.0.1:${srv.address().port}`;
+  try {
+    const r = await realFetch(`${b2}/api/ai-comment`, {
+      method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ parts: [{ text: 'hello' }] }),
+    });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).text, 'AIコメント');
+  } finally {
+    globalThis.fetch = realFetch;
+    await new Promise((r) => srv.close(r));
+  }
+});

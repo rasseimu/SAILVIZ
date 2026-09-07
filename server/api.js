@@ -6,6 +6,7 @@ import {
 } from './storage.js';
 import { isAuthorized } from './auth.js';
 import { practiceSummary } from '../src/summary.js';
+import { geminiGenerate } from './gemini.js';
 
 function send(res, status, obj, extraHeaders = {}) {
   const body = JSON.stringify(obj);
@@ -24,7 +25,7 @@ async function readBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-export function createApi({ dataDir, token }) {
+export function createApi({ dataDir, token, geminiKey }) {
   return async function api(req, res) {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname;
@@ -34,6 +35,26 @@ export function createApi({ dataDir, token }) {
 
     try {
       if (path === '/api/health') { send(res, 200, { ok: true }); return true; }
+
+      // AIコメント生成のプロキシ。キーはサーバ環境変数に隠す(クライアントに出さない)。
+      // 課金が発生するため編集モード(認証)必須にし、無認証の乱用を防ぐ。
+      if (path === '/api/ai-comment' && method === 'POST') {
+        if (!isAuthorized(req, token)) { send(res, 401, { error: 'unauthorized' }); return true; }
+        if (!geminiKey) { send(res, 503, { error: 'AI未設定(GEMINI_API_KEY 未設定)' }); return true; }
+        const body = await readBody(req) || {};
+        try {
+          const text = await geminiGenerate({
+            apiKey: geminiKey,
+            model: body.model, system: body.system, parts: body.parts,
+            temperature: body.temperature, maxOutputTokens: body.maxOutputTokens,
+            responseMimeType: body.responseMimeType,
+          });
+          send(res, 200, { text });
+        } catch (e) {
+          send(res, 502, { error: String((e && e.message) || e) });
+        }
+        return true;
+      }
 
       if (path === '/api/auth') { send(res, 200, { unlocked: isAuthorized(req, token) }); return true; }
 
