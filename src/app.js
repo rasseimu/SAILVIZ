@@ -1344,7 +1344,7 @@ async function openReflectionEditor(existing = null) {
     currentWind = null;
     setWindInputs(null);
     $('refl-wind-src').textContent = '風取得中…';
-    const target = firstVisibleTrack() ? nowAbsolute() : Date.now();
+    const target = firstVisibleTrack() ? nowAbsolute() : (state.practiceDate ?? Date.now());
     // アメダスAPIで取れないとき(取得失敗/配信範囲外の過去日)は辻堂の時別CSVへ。
     const w = await fetchWind(target) ?? await fetchWindFromCsv(target);
     // 取得中にユーザーが手入力/別操作したら上書きしない。
@@ -1460,7 +1460,7 @@ function saveReflection() {
     if (idx >= 0) {
       const prev = state.reflections[idx];
       state.reflections[idx] = createReflection({
-        id: prev.id, createdAt: prev.createdAt, practice: prev.practice, ...fields,
+        id: prev.id, createdAt: prev.createdAt, practice: practiceInfo() ?? prev.practice, ...fields,
       });
     }
   } else {
