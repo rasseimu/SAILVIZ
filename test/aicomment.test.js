@@ -69,16 +69,12 @@ test('generateAiComments: 複数ソースをまとめて根拠付けし出典配
         { reflId: 'r1', field: 'issue', sourceId: 'ch19' },
         { reflId: 'r1', field: 'issue', sourceId: 'ch11' },
       ]);
-    return {
-      ok: true, status: 200,
-      json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }),
-      text: async () => text,
-    };
+    return { ok: true, status: 200, json: async () => ({ text }) };
   };
   const loadedPdfs = [];
   const out = await generateAiComments({
     items: [{ reflId: 'r1', field: 'issue', text: 'スタート出遅れ' }],
-    sources, apiKey: 'g-key',
+    sources,
     loadPdfBase64: async (p) => { loadedPdfs.push(p); return `B64:${p}`; },
     fetchImpl,
   });
@@ -102,31 +98,30 @@ test('generateAiComments: usedSourceIds空なら渡した全ソースを出典�
     const text = hasPdf
       ? JSON.stringify({ comment: '基本を確認。', usedSourceIds: [] })
       : JSON.stringify([{ reflId: 'r1', field: 'goal', sourceId: 'ch19' }]);
-    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }), text: async () => text };
+    return { ok: true, status: 200, json: async () => ({ text }) };
   };
   const out = await generateAiComments({
     items: [{ reflId: 'r1', field: 'goal', text: '安定して走る' }],
-    sources, apiKey: 'k', loadPdfBase64: async () => 'B64', fetchImpl,
+    sources, loadPdfBase64: async () => 'B64', fetchImpl,
   });
   assert.equal(out.length, 1);
   assert.deepEqual(out[0].refs, [{ link: 'https://x/19.html', title: 'スタート' }]);
 });
 
-test('generateAiComments: apiKey空やitems空は[]', async () => {
+test('generateAiComments: items空は[](fetchを呼ばない)', async () => {
   const never = async () => { throw new Error('呼んではいけない'); };
-  assert.deepEqual(await generateAiComments({ items: [], sources, apiKey: 'k', loadPdfBase64: never, fetchImpl: never }), []);
-  assert.deepEqual(await generateAiComments({ items: [{ reflId: 'r', field: 'goal', text: 'x' }], sources, apiKey: '', loadPdfBase64: never, fetchImpl: never }), []);
+  assert.deepEqual(await generateAiComments({ items: [], sources, loadPdfBase64: never, fetchImpl: never }), []);
 });
 
 test('generateAiComments: 全PDF読込失敗の反省はスキップ(全体は止めない)', async () => {
   const fetchImpl = async (url, opts) => {
     const hasPdf = opts.body.includes('inlineData');
     const text = JSON.stringify([{ reflId: 'r1', field: 'issue', sourceId: 'ch19' }]);
-    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: hasPdf ? '{}' : text }] } }] }), text: async () => text };
+    return { ok: true, status: 200, json: async () => ({ text: hasPdf ? '{}' : text }) };
   };
   const out = await generateAiComments({
     items: [{ reflId: 'r1', field: 'issue', text: 't' }],
-    sources, apiKey: 'k', loadPdfBase64: async () => { throw new Error('PDFなし'); }, fetchImpl,
+    sources, loadPdfBase64: async () => { throw new Error('PDFなし'); }, fetchImpl,
   });
   assert.deepEqual(out, []);
 });

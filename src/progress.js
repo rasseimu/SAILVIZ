@@ -32,7 +32,6 @@ function fmtDateTime(ms) {
   }).format(new Date(ms));
 }
 const HIDE_COMMENTS_KEY = 'sailviz.progress.hideComments';
-const API_KEY_STORE = 'sailviz.geminiKey';
 
 // loadProgressData/saveProgressData を注入すると保存フォルダのファイルへ永続化できる。
 // 未指定時は従来どおり localStorage のみ(単体でも動く)。
@@ -395,18 +394,12 @@ export function createProgress({
   let aiWired = false;
   function wireAiControls() {
     if (aiWired) return;
-    const keyInput = $('progress-api-key');
     const btn = $('progress-ai-generate');
     const status = $('progress-ai-status');
-    if (!keyInput || !btn) return;
+    if (!btn) return;
     aiWired = true;
-    try { keyInput.value = globalThis.localStorage?.getItem(API_KEY_STORE) || ''; } catch { /* noop */ }
-    keyInput.addEventListener('change', () => {
-      try { globalThis.localStorage?.setItem(API_KEY_STORE, keyInput.value.trim()); } catch { /* noop */ }
-    });
     btn.addEventListener('click', async () => {
-      const apiKey = keyInput.value.trim();
-      if (!apiKey) { status.textContent = 'Gemini APIキーを入力してください'; return; }
+      // APIキーはサーバに隠されているため入力不要。編集モード(認証)なら誰でも生成できる。
       // 表示中バケットの全カードを (reflId, field, text) に平坦化。
       const sum = summarize(reflections, progress);
       const buckets = memberBuckets(sum);
@@ -432,7 +425,7 @@ export function createProgress({
       }
       btn.disabled = true; status.textContent = '生成中…(PDF照合には少し時間がかかります)';
       try {
-        const suggestions = await generateAiComments({ items, sources: SOURCES, apiKey, loadPdfBase64 });
+        const suggestions = await generateAiComments({ items, sources: SOURCES, loadPdfBase64 });
         let added = 0;
         const now = Date.now();
         for (const s of suggestions) {

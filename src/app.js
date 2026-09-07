@@ -725,6 +725,22 @@ loginForm.addEventListener('submit', async (e) => {
   else { loginError.hidden = false; }
 });
 
+// 閲覧者向け周知バナー: 個人データ(氏名・反省・GPS)を表示する旨を初回のみ通知。
+// 「閉じる」で localStorage に記憶し以後は出さない(この端末のブラウザ内のみ)。
+const NOTICE_KEY = 'sailviz.noticeDismissed.v1';
+(function initNoticeBanner() {
+  const banner = document.getElementById('notice-banner');
+  const close = document.getElementById('notice-close');
+  if (!banner || !close) return;
+  let dismissed = false;
+  try { dismissed = globalThis.localStorage?.getItem(NOTICE_KEY) === '1'; } catch { /* noop */ }
+  if (!dismissed) banner.hidden = false;
+  close.addEventListener('click', () => {
+    banner.hidden = true;
+    try { globalThis.localStorage?.setItem(NOTICE_KEY, '1'); } catch { /* noop */ }
+  });
+})();
+
 // 起動時: 認証状態を取得し、動画フォルダを IndexedDB から復元してホームを表示。
 (async () => {
   try { await store.refreshAuth(); } catch { /* 認証取得失敗は無視(未ログイン扱い) */ }

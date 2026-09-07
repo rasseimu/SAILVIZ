@@ -74,7 +74,6 @@
       <a id="progress-home-link" class="home-link" title="ホームへ戻る">← ホーム</a>
       <strong id="progress-title">練習進捗管理</strong>
       <label id="progress-hide-comments-label"><input type="checkbox" id="progress-hide-comments" />コメント非表示</label>
-      <input type="password" id="progress-api-key" placeholder="Gemini APIキー" autocomplete="off" />
       <button type="button" id="progress-ai-generate" class="writes-json">🤖 AIコメント生成</button>
       <span id="progress-ai-status" class="progress-ai-status"></span>
     </header>
@@ -236,6 +235,12 @@
       <canvas id="timeline"></canvas>
     </div>
   </footer>
+
+  <!-- 閲覧者向けの周知バナー（初回のみ・閉じると記憶） -->
+  <div id="notice-banner" hidden role="note">
+    <span id="notice-text">このサイトは芝浦工業大学ヨット部の練習データ（氏名・反省・GPS軌跡）を表示します。関係者以外への共有はご遠慮ください。</span>
+    <button type="button" id="notice-close" aria-label="お知らせを閉じる">閉じる</button>
+  </div>
 
   <script type="module" src="src/app.js"></script>
 </body>
