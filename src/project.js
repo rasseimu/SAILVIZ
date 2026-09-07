@@ -21,6 +21,7 @@ export function serializeProject(state, { savedAt } = {}) {
       id: v.id, t: v.t, name: v.name, durationMs: v.durationMs ?? null,
     })),
     reflections: state.reflections.map((r) => ({ ...r })),
+    practiceDate: typeof state.practiceDate === 'number' ? state.practiceDate : null,
   };
 }
 
@@ -47,5 +48,6 @@ export function deserializeProject(obj) {
       id: v.id, t: v.t, name: v.name, durationMs: v.durationMs ?? null,
     })),
     reflections: arr(obj.reflections),
+    practiceDate: typeof obj.practiceDate === 'number' ? obj.practiceDate : null,
   };
 }
