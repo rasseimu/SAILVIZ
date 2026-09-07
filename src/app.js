@@ -9,6 +9,7 @@ import { positionOnTracksAt } from './interpolate.js';
 import { parseMp4TimesFromFile, embeddedStartMs } from './videometa.js';
 import { scanFolderVideos, collectVideoFiles } from './folderimport.js';
 import { drawScene } from './renderer.js';
+import { planBasemap, stitchBasemap } from './basemap.js';
 import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
 import { createWindStrip } from './windstripview.js';
@@ -33,7 +34,7 @@ import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
 import { createDashboard } from './dashboard.js';
 import { createProgress } from './progress.js';
 import { createRoadmap } from './roadmap.js';
-import { analyzeFleetVmg, unifyWindAxis, rankVmg } from './vmg.js';
+import { analyzeFleetVmg, unifyWindAxis, rankVmg, summarizeNeonShare } from './vmg.js';
 import { createVmgPanel } from './vmgview.js';
 
 // トラック自動割当＆色変更メニューの共通パレット(識別しやすい12色)。
@@ -65,6 +66,7 @@ const state = {
   accuracyFilter: true,
   crop: { start: 0, end: 0 },
   transform: { scale: 1, cx: 0, cy: 0, w: 1, h: 1, proj: null },
+  basemap: null,           // 背景地図 {image(dataURL), bounds, z, img(Image)}。初回CSV取込時に1回だけ取得。
   // VMG比較 ---
   vmgEnabled: false,
   vmgHighlights: [],      // renderer に渡すハイライト区間 {boatId,color,lo,hi,...}[]
@@ -129,13 +131,36 @@ function recomputeWindAxis() {
 let vmgOn = false; // VMG勝者ネオン表示。表示のみ・保存しない(windUpと同じ扱い)。
 let vmgWinners = []; // [{boatId,color,lo,hi,pointOfSail,vmg}]（絶対epoch ms）
 function recomputeVmgWinners() {
-  if (!vmgOn) { vmgWinners = []; return; }
+  if (!vmgOn) { vmgWinners = []; renderVmgLegend(); return; }
   const visible = state.tracks.filter((t) => t.visible);
   try {
     vmgWinners = minuteWinners(visible, windSeriesByTrack, {});
   } catch {
     vmgWinners = [];
   }
+  renderVmgLegend();
+}
+
+// VMGネオンの凡例＋占有率表(#stage 右下オーバーレイ)。VMG ON かつ勝者ありで表示。
+// 縦=各色の艇、横=クローズ/ランニングのネオン占有率(全期間集計)。勝者再計算時のみ更新。
+function renderVmgLegend() {
+  const el = $('vmg-legend');
+  if (!el) return;
+  if (!vmgOn || !vmgWinners.length) { el.className = 'hidden'; el.innerHTML = ''; return; }
+  const visible = state.tracks.filter((t) => t.visible);
+  const { rows, upwindTotalMs, downwindTotalMs } = summarizeNeonShare(vmgWinners, visible);
+  const pct = (v, total) => (total ? `${Math.round(v * 100)}%` : '—');
+  const body = rows.map((r) => {
+    const sw = `<span class="legend-swatch" style="background:${escapeHtml(r.track.color || '#888')}"></span>`;
+    const name = escapeHtml(r.track.name || r.track.id || '');
+    return `<tr><td class="vl-boat">${sw}<span class="vl-name">${name}</span></td>`
+      + `<td>${pct(r.upwind, upwindTotalMs)}</td><td>${pct(r.downwind, downwindTotalMs)}</td></tr>`;
+  }).join('');
+  el.className = '';
+  el.innerHTML = '<div class="vl-title">🏆 VMGネオン</div>'
+    + '<div class="vl-desc">1分ごとに風上/風下で最もVMG（風軸方向の前進成分）が良い艇を発光。下表は各走種のネオン占有率。</div>'
+    + '<table class="vl-table"><thead><tr><th>艇</th><th>クローズ</th><th>ランニング</th></tr></thead>'
+    + `<tbody>${body}</tbody></table>`;
 }
 
 // elapsedモードでの軸オフセット(基準トラック開始)。軸時刻⇄絶対時刻の変換に使う。
@@ -161,6 +186,65 @@ function applyWindUpRotation(now) {
   const d = Math.round(((-dir % 360) + 360) % 360);
   $('rotate-slider').value = String(d);
   $('rotate-label').textContent = `${d}°`;
+}
+
+// 背景地図(dataURL)を Image に load し、読み込めたら再描画する。実行時フィールド img を持つ。
+function setBasemap(bm) {
+  if (!bm || !bm.image) { state.basemap = null; return; }
+  const img = new Image();
+  img.onload = () => { if (state.basemap && state.basemap.img === img) draw(); };
+  img.src = bm.image;
+  state.basemap = { image: bm.image, bounds: bm.bounds, z: bm.z ?? null, seaColor: bm.seaColor ?? null, img };
+}
+
+// 同一オリジンのプロキシ経由で地理院タイルを1枚 Image として読む(canvas 非汚染)。
+// 欠損(海域等)は null を返し合成側で飛ばす。
+function loadTileImage(z, x, y) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = `/api/basemap/pale/${z}/${x}/${y}.png`;
+  });
+}
+
+// 現在の背景地図が bounds を内包しているか(はみ出しの検出用)。
+function basemapCovers(bounds) {
+  const b = state.basemap?.bounds;
+  return !!b
+    && bounds.minLat >= b.minLat && bounds.maxLat <= b.maxLat
+    && bounds.minLon >= b.minLon && bounds.maxLon <= b.maxLon;
+}
+
+// 全トラックの外接矩形を覆う背景地図を用意する。通常は初回CSVで1回だけだが、
+// 2つ目以降のCSVで軌跡が現地図の外へ広がったら、全トラックを覆う地図に取り直す。
+// 被覆内なら何もしない(無駄な再取得はしない)。失敗は非ブロッキング(ログのみ)。
+let basemapFetching = false;
+async function ensureBasemap() {
+  if (basemapFetching) return;
+  const bounds = computeBounds(state.tracks);
+  if (!bounds || basemapCovers(bounds)) return;
+  basemapFetching = true;
+  let ok = false;
+  try {
+    const plan = planBasemap(bounds);
+    const result = await stitchBasemap(plan, {
+      fetchTile: loadTileImage,
+      createCanvas: (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; },
+    });
+    setBasemap(result); // load 後に draw() される
+    ok = true;
+  } catch (e) {
+    console.warn('背景地図の取得に失敗', e);
+  } finally {
+    basemapFetching = false;
+  }
+  // 取得成功後、取得中に更にトラックが増えて未被覆なら取り直す(収束する)。
+  // 失敗時は再帰しない(無限リトライ防止)。
+  if (ok) {
+    const after = computeBounds(state.tracks);
+    if (after && !basemapCovers(after)) ensureBasemap();
+  }
 }
 
 function recomputeView() {
@@ -197,7 +281,7 @@ function draw() {
     transform: state.transform, tracks: state.tracks, events: state.events,
     marks: state.marks, videos: state.videos, activeVideoId: currentVideo?.id,
     now, mode: state.mode, crop: state.crop, referenceTrack: refTrack,
-    vmgWinners,
+    vmgWinners, basemap: state.basemap,
   });
   timeline.render({ range, crop: state.crop, now, events: axisEvents, pending: pendingStart, videos: axisVideos, pins: axisPins });
   // 風軸ストリップ: 可視トラックの推定風向を軸時刻へ変換して重ね描き(色はマップと同じ)。
@@ -241,6 +325,8 @@ async function loadFiles(fileList) {
   recomputeView();
   draw();
   renderSidebar();
+  // 初回CSV取込時のみ背景地図を取得(GPSトラックがあり未取得のとき)。非ブロッキング。
+  if (state.tracks.length) ensureBasemap();
 }
 
 // ドロップされた動画を、その瞬間の再生位置(絶対時刻)に紐付けて登録。
@@ -345,6 +431,7 @@ async function loadPractice(name) {
   state.videos = data.videos; // url なし=未リンク
   state.reflections = data.reflections;
   state.practiceDate = data.practiceDate ?? null;
+  setBasemap(data.basemap || null); // 保存済み背景地図を復元(なければ消す)
   state.currentFileName = name;
   saveReflections(state.reflections); // localStorage にも反映
   $('align-mode').value = state.mode;
@@ -412,6 +499,7 @@ function resetState() {
   state.videos = []; state.reflections = [];
   state.crop = { start: 0, end: 0 };
   state.practiceDate = null;
+  state.basemap = null; // 新規練習では背景地図もクリア(次の初回取込で再取得)
   state.currentFileName = null;
   saveReflections(state.reflections);
   invalidateVmgCache();
@@ -473,11 +561,32 @@ async function renderHome() {
     return;
   }
   for (const it of items) {
+    const wrap = document.createElement('div');
+    wrap.className = 'home-card-wrap';
     const card = document.createElement('button');
     card.className = 'home-card';
     renderCard(card, it, it);
     card.addEventListener('click', () => openPractice(it.name));
-    grid.appendChild(card);
+    // 角の赤バツ削除(編集モード時のみ有効=writes-json)。カードを開かないよう伝播を止める。
+    const del = document.createElement('button');
+    del.className = 'home-card-del writes-json';
+    del.textContent = '×';
+    del.title = store.isUnlocked() ? '削除' : '編集モードにすると削除できます';
+    del.disabled = !store.isUnlocked();
+    del.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const label = it.label || it.name;
+      if (!window.confirm(`練習「${label}」を削除しますか？この操作は元に戻せません。`)) return;
+      try {
+        await store.deleteProject(it.name);
+        renderHome();
+      } catch (err) {
+        statusEl.textContent = `削除に失敗: ${err.message}`;
+      }
+    });
+    wrap.appendChild(card);
+    wrap.appendChild(del);
+    grid.appendChild(wrap);
   }
 }
 

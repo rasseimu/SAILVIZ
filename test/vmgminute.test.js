@@ -176,16 +176,26 @@ test('minuteWinners: リーチ艇は対象外(2艇ともリーチなら勝者な
   assert.deepEqual(segs, []);
 });
 
-test('minuteWinners: 区間は時計の毎分境界に揃う', () => {
+test('minuteWinners: 区間は集計バケット(30秒)境界に揃う', () => {
   const tracks = [
     straightTrack('A', '#f00', { bearing: 0, speed: 5, startT: T0, durationSec: 180 }),
     straightTrack('B', '#00f', { bearing: 45, speed: 5, startT: T0, durationSec: 180 }),
   ];
   const segs = minuteWinners(tracks, windMap(tracks), {});
   for (const s of segs) {
-    assert.equal(s.lo % 60000, 0, 'loが分境界');
-    assert.equal(s.hi % 60000, 0, 'hiが分境界');
+    assert.equal(s.lo % 30000, 0, 'loがバケット境界');
+    assert.equal(s.hi % 30000, 0, 'hiがバケット境界');
   }
+});
+
+test('minuteWinners: bucketMs で集計バケット幅を上書きできる', () => {
+  const tracks = [
+    straightTrack('A', '#f00', { bearing: 0, speed: 5, startT: T0, durationSec: 180 }),
+    straightTrack('B', '#00f', { bearing: 45, speed: 5, startT: T0, durationSec: 180 }),
+  ];
+  const segs = minuteWinners(tracks, windMap(tracks), { bucketMs: 60000 });
+  assert.ok(segs.length >= 1);
+  for (const s of segs) assert.equal(s.lo % 60000, 0, '60秒指定なら60秒境界');
 });
 
 // 回帰: 各艇のGPSファイルが同名(例 Location.csv)でidが重複しても、
@@ -199,4 +209,21 @@ test('minuteWinners: 同名idの別艇を取り違えない', () => {
   assert.ok(segs.length >= 1);
   assert.ok(segs.every(s => s.track === tracks[0]), '勝者は真っ向のトラックだけ');
   assert.ok(segs.every(s => s.color === '#f00'), '色が最後の艇に潰れない');
+});
+
+// --- 高さ調整局面フィルタ(neon): 1艇クローズ・他艇過半数が下った時間帯を除外 ---
+const totalDur = (ss) => ss.reduce((a, s) => a + (s.hi - s.lo), 0);
+
+test('minuteWinners: 1艇クローズ・他艇過半数が下った局面はネオンから除外', () => {
+  const tracks = [
+    straightTrack('A', '#f00', { bearing: 0, speed: 5, startT: T0, durationSec: 180 }),   // クローズ継続
+    straightTrack('B', '#0f0', { bearing: 75, speed: 5, startT: T0, durationSec: 180 }),  // フット(|Δ|=75)
+    straightTrack('C', '#00f', { bearing: 75, speed: 5, startT: T0, durationSec: 180 }),  // フット
+  ];
+  const off = minuteWinners(tracks, windMap(tracks), { excludeHeightAdjust: false });
+  const on = minuteWinners(tracks, windMap(tracks), {});
+  assert.ok(off.every(s => s.track === tracks[0]), 'フィルタ無しではクローズのAが勝者');
+  assert.ok(totalDur(off) > 150_000, 'フィルタ無しはほぼ全域が勝者');
+  // 高さ調整局面(≈全域)が除外され、勝者時間は大きく削られる(残りは分境界の端数のみ)。
+  assert.ok(totalDur(off) - totalDur(on) > 150_000, '高さ調整局面が除外されて勝者時間が大幅減');
 });

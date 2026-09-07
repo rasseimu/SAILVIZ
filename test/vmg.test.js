@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { circDiffDeg } from '../src/windaxis.js';
 import {
   windFromAt, vmgComponents, classifyPointOfSail, boatLegVmg,
-  winnerTimeline, rankVmg, analyzeFleetVmg, unifyWindAxis,
+  winnerTimeline, rankVmg, analyzeFleetVmg, unifyWindAxis, summarizeNeonShare,
+  detectHeightAdjustWindows,
 } from '../src/vmg.js';
 import { trackForHighlight } from '../src/renderer.js';
 
@@ -158,4 +159,103 @@ test('trackForHighlight: boatId でトラックを引く', () => {
   const tracks = [{ id: 'A' }, { id: 'B' }];
   assert.equal(trackForHighlight(tracks, 'B').id, 'B');
   assert.equal(trackForHighlight(tracks, 'Z'), null);
+});
+
+// ---- summarizeNeonShare: VMGネオンの走種別・艇別 占有率 ----
+const M = 60000; // 1分
+test('summarizeNeonShare: 走種別に各艇のネオン占有率(列合計100%)', () => {
+  const A = { id: 'a', color: '#111', name: 'A' };
+  const B = { id: 'b', color: '#222', name: 'B' };
+  const winners = [
+    { track: A, pointOfSail: 'upwind', lo: 0, hi: 3 * M },   // A 上り3分
+    { track: B, pointOfSail: 'upwind', lo: 3 * M, hi: 4 * M }, // B 上り1分
+    { track: A, pointOfSail: 'downwind', lo: 4 * M, hi: 5 * M }, // A 下り1分
+    { track: B, pointOfSail: 'downwind', lo: 5 * M, hi: 8 * M }, // B 下り3分
+  ];
+  const { rows, upwindTotalMs, downwindTotalMs } = summarizeNeonShare(winners, [A, B]);
+  assert.equal(upwindTotalMs, 4 * M);
+  assert.equal(downwindTotalMs, 4 * M);
+  const a = rows.find((r) => r.track === A);
+  const b = rows.find((r) => r.track === B);
+  near(a.upwind, 0.75); near(a.downwind, 0.25);
+  near(b.upwind, 0.25); near(b.downwind, 0.75);
+  // 列ごとに合計100%
+  near(a.upwind + b.upwind, 1);
+  near(a.downwind + b.downwind, 1);
+});
+
+test('summarizeNeonShare: 行順は渡したtracks順、勝者ゼロの艇も0%で含む', () => {
+  const A = { id: 'a', color: '#111' };
+  const B = { id: 'b', color: '#222' };
+  const winners = [{ track: A, pointOfSail: 'upwind', lo: 0, hi: 2 * M }];
+  const { rows, downwindTotalMs } = summarizeNeonShare(winners, [A, B]);
+  assert.deepEqual(rows.map((r) => r.track), [A, B]); // tracks順
+  assert.equal(downwindTotalMs, 0);
+  near(rows[0].upwind, 1); near(rows[0].downwind, 0);
+  near(rows[1].upwind, 0); near(rows[1].downwind, 0); // 勝者ゼロでも0%で存在
+});
+
+test('summarizeNeonShare: 非表示(tracksに無い)トラックの勝者は無視', () => {
+  const A = { id: 'a', color: '#111' };
+  const Ghost = { id: 'g', color: '#999' };
+  const winners = [
+    { track: A, pointOfSail: 'upwind', lo: 0, hi: 1 * M },
+    { track: Ghost, pointOfSail: 'upwind', lo: 1 * M, hi: 9 * M }, // tracksに無い
+  ];
+  const { rows, upwindTotalMs } = summarizeNeonShare(winners, [A]);
+  assert.equal(upwindTotalMs, 1 * M); // Ghost分は集計されない
+  assert.equal(rows.length, 1);
+  near(rows[0].upwind, 1);
+});
+
+test('summarizeNeonShare: 勝者なしなら全艇0%・合計0', () => {
+  const A = { id: 'a', color: '#111' };
+  const { rows, upwindTotalMs, downwindTotalMs } = summarizeNeonShare([], [A]);
+  assert.equal(upwindTotalMs, 0);
+  assert.equal(downwindTotalMs, 0);
+  near(rows[0].upwind, 0); near(rows[0].downwind, 0);
+});
+
+// ===== 高さ調整局面フィルタ: detectHeightAdjustWindows =====
+// クローズを走り続ける1艇に対し、他艇の過半数が下った(フット/リーチ帯)時間帯を全艇除外する。
+test('detectHeightAdjustWindows: クローズ1艇＋過半数フットで区間検出', () => {
+  const t0 = 1_787_000_000_000;
+  const ws = [{ tMs: t0, windFromDeg: 0 }, { tMs: t0 + 30000, windFromDeg: 0 }];
+  const a = straightTrack('A', t0, 45, 30, 3);  // クローズ(|Δ|=45 <55)
+  const b = straightTrack('B', t0, 75, 30, 3);  // フット(|Δ|=75: 45+15以上 かつ <100)
+  const c = straightTrack('C', t0, 75, 30, 3);  // フット
+  const win = detectHeightAdjustWindows([a, b, c], ws);
+  assert.equal(win.length, 1);
+  assert.ok(win[0].hi - win[0].lo >= 3000, `duration ${win[0].hi - win[0].lo}`);
+});
+
+test('detectHeightAdjustWindows: minHoldSec 未満は検出しない', () => {
+  const t0 = 1_787_000_000_000;
+  const ws = [{ tMs: t0, windFromDeg: 0 }, { tMs: t0 + 30000, windFromDeg: 0 }];
+  const a = straightTrack('A', t0, 45, 30, 3);
+  const b = straightTrack('B', t0, 75, 30, 3);
+  const c = straightTrack('C', t0, 75, 30, 3);
+  // 継続時間の下限を過大にすれば、恒常的なフットでも区間は成立しない
+  const win = detectHeightAdjustWindows([a, b, c], ws, { minHoldSec: 9999 });
+  assert.equal(win.length, 0);
+});
+
+test('detectHeightAdjustWindows: ランニング艇は誤検出しない', () => {
+  const t0 = 1_787_000_000_000;
+  const ws = [{ tMs: t0, windFromDeg: 0 }, { tMs: t0 + 30000, windFromDeg: 0 }];
+  const a = straightTrack('A', t0, 45, 30, 3);   // クローズ
+  const b = straightTrack('B', t0, 175, 30, 3);  // ランニング(|Δ|>=100)
+  const c = straightTrack('C', t0, 175, 30, 3);  // ランニング
+  const win = detectHeightAdjustWindows([a, b, c], ws);
+  assert.equal(win.length, 0);
+});
+
+test('analyzeFleetVmg: 高さ調整局面を exclude として返す', () => {
+  const t0 = 1_787_000_000_000;
+  const ws = [{ tMs: t0, windFromDeg: 0 }, { tMs: t0 + 40000, windFromDeg: 0 }];
+  const f = straightTrack('F', t0, 45, 40, 3); f.color = '#f00'; // クローズ継続
+  const s = straightTrack('S', t0, 75, 40, 3); s.color = '#00f'; // フット
+  const r = analyzeFleetVmg([f, s], ws, { settleSec: 4, settleM: 10, minLegSec: 5 });
+  assert.equal(r.exclude.length, 1);
+  assert.ok(r.exclude[0].hi - r.exclude[0].lo >= 3000);
 });
