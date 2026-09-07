@@ -91,6 +91,7 @@
           <input type="file" id="import-file" accept=".md,.txt" hidden />
         </label>
         <span class="im-or">または貼り付け ↓</span>
+        <label class="im-date">練習日時 <input type="datetime-local" id="import-date" /></label>
         <textarea id="import-text" rows="6" placeholder="## 名前（フルネーム）&#10;- **今日の目標**：…&#10;- **課題**：…&#10;- **発見**：…"></textarea>
       </div>
       <div id="import-preview"></div>
@@ -171,6 +172,7 @@
       <button id="refl-cancel">破棄</button>
     </div>
     <div id="refl-input-wrap">
+      <label id="refl-date-row">練習日時 <input type="datetime-local" id="refl-date" /></label>
       <textarea id="refl-text" rows="3" placeholder="今日の反省…（@ で部員、動画リストのクリックで動画をメンション）"></textarea>
       <ul id="refl-mention" class="hidden"></ul>
 

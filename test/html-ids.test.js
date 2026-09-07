@@ -21,3 +21,9 @@ test('index.html に重複した id が存在しない', () => {
   }
   assert.deepEqual([...dupes], [], `重複 id: ${[...dupes].join(', ')}`);
 });
+
+test('index.html に refl-date と import-date が存在する', () => {
+  const html = readFileSync(join(__dir, '..', 'index.html'), 'utf8');
+  assert.ok(/id="refl-date"/.test(html), 'refl-date が無い');
+  assert.ok(/id="import-date"/.test(html), 'import-date が無い');
+});
