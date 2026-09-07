@@ -366,6 +366,19 @@ body.view-roadmap #transport { display: none; }
 .progress-section { min-width: 0; min-height: 0; display: flex; flex-direction: column;
   border: 1px solid #e5e5e5; border-radius: 8px; padding: 10px 12px; overflow: hidden; }
 .progress-section > h3 { margin: 0 0 8px; font-size: 15px; flex: 0 0 auto; }
+/* 目標の変化枠: 見出し行に「目標の変化 / ロードマップ」トグル */
+.pq-goals-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex: 0 0 auto; }
+.pq-goals-head h3 { margin: 0; }
+.pq-goal-toggle { display: inline-flex; margin-left: auto; border: 1px solid #ccc; border-radius: 6px; overflow: hidden; }
+.pq-gv-btn { border: none; background: #fafafa; padding: 3px 10px; cursor: pointer; font-size: 12px; color: #555; }
+.pq-gv-btn + .pq-gv-btn { border-left: 1px solid #ccc; }
+.pq-gv-btn.active { background: #1c72b8; color: #fff; }
+/* ロードマップ表示(読み取り専用・縦スクロール) */
+.pq-roadmap { flex: 1; overflow: auto; }
+.pq-rm-member { margin-bottom: 12px; }
+.pq-rm-name { font-weight: 600; font-size: 13px; color: #333; margin-bottom: 2px; }
+.pq-rm-goal { font-weight: 400; color: #777; margin-left: 6px; }
+.pq-roadmap .rm-stepper { padding: 22px 4px 4px; }
 /* 目標(左上): カードを横スクロール */
 .pq-goals .goal-cards { flex: 1; display: flex; gap: 10px; overflow-x: auto; overflow-y: hidden;
   align-items: stretch; padding-bottom: 4px; }
