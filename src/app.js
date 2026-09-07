@@ -33,6 +33,8 @@ import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
 import { createDashboard } from './dashboard.js';
 import { createProgress } from './progress.js';
 import { loadProgress, saveProgress } from './progressstore.js';
+import { createRoadmap } from './roadmap.js';
+import { loadRoadmap, saveRoadmap, readRoadmapFile, writeRoadmapFile } from './roadmapstore.js';
 import { analyzeFleetVmg, unifyWindAxis, rankVmg } from './vmg.js';
 import { createVmgPanel } from './vmgview.js';
 
@@ -393,6 +395,17 @@ function backToHomeFromProgress() {
   document.body.classList.remove('view-progress');
   showHome();
 }
+async function showRoadmap() {
+  // ロードマップは自己完結データ(目標/段階)なので保存フォルダは必須にしない。
+  // フォルダ選択済みなら sailviz-roadmap.json に永続化、未選択なら localStorage のみ。
+  document.body.classList.remove('view-home');
+  document.body.classList.add('view-roadmap');
+  await roadmap.render();
+}
+function backToHomeFromRoadmap() {
+  document.body.classList.remove('view-roadmap');
+  showHome();
+}
 function showTrack() {
   document.body.classList.remove('view-home');
   // ホーム中は stage が display:none だった → canvas バッファを再計算しないと潰れる
@@ -693,6 +706,8 @@ $('home-dashboard-link').addEventListener('click', showDashboard);
 $('dashboard-home-link').addEventListener('click', backToHomeFromDashboard);
 $('home-progress-link').addEventListener('click', showProgress);
 $('progress-home-link').addEventListener('click', backToHomeFromProgress);
+$('home-roadmap-link').addEventListener('click', showRoadmap);
+$('roadmap-home-link').addEventListener('click', backToHomeFromRoadmap);
 $('home-new').addEventListener('click', startNewPractice);
 
 $('play-btn').addEventListener('click', () => {
@@ -1080,6 +1095,25 @@ const progress = createProgress({
   saveProgressData: async (obj) => {
     saveProgress(obj); // localStorage ミラー(フォルダ未選択/書込失敗の保険)
     if (projectDir) await writeProgress(projectDir, obj);
+  },
+});
+
+// 目標ロードマップ: 進捗と同じく保存フォルダの sailviz-roadmap.json に永続化。
+// フォルダ未選択時は localStorage のみ。旧 localStorage データはファイルが空なら初回だけ移行。
+const roadmap = createRoadmap({
+  loadRoadmapData: async () => {
+    const local = loadRoadmap();
+    if (!projectDir) return local;
+    const file = await readRoadmapFile(projectDir);
+    if (!Object.keys(file).length && Object.keys(local).length) {
+      await writeRoadmapFile(projectDir, local); // 初回移行
+      return local;
+    }
+    return file;
+  },
+  saveRoadmapData: async (obj) => {
+    saveRoadmap(obj); // localStorage ミラー(フォルダ未選択/書込失敗の保険)
+    if (projectDir) await writeRoadmapFile(projectDir, obj);
   },
 });
 

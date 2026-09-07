@@ -308,6 +308,56 @@ body.view-progress #dashboard-screen,
 body.view-progress #topbar,
 body.view-progress main,
 body.view-progress #transport { display: none; }
+/* ===== 目標ロードマップ画面(項目#28) ===== */
+#roadmap-screen { display: none; }
+body.view-roadmap #roadmap-screen { display: flex; flex-direction: column; position: fixed; inset: 0; background: #fff; z-index: 50; }
+body.view-roadmap #home-screen,
+body.view-roadmap #dashboard-screen,
+body.view-roadmap #progress-screen,
+body.view-roadmap #topbar,
+body.view-roadmap main,
+body.view-roadmap #transport { display: none; }
+#roadmap-bar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid #e5e5e5; }
+#roadmap-nav { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; border-bottom: 1px solid #eee; overflow-x: auto; }
+#roadmap-content { flex: 1; overflow: auto; padding: 20px; }
+.roadmap-goal-sec { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+.rm-goal-label { font-weight: 600; color: #555; white-space: nowrap; }
+.rm-goal-input { flex: 1; font-size: 18px; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; }
+.roadmap-stepper-sec { margin-bottom: 24px; }
+.rm-progress-count { color: #777; font-size: 13px; margin-bottom: 10px; }
+.roadmap-empty { color: #999; }
+/* 横並びステッパー: 丸をコネクタ線でつなぐ。達成=緑 現在地=橙強調 未達=灰。 */
+.rm-stepper { list-style: none; display: flex; align-items: flex-start; gap: 0;
+  padding: 24px 4px 8px; margin: 0; overflow-x: auto; }
+.rm-step { position: relative; display: flex; flex-direction: column; align-items: center;
+  min-width: 96px; text-align: center; }
+.rm-step:not(:first-child)::before { content: ''; position: absolute; top: 16px; left: -50%;
+  width: 100%; height: 3px; background: #ddd; z-index: 0; }
+.rm-step.rm-done:not(:first-child)::before,
+.rm-step.rm-current:not(:first-child)::before { background: #3aa657; }
+.rm-dot { position: relative; z-index: 1; width: 34px; height: 34px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff;
+  background: #bbb; border: 3px solid #fff; box-shadow: 0 0 0 1px #ddd; }
+.rm-done .rm-dot { background: #3aa657; box-shadow: 0 0 0 1px #3aa657; }
+.rm-current .rm-dot { background: #f08c1e; box-shadow: 0 0 0 3px #fbd8ac; }
+.rm-goal .rm-dot { background: #d33; box-shadow: 0 0 0 3px #f6c2c2; }
+.rm-step-title { margin-top: 8px; font-size: 13px; color: #333; max-width: 96px; word-break: break-word; }
+.rm-here { position: absolute; top: -18px; font-size: 11px; font-weight: 700; color: #f08c1e;
+  white-space: nowrap; }
+.rm-goal .rm-here { color: #d33; }
+/* 段階の編集リスト */
+.rm-editor { list-style: none; padding: 0; margin: 0 0 12px; }
+.rm-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #f0f0f0; }
+.rm-row-title { flex: 1; }
+.rm-row-done { text-decoration: line-through; color: #3aa657; }
+.rm-rename-input { flex: 1; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; }
+.rm-row-ctrl { display: flex; gap: 4px; }
+.rm-row-ctrl button, .rm-add-btn, .rm-edit, .rm-rename-save, .rm-rename-cancel {
+  border: 1px solid #ccc; background: #fafafa; border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+.rm-row-ctrl button:disabled { opacity: 0.35; cursor: default; }
+.rm-add { display: flex; gap: 8px; margin-top: 8px; }
+.rm-add-input { flex: 1; padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; }
+
 #progress-bar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid #e5e5e5; }
 #progress-nav { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; border-bottom: 1px solid #eee; overflow-x: auto; }
 /* 十字4分割: 左上=目標 右上=課題 左下=発見 右下=推移。各象限は独立スクロール。 */
