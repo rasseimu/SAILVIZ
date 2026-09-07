@@ -490,6 +490,17 @@ body.view-roadmap #transport { display: none; }
 /* 読み取り専用時: 書き込み系コントロールをグレーアウト */
 body.readonly .writes-json { opacity: .4; cursor: not-allowed; }
 
+/* 閲覧者向け周知バナー(下部固定・初回のみ) */
+#notice-banner { position: fixed; left: 0; right: 0; bottom: 0; z-index: 100;
+  display: flex; gap: 12px; align-items: center; justify-content: center;
+  padding: 10px 16px; background: #202124; color: #fff; font-size: 13px;
+  box-shadow: 0 -2px 8px rgba(0,0,0,0.2); }
+#notice-banner[hidden] { display: none; }
+#notice-text { max-width: 900px; }
+#notice-close { flex: 0 0 auto; font: inherit; font-size: 13px; cursor: pointer;
+  background: #fff; color: #202124; border: none; padding: 6px 14px; border-radius: 6px; }
+#notice-close:hover { background: #e8eaed; }
+
 /* 編集モードボタン(ホームバー右端) */
 #editModeBtn { border: 1px solid var(--gd-border); background: none; color: var(--gd-blue);
   font: inherit; padding: 7px 16px; border-radius: 8px; cursor: pointer; }
