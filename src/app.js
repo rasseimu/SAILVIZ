@@ -27,6 +27,7 @@ import {
 import { serializeProject, deserializeProject } from './project.js';
 import {
   projectFileName, listProjectFiles, readProject, writeProject, readProgress, writeProgress,
+  uniqueProjectName,
 } from './projectfs.js';
 import { practiceSummary, earliestContentMs } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
@@ -61,6 +62,8 @@ const state = {
   videos: [],
   pins: [], // タイムライン上に自由に刺すピン(絶対時刻)。クリックでcrop開始を移動。
   reflections: loadReflections(),
+  practiceDate: null,      // ページ(練習)の日時(絶対ms)。ダイアログで取得。保存対象。
+  currentFileName: null,   // 現在ロード/保存中のファイル名。後付け紐付けで同一ファイル上書き。
   mode: 'absolute',
   accuracyFilter: true,
   crop: { start: 0, end: 0 },
@@ -307,10 +310,15 @@ async function saveProject() {
   const dir = await ensureProjectDir();
   if (!dir) return;
   const obj = serializeProject(state, { savedAt: new Date().toISOString() });
-  // ファイル名は練習の実データ時刻(トラックGPS開始/動画配置の最小)で命名。
-  // 実データが無い練習は従来どおり保存時刻へフォールバック。
-  const dataMs = earliestContentMs(obj);
-  const name = projectFileName(new Date(dataMs ?? Date.now()));
+  // 既存ファイルを開いている/一度保存済みなら同名に上書き(後付けGPSでファイルを増やさない)。
+  // 新規は練習日時(ユーザー指定→データ時刻→now)から採番し、衝突は分単位でずらす。
+  let name = state.currentFileName;
+  if (!name) {
+    const baseMs = state.practiceDate ?? earliestContentMs(obj) ?? Date.now();
+    const existing = (await listProjectFiles(dir)).map((f) => f.name);
+    name = uniqueProjectName(baseMs, existing);
+    state.currentFileName = name;
+  }
   try {
     await writeProject(dir, name, obj);
   } catch (e) {
@@ -342,6 +350,8 @@ async function loadPractice(name) {
   for (const v of state.videos) if (v.url) URL.revokeObjectURL(v.url); // blob URL リーク防止
   state.videos = data.videos; // url なし=未リンク
   state.reflections = data.reflections;
+  state.practiceDate = data.practiceDate ?? null;
+  state.currentFileName = name;
   saveReflections(state.reflections); // localStorage にも反映
   $('align-mode').value = state.mode;
   $('accuracy-filter').checked = state.accuracyFilter;
@@ -419,6 +429,8 @@ function resetState() {
   state.tracks = []; state.events = []; state.marks = []; state.pins = [];
   state.videos = []; state.reflections = [];
   state.crop = { start: 0, end: 0 };
+  state.practiceDate = null;
+  state.currentFileName = null;
   saveReflections(state.reflections);
   invalidateVmgCache();
   recomputeView(); renderSidebar(); draw();
