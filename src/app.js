@@ -17,7 +17,7 @@ import { applyWindAxisOverrides, pushOverride } from './windaxisoverride.js';
 import { minuteWinners } from './vmgminute.js';
 import { nextRotation, rotatedFitBox } from './videoview.js';
 import { memberList, filterMembers } from './members.js';
-import { parseMinutes, matchMember } from './minutes.js';
+import { parseMinutes, matchMember, parseMinutesDate } from './minutes.js';
 import { jstWallToMs, msToJstWall } from './time.js';
 import { DIR_NAMES, fetchWind } from './wind.js';
 import { fetchWindFromCsv } from './windCsv.js';
@@ -1483,17 +1483,30 @@ $('refl-save').addEventListener('click', saveReflection);
 let importRows = []; // [{ block, memberFullName|null, include }]
 
 function openImportModal() {
-  if (!firstVisibleTrack()) { statusEl.textContent = '先に練習(GPS)を読み込んでください'; return; }
   $('import-text').value = '';
   $('import-preview').innerHTML = '';
   $('import-wind').textContent = '';
+  $('import-date').value = state.practiceDate != null ? msToJstWall(state.practiceDate) : '';
   importRows = [];
   $('import-modal').classList.remove('hidden');
 }
 function closeImportModal() { $('import-modal').classList.add('hidden'); }
 
+// 現在のJST年(議事録に年が無い場合の補完に使う)。
+function currentJstYear() {
+  return Number(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric' }).format(new Date()));
+}
+
 // テキストをパースしてプレビュー行を構築。
 function rebuildImportPreview(text) {
+  // 議事録本文から日時を抽出(取れれば #import-date が空のときだけプリフィル。上書きしない)。
+  if (!$('import-date').value) {
+    const dt = parseMinutesDate(text, { defaultYear: currentJstYear() });
+    if (dt) {
+      const two = (n) => String(n).padStart(2, '0');
+      $('import-date').value = `${dt.y}-${two(dt.mo)}-${two(dt.d)}T${two(dt.h)}:${two(dt.mi)}`;
+    }
+  }
   const roster = memberList();
   const blocks = parseMinutes(text);
   importRows = blocks.map((b) => {
@@ -1527,8 +1540,13 @@ function renderImportPreview(roster = memberList()) {
 async function runImport() {
   const rows = importRows.filter((r) => r.include && r.memberFullName);
   if (!rows.length) { statusEl.textContent = '取込対象がありません(部員を割り当ててください)'; return; }
+  // ダイアログ日時をページ練習日時へ反映(未設定なら設定、変更なら上書き)。
+  const dImp = jstWallToMs($('import-date').value);
+  if (Number.isFinite(dImp) && (state.practiceDate == null || dImp !== state.practiceDate)) {
+    state.practiceDate = dImp;
+  }
   const practice = practiceInfo();
-  const target = firstVisibleTrack() ? nowAbsolute() : Date.now();
+  const target = firstVisibleTrack() ? nowAbsolute() : (state.practiceDate ?? Date.now());
   const wind = await fetchWind(target) ?? await fetchWindFromCsv(target);
   for (const row of rows) {
     const b = row.block;
