@@ -5,7 +5,7 @@ import { parseTags } from './tags.js';
 import { computeBounds, fitTransform, unproject, project } from './projection.js';
 import { pan, zoomAt, screenToWorld, worldToScreen } from './viewport.js';
 import { globalRange, remapEventsToAxis } from './timeaxis.js';
-import { positionAt } from './interpolate.js';
+import { positionOnTracksAt } from './interpolate.js';
 import { parseMp4TimesFromFile, embeddedStartMs } from './videometa.js';
 import { scanFolderVideos, collectVideoFiles } from './folderimport.js';
 import { drawScene } from './renderer.js';
@@ -839,9 +839,11 @@ function pickTrackTime(px, py) {
 function pickVideo(px, py) {
   const T = state.transform;
   const ref = firstVisibleTrack();
-  if (!T.proj || !ref) return null;
+  if (!T.proj) return null;
   for (const v of state.videos) {
-    const pos = positionAt(ref.points, v.t);
+    // 描画(renderer)と同じロジックで位置を求める。時刻を含むトラック(基準優先)に
+    // 配置されるので、午前・午後を別トラックで読み込んでもバッジをクリックできる。
+    const pos = positionOnTracksAt(state.tracks, ref, v.t);
     if (!pos) continue;
     const s = worldToScreen(project(pos.lat, pos.lon, T.proj), T);
     if (Math.abs(s.px - px) <= 14 && Math.abs(s.py - py) <= 12) return v;
