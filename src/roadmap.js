@@ -89,22 +89,22 @@ export function createRoadmap({
     const rows = milestones.map((m, i) => {
       const title = editingId === m.id
         ? `<input class="rm-rename-input" data-id="${esc(m.id)}" value="${esc(m.title)}" />`
-          + `<button class="rm-rename-save" data-id="${esc(m.id)}">保存</button>`
+          + `<button class="rm-rename-save writes-json" data-id="${esc(m.id)}">保存</button>`
           + '<button class="rm-rename-cancel">取消</button>'
         : `<span class="rm-row-title${m.done ? ' rm-row-done' : ''}">${esc(m.title)}</span>`
           + `<button class="rm-edit" data-id="${esc(m.id)}" title="名前を変更">✎</button>`;
       return `<li class="rm-row">`
-        + `<input type="checkbox" class="rm-check" data-id="${esc(m.id)}" ${m.done ? 'checked' : ''} title="達成" />`
+        + `<input type="checkbox" class="rm-check writes-json" data-id="${esc(m.id)}" ${m.done ? 'checked' : ''} title="達成" />`
         + `${title}`
         + `<span class="rm-row-ctrl">`
-        + `<button class="rm-up" data-id="${esc(m.id)}" title="上へ" ${i === 0 ? 'disabled' : ''}>↑</button>`
-        + `<button class="rm-down" data-id="${esc(m.id)}" title="下へ" ${i === milestones.length - 1 ? 'disabled' : ''}>↓</button>`
-        + `<button class="rm-del" data-id="${esc(m.id)}" title="削除">🗑</button>`
+        + `<button class="rm-up writes-json" data-id="${esc(m.id)}" title="上へ" ${i === 0 ? 'disabled' : ''}>↑</button>`
+        + `<button class="rm-down writes-json" data-id="${esc(m.id)}" title="下へ" ${i === milestones.length - 1 ? 'disabled' : ''}>↓</button>`
+        + `<button class="rm-del writes-json" data-id="${esc(m.id)}" title="削除">🗑</button>`
         + `</span></li>`;
     }).join('');
     return `<ul class="rm-editor">${rows}</ul>`
       + `<div class="rm-add"><input class="rm-add-input" placeholder="新しい段階を追加" />`
-      + `<button class="rm-add-btn">＋ 追加</button></div>`;
+      + `<button class="rm-add-btn writes-json">＋ 追加</button></div>`;
   }
 
   function renderBody() {
@@ -115,7 +115,7 @@ export function createRoadmap({
     const { done, total } = roadmapProgress(milestones);
     content.innerHTML =
       `<section class="roadmap-goal-sec"><label class="rm-goal-label">大目標</label>`
-      + `<input class="rm-goal-input" placeholder="例: 全日本インカレ出場" value="${esc(goal)}" /></section>`
+      + `<input class="rm-goal-input writes-json" placeholder="例: 全日本インカレ出場" value="${esc(goal)}" /></section>`
       + `<section class="roadmap-stepper-sec">`
       + `<div class="rm-progress-count">${done} / ${total} 段階クリア</div>`
       + `${stepperHtml(milestones)}</section>`

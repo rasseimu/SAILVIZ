@@ -14,6 +14,18 @@
       <a id="home-progress-link" class="home-link" title="部員ごとの練習進捗を見る">📈 練習進捗管理</a>
       <a id="home-roadmap-link" class="home-link" title="部員ごとの目標ロードマップを変更する">🎯 目標ロードマップの変更</a>
       <span id="home-folder"></span>
+      <button id="editModeBtn" type="button">編集モード</button>
+      <dialog id="loginDialog">
+        <form method="dialog" id="loginForm">
+          <p>編集用パスワード</p>
+          <input id="loginPassword" type="password" autocomplete="current-password" />
+          <menu>
+            <button value="cancel">キャンセル</button>
+            <button id="loginSubmit" value="ok">ログイン</button>
+          </menu>
+          <p id="loginError" class="error" hidden>パスワードが違います</p>
+        </form>
+      </dialog>
     </header>
     <div id="home-body">
       <div id="home-toolbar">
@@ -62,7 +74,7 @@
       <strong id="progress-title">練習進捗管理</strong>
       <label id="progress-hide-comments-label"><input type="checkbox" id="progress-hide-comments" />コメント非表示</label>
       <input type="password" id="progress-api-key" placeholder="Gemini APIキー" autocomplete="off" />
-      <button type="button" id="progress-ai-generate">🤖 AIコメント生成</button>
+      <button type="button" id="progress-ai-generate" class="writes-json">🤖 AIコメント生成</button>
       <span id="progress-ai-status" class="progress-ai-status"></span>
     </header>
     <nav id="progress-nav"></nav>
@@ -104,7 +116,7 @@
       <input type="file" id="file-input" accept=".csv" multiple hidden />
     </label>
     <button id="folder-import" class="btn" title="同期フォルダから、GPS範囲内の動画を自動取込">📁 動画フォルダ取込</button>
-    <button id="project-save" class="btn" title="現在の状態を保存フォルダに書き出す">💾 保存</button>
+    <button id="project-save" class="btn writes-json" title="現在の状態を保存フォルダに書き出す">💾 保存</button>
     <label>整列:
       <select id="align-mode">
         <option value="absolute">絶対時刻</option>

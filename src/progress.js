@@ -120,7 +120,7 @@ export function createProgress({
     const prefix = selected === 'all' ? `<span class="et-name">${esc(name)}：</span>` : '';
     if (editing === `${reflId}:${field}`) {
       return `${prefix}<textarea class="edit-input" rows="1" data-refl="${esc(reflId)}" data-field="${field}">${esc(text)}</textarea>`
-        + `<button class="edit-save" data-refl="${esc(reflId)}" data-field="${field}">保存</button>`
+        + `<button class="edit-save writes-json" data-refl="${esc(reflId)}" data-field="${field}">保存</button>`
         + '<button class="edit-cancel">取消</button>';
     }
     return `${prefix}<span class="et-text">${esc(text)}</span>`
@@ -159,12 +159,12 @@ export function createProgress({
           : `<span class="comment-ref-src">${esc(r.title || '参考')}</span>`));
         link = ` <span class="comment-refs">（出典: ${parts.join('、')}）</span>`;
       }
-      return `<div class="comment-row${c.ai ? ' comment-ai' : ''}"><span class="comment-when">${fmtDateTime(c.ts)}<button class="comment-del" data-cfield="${field}" data-crefl="${esc(reflId)}" data-cidx="${i}" title="削除">×</button></span>`
+      return `<div class="comment-row${c.ai ? ' comment-ai' : ''}"><span class="comment-when">${fmtDateTime(c.ts)}<button class="comment-del writes-json" data-cfield="${field}" data-crefl="${esc(reflId)}" data-cidx="${i}" title="削除">×</button></span>`
         + `${badge}<span class="comment-text">${esc(c.text)}${link}</span></div>`;
     }).join('');
     const input = commenting === `${reflId}:${field}`
       ? `<div class="comment-input-row"><textarea class="comment-input" rows="1" data-cfield="${field}" data-crefl="${esc(reflId)}" placeholder="コメントを入力"></textarea>`
-        + `<button class="comment-save" data-cfield="${field}" data-crefl="${esc(reflId)}">追加</button>`
+        + `<button class="comment-save writes-json" data-cfield="${field}" data-crefl="${esc(reflId)}">追加</button>`
         + '<button class="comment-cancel">取消</button></div>'
       : '';
     return (list || input) ? `<div class="comment-block">${list}${input}</div>` : '';
@@ -178,7 +178,7 @@ export function createProgress({
     const goalsHtml = buckets.flatMap(([name, b]) => b.goals.map((g) =>
       `<div ${cardAttrs('goal', g.reflId, 'goal-card')}><div class="gc-head"><span class="gr-date">${fmtDate(g.dateMs)}</span>`
       + `<span class="gc-head-right">${commentIcon('goal', g.reflId)}`
-      + `<input type="checkbox" data-goal="${esc(g.reflId)}" ${g.done ? 'checked' : ''} /></span></div>`
+      + `<input type="checkbox" class="writes-json" data-goal="${esc(g.reflId)}" ${g.done ? 'checked' : ''} /></span></div>`
       + `<div class="gc-body">${editable('goal', g.reflId, name, g.text)}</div>`
       + `${commentSection('goal', g.reflId, g.comments)}</div>`)).join('');
 
@@ -186,7 +186,7 @@ export function createProgress({
       `<div ${cardAttrs('issue', it.reflId, 'issue-card')}><div class="ic-top"><span class="ic-date">${fmtDate(it.dateMs)}</span>`
       + `<span class="ic-text">${editable('issue', it.reflId, name, it.text)}</span>${commentIcon('issue', it.reflId)}</div>`
       + `<span class="stage-toggle">${STAGES.map((s) =>
-        `<button data-issue="${esc(it.reflId)}" data-stage="${s.v}" class="${it.stage === s.v ? 'active' : ''}">${s.label}</button>`).join('')}</span>`
+        `<button data-issue="${esc(it.reflId)}" data-stage="${s.v}" class="writes-json${it.stage === s.v ? ' active' : ''}">${s.label}</button>`).join('')}</span>`
       + `${commentSection('issue', it.reflId, it.comments)}</div>`)).join('') || '<p>(課題なし)</p>';
 
     // 風速ビンごとに発見を集約(全ビン + unknown)。

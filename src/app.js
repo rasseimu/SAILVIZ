@@ -688,9 +688,37 @@ $('file-input').addEventListener('change', (e) => loadFiles(e.target.files));
 $('folder-import').addEventListener('click', importFromVideoFolder);
 $('project-save').addEventListener('click', saveProject);
 
+// ================= 編集モード(共有パスワード)ゲート =================
+const editModeBtn = $('editModeBtn');
+const loginDialog = $('loginDialog');
+const loginForm = $('loginForm');
+const loginPassword = $('loginPassword');
+const loginError = $('loginError');
+
+function applyEditableState() {
+  const on = store.isUnlocked();
+  editModeBtn.textContent = on ? 'ログアウト' : '編集モード';
+  document.body.classList.toggle('readonly', !on);
+  document.querySelectorAll('.writes-json').forEach((el) => { el.disabled = !on; });
+}
+
+editModeBtn.addEventListener('click', async () => {
+  if (store.isUnlocked()) { await store.lock(); applyEditableState(); return; }
+  loginError.hidden = true; loginPassword.value = ''; loginDialog.showModal();
+});
+
+loginForm.addEventListener('submit', async (e) => {
+  if (e.submitter && e.submitter.value !== 'ok') return;
+  e.preventDefault();
+  const ok = await store.unlock(loginPassword.value);
+  if (ok) { loginDialog.close(); applyEditableState(); }
+  else { loginError.hidden = false; }
+});
+
 // 起動時: 認証状態を取得し、動画フォルダを IndexedDB から復元してホームを表示。
 (async () => {
   try { await store.refreshAuth(); } catch { /* 認証取得失敗は無視(未ログイン扱い) */ }
+  applyEditableState();
   try {
     const h = await loadDirHandle();
     if (h && await ensurePermission(h)) { projectDir = h; }
