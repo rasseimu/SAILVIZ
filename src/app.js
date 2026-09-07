@@ -18,6 +18,7 @@ import { minuteWinners } from './vmgminute.js';
 import { nextRotation, rotatedFitBox } from './videoview.js';
 import { memberList, filterMembers } from './members.js';
 import { parseMinutes, matchMember } from './minutes.js';
+import { jstWallToMs, msToJstWall } from './time.js';
 import { DIR_NAMES, fetchWind } from './wind.js';
 import { fetchWindFromCsv } from './windCsv.js';
 import {
@@ -1238,14 +1239,19 @@ function getNotesInputs() {
   return out;
 }
 
-// 練習日時(絶対時刻の全体範囲, JST日付)。トラック未読込なら null。
+// 練習日時(絶対時刻の全体範囲, JST日付)。トラック未読込なら practiceDate から補完。
 function practiceInfo() {
-  const range = globalRange(state.tracks, 'absolute');
-  if (!(range.end > range.start)) return null;
-  const date = new Intl.DateTimeFormat('ja-JP', {
+  const fmt = (ms) => new Intl.DateTimeFormat('ja-JP', {
     timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date(range.start));
-  return { date, startMs: range.start, endMs: range.end };
+  }).format(new Date(ms));
+  const range = globalRange(state.tracks, 'absolute');
+  if (range.end > range.start) {
+    return { date: fmt(range.start), startMs: range.start, endMs: range.end };
+  }
+  if (state.practiceDate != null) {
+    return { date: fmt(state.practiceDate), startMs: state.practiceDate, endMs: state.practiceDate };
+  }
+  return null;
 }
 
 // 保存済み反省の一覧をサイドバーに描画。
@@ -1301,6 +1307,10 @@ async function openReflectionEditor(existing = null) {
   windEdited = false;
   const members = memberList();
   $('refl-text').value = existing?.text ?? '';
+  {
+    const ms = state.practiceDate ?? existing?.practice?.startMs ?? practiceInfo()?.startMs ?? null;
+    $('refl-date').value = ms != null ? msToJstWall(ms) : '';
+  }
   pendingPeople = (existing?.people ?? []).map((full) => {
     const m = members.find((x) => x.fullName === full);
     return { fullName: full, given: m?.given ?? full.split(' ').pop() };
@@ -1422,6 +1432,11 @@ function chooseMention(i) {
 
 function saveReflection() {
   const text = $('refl-text').value.trim();
+  // 日時が入力/変更されていればページ練習日時に反映(最初に入った値を採用、変更は上書き)。
+  const dateMs = jstWallToMs($('refl-date').value);
+  if (Number.isFinite(dateMs) && (state.practiceDate == null || dateMs !== state.practiceDate)) {
+    state.practiceDate = dateMs;
+  }
   const dir = $('refl-wind-dir').value;
   const speedRaw = $('refl-wind-speed').value;
   const speed = speedRaw === '' ? null : Number(speedRaw);
