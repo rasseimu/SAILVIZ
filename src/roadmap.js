@@ -22,6 +22,25 @@ function newId() {
   return `ms${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
+// 横並びステッパーの HTML(純粋関数)。達成=済/現在地=強調/未達=灰、全達成時は末尾の先に「達成！」。
+// 変更画面(createRoadmap)と進捗画面の読み取り専用トグルで共用する。
+export function stepperHtml(milestones = []) {
+  if (!milestones.length) return '<p class="roadmap-empty">まだ段階がありません。下で追加してください。</p>';
+  const { currentIndex } = roadmapProgress(milestones);
+  const nodes = milestones.map((m, i) => {
+    const state = m.done ? 'done' : (i === currentIndex ? 'current' : 'future');
+    const here = i === currentIndex ? '<span class="rm-here">現在地</span>' : '';
+    const mark = m.done ? '✓' : (i + 1);
+    return `<li class="rm-step rm-${state}">${here}`
+      + `<span class="rm-dot">${mark}</span>`
+      + `<span class="rm-step-title">${esc(m.title)}</span></li>`;
+  }).join('');
+  const goal = currentIndex >= milestones.length
+    ? '<li class="rm-step rm-goal"><span class="rm-here">達成！</span><span class="rm-dot">🏁</span><span class="rm-step-title">ゴール</span></li>'
+    : '<li class="rm-step rm-goal-future"><span class="rm-dot">🏁</span><span class="rm-step-title">ゴール</span></li>';
+  return `<ol class="rm-stepper">${nodes}${goal}</ol>`;
+}
+
 // loadRoadmapData/saveRoadmapData を注入すると保存フォルダのファイルへ永続化できる。
 // 未指定時は localStorage のみ(単体でも動く)。
 export function createRoadmap({
@@ -63,24 +82,6 @@ export function createRoadmap({
   function entry() {
     const e = data[selected] || { goal: '', milestones: [] };
     return { goal: e.goal || '', milestones: e.milestones || [] };
-  }
-
-  // 横並びステッパー。達成=済/現在地=強調/未達=灰。全達成時は末尾の先に「達成！」。
-  function stepperHtml(milestones) {
-    if (!milestones.length) return '<p class="roadmap-empty">まだ段階がありません。下で追加してください。</p>';
-    const { currentIndex } = roadmapProgress(milestones);
-    const nodes = milestones.map((m, i) => {
-      const state = m.done ? 'done' : (i === currentIndex ? 'current' : 'future');
-      const here = i === currentIndex ? '<span class="rm-here">現在地</span>' : '';
-      const mark = m.done ? '✓' : (i + 1);
-      return `<li class="rm-step rm-${state}">${here}`
-        + `<span class="rm-dot">${mark}</span>`
-        + `<span class="rm-step-title">${esc(m.title)}</span></li>`;
-    }).join('');
-    const goal = currentIndex >= milestones.length
-      ? '<li class="rm-step rm-goal"><span class="rm-here">達成！</span><span class="rm-dot">🏁</span><span class="rm-step-title">ゴール</span></li>'
-      : '<li class="rm-step rm-goal-future"><span class="rm-dot">🏁</span><span class="rm-step-title">ゴール</span></li>';
-    return `<ol class="rm-stepper">${nodes}${goal}</ol>`;
   }
 
   // 段階の編集リスト(達成トグル・改名・並べ替え・削除)。

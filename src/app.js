@@ -1096,6 +1096,13 @@ const progress = createProgress({
     saveProgress(obj); // localStorage ミラー(フォルダ未選択/書込失敗の保険)
     if (projectDir) await writeProgress(projectDir, obj);
   },
+  // 目標の変化枠の「ロードマップ」表示(読み取り専用)用。編集は roadmap 画面。
+  loadRoadmapData: async () => {
+    const local = loadRoadmap();
+    if (!projectDir) return local;
+    const file = await readRoadmapFile(projectDir);
+    return Object.keys(file).length ? file : local;
+  },
 });
 
 // 目標ロードマップ: 進捗と同じく保存フォルダの sailviz-roadmap.json に永続化。
