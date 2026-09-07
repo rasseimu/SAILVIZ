@@ -58,6 +58,36 @@ test('matchMember: 括弧フルネーム→姓→kana の順で名簿に解決�
   assert.equal(matchMember('だれか', null, roster).member, null);                 // 未一致
 });
 
+// 実運用の議事録は Markdown 記号(##, -, **)を使わない素のテキストが多い。
+const PLAIN = `ゆま
+今日の目標：ジャイブを安定させる。
+課題：強風クローズで起こしきれず走ってしまった。
+発見：北風ランニングは何もしない方が速い。
+ももか
+今日の目標：全ての動作をスムーズに。
+反省点：周期的な波を予測できなかった。
+気づき：ポールを離すタイミングが分かった。`;
+
+test('parseMinutes は素のテキスト(##/箇条書き/太字なし)を裸の名前見出しで分割する', () => {
+  const blocks = parseMinutes(PLAIN);
+  assert.equal(blocks.length, 2);
+  assert.equal(blocks[0].headerName, 'ゆま');
+  assert.equal(blocks[1].headerName, 'ももか');
+});
+
+test('parseMinutes は素のテキストの 目標/課題/発見 ラベルを吸収する', () => {
+  const b = parseMinutes(PLAIN)[0];
+  assert.match(b.goal, /ジャイブを安定/);
+  assert.match(b.issue, /強風クローズ/);
+  assert.match(b.discovery, /北風ランニング/);
+});
+
+test('parseMinutes は 反省点→課題 / 気づき→発見 の別名を解決する', () => {
+  const momoka = parseMinutes(PLAIN)[1];
+  assert.match(momoka.issue, /周期的な波/);      // 反省点 → issue
+  assert.match(momoka.discovery, /ポールを離す/); // 気づき → discovery
+});
+
 test('parseMinutes は全角半角コロン両対応、未知ラベルは無視', () => {
   const b = parseMinutes('## X（山田太郎）\n- **今日の目標**:半角コロン\n- **雑談**：無視される')[0];
   assert.equal(b.goal, '半角コロン');

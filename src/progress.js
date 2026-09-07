@@ -45,6 +45,7 @@ export function createProgress({
   let chart = null;
   let editing = null;     // 編集中の `${reflId}:${field}`(null=非編集)
   let commenting = null;  // コメント入力中の `${reflId}:${field}`(null=非入力)
+  const selectedCards = new Set(); // AIコメント対象に選んだカード `${reflId}:${field}`(一時的・保存しない)
   let hideComments = (() => { try { return globalThis.localStorage?.getItem(HIDE_COMMENTS_KEY) === '1'; } catch { return false; } })();
 
   // 進捗の保存はUIを止めないよう非同期・投げっぱなし(失敗はログのみ。
@@ -78,6 +79,7 @@ export function createProgress({
       btn.addEventListener('click', () => {
         if (selected === btn.dataset.key) return;
         selected = btn.dataset.key;
+        selectedCards.clear(); // 部員を切り替えたらカード選択はリセット
         renderNav();
         renderBody();
       }));
@@ -99,6 +101,18 @@ export function createProgress({
     }
     return `${prefix}<span class="et-text">${esc(text)}</span>`
       + `<button class="edit-btn" data-refl="${esc(reflId)}" data-field="${field}" title="編集">✎</button>`;
+  }
+
+  // カード要素の属性(選択キー＋選択中クラス)。field ∈ {goal,issue,discovery}。
+  // baseClass にカード種別の基底クラスを渡す。
+  function cardAttrs(field, reflId, baseClass) {
+    const sel = selectedCards.has(`${reflId}:${field}`) ? ' card-selected' : '';
+    return `class="${baseClass}${sel}" data-card-key="${esc(reflId)}:${field}"`;
+  }
+
+  // 指定カード(reflId×field)に既にAI生成コメントが付いているか。
+  function hasAnyAi(reflId, field) {
+    return (progress?.[reflId]?.comments?.[field] || []).some((c) => c.ai);
   }
 
   // コメント吹き出しアイコン。クリックで入力欄を開く。非表示設定時は出さない。
@@ -138,14 +152,14 @@ export function createProgress({
     const buckets = memberBuckets(sum);
 
     const goalsHtml = buckets.flatMap(([name, b]) => b.goals.map((g) =>
-      `<div class="goal-card"><div class="gc-head"><span class="gr-date">${fmtDate(g.dateMs)}</span>`
+      `<div ${cardAttrs('goal', g.reflId, 'goal-card')}><div class="gc-head"><span class="gr-date">${fmtDate(g.dateMs)}</span>`
       + `<span class="gc-head-right">${commentIcon('goal', g.reflId)}`
       + `<input type="checkbox" data-goal="${esc(g.reflId)}" ${g.done ? 'checked' : ''} /></span></div>`
       + `<div class="gc-body">${editable('goal', g.reflId, name, g.text)}</div>`
       + `${commentSection('goal', g.reflId, g.comments)}</div>`)).join('');
 
     const issuesHtml = buckets.flatMap(([name, b]) => b.issues.map((it) =>
-      `<div class="issue-card"><div class="ic-top"><span class="ic-date">${fmtDate(it.dateMs)}</span>`
+      `<div ${cardAttrs('issue', it.reflId, 'issue-card')}><div class="ic-top"><span class="ic-date">${fmtDate(it.dateMs)}</span>`
       + `<span class="ic-text">${editable('issue', it.reflId, name, it.text)}</span>${commentIcon('issue', it.reflId)}</div>`
       + `<span class="stage-toggle">${STAGES.map((s) =>
         `<button data-issue="${esc(it.reflId)}" data-stage="${s.v}" class="${it.stage === s.v ? 'active' : ''}">${s.label}</button>`).join('')}</span>`
@@ -155,7 +169,7 @@ export function createProgress({
     const binOrder = [...WIND_BINS, { key: 'unknown', label: '風速不明' }];
     const discHtml = binOrder.map((bin) => {
       const items = buckets.flatMap(([name, b]) => (b.discoveriesByBin[bin.key] || []).map((d) =>
-        `<li>${editable('discovery', d.reflId, name, d.text)}${commentIcon('discovery', d.reflId)}`
+        `<li ${cardAttrs('discovery', d.reflId, 'disc-card')}>${editable('discovery', d.reflId, name, d.text)}${commentIcon('discovery', d.reflId)}`
         + `${commentSection('discovery', d.reflId, d.comments)}</li>`));
       return items.length ? `<div class="wind-bin"><strong>${bin.label}</strong><ul>${items.join('')}</ul></div>` : '';
     }).join('') || '<p>(発見なし)</p>';
@@ -172,6 +186,18 @@ export function createProgress({
 
   function wireBody() {
     const content = $('progress-content');
+
+    // カードの余白クリックでAIコメント対象を選択トグル。既存の操作要素
+    // (ボタン・入力欄・リンク)へのクリックは選択に影響しない。
+    content.querySelectorAll('[data-card-key]').forEach((card) =>
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('button, input, textarea, a')) return;
+        const key = card.dataset.cardKey;
+        if (selectedCards.has(key)) selectedCards.delete(key);
+        else selectedCards.add(key);
+        renderBody();
+      }));
+
     content.querySelectorAll('button[data-issue]').forEach((btn) =>
       btn.addEventListener('click', () => {
         progress = setIssueStage(progress, btn.dataset.issue, Number(btn.dataset.stage));
@@ -335,16 +361,28 @@ export function createProgress({
     btn.addEventListener('click', async () => {
       const apiKey = keyInput.value.trim();
       if (!apiKey) { status.textContent = 'Gemini APIキーを入力してください'; return; }
-      // 表示中バケットから走査対象を作る(選択メンバー/全て)。
+      // 表示中バケットの全カードを (reflId, field, text) に平坦化。
       const sum = summarize(reflections, progress);
       const buckets = memberBuckets(sum);
-      const items = [];
+      const allItems = [];
       for (const [, b] of buckets) {
-        for (const g of b.goals) items.push({ reflId: g.reflId, field: 'goal', text: g.text });
-        for (const it of b.issues) items.push({ reflId: it.reflId, field: 'issue', text: it.text });
+        for (const g of b.goals) allItems.push({ reflId: g.reflId, field: 'goal', text: g.text });
+        for (const it of b.issues) allItems.push({ reflId: it.reflId, field: 'issue', text: it.text });
         for (const bin of Object.values(b.discoveriesByBin)) {
-          for (const d of bin) items.push({ reflId: d.reflId, field: 'discovery', text: d.text });
+          for (const d of bin) allItems.push({ reflId: d.reflId, field: 'discovery', text: d.text });
         }
+      }
+      // コメント対象の決定:
+      //  (1) 選択あり     : 選択カードのみ。
+      //  (2) 選択なし・部員: AIコメント未付与のカードのみ。
+      //  (3) 選択なし・全て: 全カード(screeningが拾ったものだけコメント＝ピックアップ)。
+      let items;
+      if (selectedCards.size > 0) {
+        items = allItems.filter((x) => selectedCards.has(`${x.reflId}:${x.field}`));
+      } else if (selected !== 'all') {
+        items = allItems.filter((x) => !hasAnyAi(x.reflId, x.field));
+      } else {
+        items = allItems;
       }
       btn.disabled = true; status.textContent = '生成中…(PDF照合には少し時間がかかります)';
       try {

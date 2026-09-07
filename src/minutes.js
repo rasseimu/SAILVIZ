@@ -5,8 +5,8 @@ import { memberList, toHiragana } from './members.js';
 // ラベル(別名込み)→ 反省フィールドキー。今後/取り組みは発見(discovery)に集約する。
 const LABEL_MAP = {
   '目標': 'goal', '今日の目標': 'goal',
-  '課題': 'issue',
-  '発見': 'discovery',
+  '課題': 'issue', '反省点': 'issue', '反省': 'issue',
+  '発見': 'discovery', '気づき': 'discovery', '気付き': 'discovery',
   '今後': 'discovery', '今後の取り組み': 'discovery', '取り組み': 'discovery', '取組': 'discovery',
 };
 
@@ -17,9 +17,9 @@ function splitHeader(line) {
   return { headerName: line.trim(), fullNameHint: null };
 }
 
-// `- **ラベル**：本文` 行を { key, text } に。ラベル別名を解決。非該当は null。
+// `ラベル：本文` 行を { key, text } に。箇条書き(- *)・太字(**)は任意。ラベル別名を解決。非該当は null。
 function parseLabelLine(line) {
-  const m = line.match(/^\s*[-*]\s*\*\*(.+?)\*\*\s*[：:]\s*(.*)$/);
+  const m = line.match(/^\s*(?:[-*]\s*)?(?:\*\*)?\s*(.+?)\s*(?:\*\*)?\s*[：:]\s*(.*)$/);
   if (!m) return null;
   const key = LABEL_MAP[m[1].trim()];
   if (!key) return null;
@@ -29,20 +29,29 @@ function parseLabelLine(line) {
 // 議事録全文 → 部員ブロック配列。
 export function parseMinutes(text) {
   const lines = String(text).split(/\r?\n/);
+  // ## 見出しが1つも無い素のテキスト議事録では、裸の名前行を部員見出しとして扱う。
+  const hasMdHeading = lines.some((l) => /^##\s+.+/.test(l));
   const blocks = [];
   let cur = null;      // 現在のブロック
   let lastKey = null;  // 継続行(ラベルの折返し)の追記先
   const push = () => { if (cur) blocks.push(cur); };
+  const start = (name) => {
+    push();
+    const { headerName, fullNameHint } = splitHeader(name);
+    cur = { headerName, fullNameHint, goal: '', issue: '', discovery: '', raw: '' };
+    lastKey = null;
+  };
   for (const line of lines) {
     const h = line.match(/^##\s+(.+?)\s*$/);
-    if (h) {
-      push();
-      const { headerName, fullNameHint } = splitHeader(h[1]);
-      cur = { headerName, fullNameHint, goal: '', issue: '', discovery: '', raw: '' };
-      lastKey = null;
+    if (h) { start(h[1]); continue; }
+    const trimmed = line.trim();
+    // プレーン書式: ラベルでも箇条書きでもコロンも含まない短い行 = 部員名の見出し。
+    if (!hasMdHeading && trimmed && !parseLabelLine(line)
+        && !/^[-*]/.test(trimmed) && !/[：:]/.test(trimmed) && trimmed.length <= 20) {
+      start(trimmed);
       continue;
     }
-    if (!cur) continue; // 最初の ## より前(# タイトル等)は無視
+    if (!cur) continue; // 最初の見出しより前(# タイトル等)は無視
     cur.raw += (cur.raw ? '\n' : '') + line;
     const lbl = parseLabelLine(line);
     if (lbl) {
