@@ -741,7 +741,7 @@ $('home-dashboard-link').addEventListener('click', showDashboard);
 $('dashboard-home-link').addEventListener('click', backToHomeFromDashboard);
 $('home-progress-link').addEventListener('click', showProgress);
 $('progress-home-link').addEventListener('click', backToHomeFromProgress);
-$('home-roadmap-link').addEventListener('click', showRoadmap);
+// ロードマップ編集への導線は進捗画面のロードマップ表示の下に集約(onEditRoadmap)。
 $('roadmap-home-link').addEventListener('click', backToHomeFromRoadmap);
 $('home-new').addEventListener('click', startNewPractice);
 
@@ -1119,6 +1119,8 @@ const progress = createProgress({
   saveProgressData: async (obj) => { await store.writeProgress(obj); },
   // 目標の変化枠の「ロードマップ」表示(読み取り専用)用。編集は roadmap 画面。
   loadRoadmapData: async () => store.readRoadmap(),
+  // ロードマップ表示の下の「変更」リンクから編集画面へ遷移。
+  onEditRoadmap: showRoadmap,
 });
 
 // 目標ロードマップ: API(store) に永続化。
