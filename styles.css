@@ -489,6 +489,9 @@ body.readonly .writes-json { opacity: .4; cursor: not-allowed; }
 #editModeBtn { border: 1px solid var(--gd-border); background: none; color: var(--gd-blue);
   font: inherit; padding: 7px 16px; border-radius: 8px; cursor: pointer; }
 #editModeBtn:hover { background: rgba(26,115,232,0.06); }
+/* 編集中は緑の塗り(明確に「編集ON」を示す) */
+#editModeBtn.editing { background: #1a7f37; border-color: #1a7f37; color: #fff; }
+#editModeBtn.editing:hover { background: #166a2e; }
 
 /* ログインダイアログ */
 #loginDialog { border: none; border-radius: 8px; padding: 20px 24px;

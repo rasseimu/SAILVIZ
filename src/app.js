@@ -697,9 +697,19 @@ const loginError = $('loginError');
 
 function applyEditableState() {
   const on = store.isUnlocked();
-  editModeBtn.textContent = on ? 'ログアウト' : '編集モード';
+  // ボタンで現在のモードを明示: 閲覧中=🔒/編集中=✓(緑=.editing)。
+  editModeBtn.textContent = on ? '✓ 編集中' : '🔒 編集モード';
+  editModeBtn.classList.toggle('editing', on);
+  editModeBtn.title = on
+    ? 'クリックで編集を終了（閲覧のみに戻す）'
+    : 'クリックして編集モードにすると、反省・進捗・ロードマップを保存できます';
   document.body.classList.toggle('readonly', !on);
-  document.querySelectorAll('.writes-json').forEach((el) => { el.disabled = !on; });
+  document.querySelectorAll('.writes-json').forEach((el) => {
+    el.disabled = !on;
+    // 無効化の理由をツールチップで補足(Firefox 等では disabled 要素でも表示)。
+    if (on) el.removeAttribute('title');
+    else el.title = '編集モードにすると変更できます';
+  });
 }
 
 editModeBtn.addEventListener('click', async () => {
