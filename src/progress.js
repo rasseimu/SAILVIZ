@@ -41,6 +41,7 @@ export function createProgress({
   loadProgressData = async () => loadProgress(),
   saveProgressData = async (obj) => saveProgress(obj),
   loadRoadmapData = async () => loadRoadmap(),
+  onEditRoadmap = () => {},
 } = {}) {
   let reflections = [];   // 全練習の反省を平坦化
   let progress = {};      // sailviz.progress
@@ -203,6 +204,7 @@ export function createProgress({
       + `<button class="pq-gv-btn${goalView === 'roadmap' ? ' active' : ''}" data-goalview="roadmap">ロードマップ</button></span>`;
     const goalBody = goalView === 'roadmap'
       ? `<div class="pq-roadmap">${roadmapPanelHtml()}</div>`
+        + '<div class="pq-roadmap-edit"><button type="button" class="pq-roadmap-edit-btn" data-roadmap-edit>🎯 目標ロードマップを変更</button></div>'
       : `<div class="goal-cards">${goalsHtml || '<p>(目標なし)</p>'}</div>`;
 
     content.innerHTML =
@@ -225,6 +227,11 @@ export function createProgress({
         goalView = btn.dataset.goalview;
         renderBody();
       }));
+
+    // ロードマップ表示の下の「変更」→ 編集画面へ遷移(閲覧は誰でも、保存は編集モード)。
+    // 特定部員を選択中ならその部員を、全て表示なら未指定で開く。
+    content.querySelectorAll('[data-roadmap-edit]').forEach((btn) =>
+      btn.addEventListener('click', () => onEditRoadmap(selected === 'all' ? null : selected)));
 
     // カードの余白クリックでAIコメント対象を選択トグル。既存の操作要素
     // (ボタン・入力欄・リンク)へのクリックは選択に影響しない。

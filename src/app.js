@@ -5,7 +5,7 @@ import { parseTags } from './tags.js';
 import { computeBounds, fitTransform, unproject, project } from './projection.js';
 import { pan, zoomAt, screenToWorld, worldToScreen } from './viewport.js';
 import { globalRange, remapEventsToAxis } from './timeaxis.js';
-import { positionAt } from './interpolate.js';
+import { positionOnTracksAt } from './interpolate.js';
 import { parseMp4TimesFromFile, embeddedStartMs } from './videometa.js';
 import { scanFolderVideos, collectVideoFiles } from './folderimport.js';
 import { drawScene } from './renderer.js';
@@ -387,12 +387,12 @@ function backToHomeFromProgress() {
   document.body.classList.remove('view-progress');
   showHome();
 }
-async function showRoadmap() {
-  // ロードマップは自己完結データ(目標/段階)なので保存フォルダは必須にしない。
-  // フォルダ選択済みなら sailviz-roadmap.json に永続化、未選択なら localStorage のみ。
+// member を渡すと、その部員を選択して編集画面を開く(進捗画面の導線用)。
+async function showRoadmap(member) {
+  // ロードマップは自己完結データ(目標/段階)。永続化は API(store)。
   document.body.classList.remove('view-home');
   document.body.classList.add('view-roadmap');
-  await roadmap.render();
+  await roadmap.render(typeof member === 'string' ? member : undefined);
 }
 function backToHomeFromRoadmap() {
   document.body.classList.remove('view-roadmap');
@@ -697,9 +697,19 @@ const loginError = $('loginError');
 
 function applyEditableState() {
   const on = store.isUnlocked();
-  editModeBtn.textContent = on ? 'ログアウト' : '編集モード';
+  // ボタンで現在のモードを明示: 閲覧中=🔒/編集中=✓(緑=.editing)。
+  editModeBtn.textContent = on ? '✓ 編集中' : '🔒 編集モード';
+  editModeBtn.classList.toggle('editing', on);
+  editModeBtn.title = on
+    ? 'クリックで編集を終了（閲覧のみに戻す）'
+    : 'クリックして編集モードにすると、反省・進捗・ロードマップを保存できます';
   document.body.classList.toggle('readonly', !on);
-  document.querySelectorAll('.writes-json').forEach((el) => { el.disabled = !on; });
+  document.querySelectorAll('.writes-json').forEach((el) => {
+    el.disabled = !on;
+    // 無効化の理由をツールチップで補足(Firefox 等では disabled 要素でも表示)。
+    if (on) el.removeAttribute('title');
+    else el.title = '編集モードにすると変更できます';
+  });
 }
 
 editModeBtn.addEventListener('click', async () => {
@@ -731,7 +741,7 @@ $('home-dashboard-link').addEventListener('click', showDashboard);
 $('dashboard-home-link').addEventListener('click', backToHomeFromDashboard);
 $('home-progress-link').addEventListener('click', showProgress);
 $('progress-home-link').addEventListener('click', backToHomeFromProgress);
-$('home-roadmap-link').addEventListener('click', showRoadmap);
+// ロードマップ編集への導線は進捗画面のロードマップ表示の下に集約(onEditRoadmap)。
 $('roadmap-home-link').addEventListener('click', backToHomeFromRoadmap);
 $('home-new').addEventListener('click', startNewPractice);
 
@@ -829,9 +839,11 @@ function pickTrackTime(px, py) {
 function pickVideo(px, py) {
   const T = state.transform;
   const ref = firstVisibleTrack();
-  if (!T.proj || !ref) return null;
+  if (!T.proj) return null;
   for (const v of state.videos) {
-    const pos = positionAt(ref.points, v.t);
+    // 描画(renderer)と同じロジックで位置を求める。時刻を含むトラック(基準優先)に
+    // 配置されるので、午前・午後を別トラックで読み込んでもバッジをクリックできる。
+    const pos = positionOnTracksAt(state.tracks, ref, v.t);
     if (!pos) continue;
     const s = worldToScreen(project(pos.lat, pos.lon, T.proj), T);
     if (Math.abs(s.px - px) <= 14 && Math.abs(s.py - py) <= 12) return v;
@@ -1109,6 +1121,8 @@ const progress = createProgress({
   saveProgressData: async (obj) => { await store.writeProgress(obj); },
   // 目標の変化枠の「ロードマップ」表示(読み取り専用)用。編集は roadmap 画面。
   loadRoadmapData: async () => store.readRoadmap(),
+  // ロードマップ表示の下の「変更」リンクから編集画面へ遷移。
+  onEditRoadmap: showRoadmap,
 });
 
 // 目標ロードマップ: API(store) に永続化。

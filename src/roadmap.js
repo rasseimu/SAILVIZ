@@ -56,8 +56,10 @@ export function createRoadmap({
     Promise.resolve(saveRoadmapData(data)).catch((e) => console.error('ロードマップの保存に失敗', e));
   }
 
-  async function render() {
+  // member を渡すと、その部員を選択して開く(進捗画面の「ロードマップを変更」導線用)。
+  async function render(member) {
     data = await loadRoadmapData();
+    if (member && memberList().some((m) => m.fullName === member)) selected = member;
     if (!selected) selected = memberList()[0]?.fullName || null;
     renderNav();
     renderBody();

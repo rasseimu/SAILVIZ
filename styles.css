@@ -27,7 +27,7 @@ body.view-home #home-screen { display: flex; }
 #home-bar { display: flex; gap: 12px; align-items: center; height: 64px; padding: 0 16px;
   background: var(--gd-surface); border-bottom: 1px solid var(--gd-border); }
 #home-bar strong { font-size: 20px; font-weight: 500; color: #5f6368; letter-spacing: .2px; }
-#home-bar strong::before { content: "⛵"; margin-right: 8px; }
+#home-logo { height: 28px; width: auto; display: block; }
 #home-folder { margin-left: auto; }
 #home-folder .btn { background: none; color: var(--gd-blue); border: 1px solid var(--gd-border);
   font: inherit; padding: 7px 16px; border-radius: 8px; cursor: pointer; }
@@ -379,6 +379,11 @@ body.view-roadmap #transport { display: none; }
 .pq-rm-name { font-weight: 600; font-size: 13px; color: #333; margin-bottom: 2px; }
 .pq-rm-goal { font-weight: 400; color: #777; margin-left: 6px; }
 .pq-roadmap .rm-stepper { padding: 22px 4px 4px; }
+/* ロードマップ表示の下の「変更」導線 */
+.pq-roadmap-edit { margin-top: 10px; }
+.pq-roadmap-edit-btn { font: inherit; font-size: 13px; color: var(--gd-blue); background: none;
+  border: 1px solid var(--gd-border); padding: 6px 14px; border-radius: 8px; cursor: pointer; }
+.pq-roadmap-edit-btn:hover { background: rgba(26,115,232,0.06); }
 /* 目標(左上): カードを横スクロール */
 .pq-goals .goal-cards { flex: 1; display: flex; gap: 10px; overflow-x: auto; overflow-y: hidden;
   align-items: stretch; padding-bottom: 4px; }
@@ -489,6 +494,9 @@ body.readonly .writes-json { opacity: .4; cursor: not-allowed; }
 #editModeBtn { border: 1px solid var(--gd-border); background: none; color: var(--gd-blue);
   font: inherit; padding: 7px 16px; border-radius: 8px; cursor: pointer; }
 #editModeBtn:hover { background: rgba(26,115,232,0.06); }
+/* 編集中は緑の塗り(明確に「編集ON」を示す) */
+#editModeBtn.editing { background: #1a7f37; border-color: #1a7f37; color: #fff; }
+#editModeBtn.editing:hover { background: #166a2e; }
 
 /* ログインダイアログ */
 #loginDialog { border: none; border-radius: 8px; padding: 20px 24px;
