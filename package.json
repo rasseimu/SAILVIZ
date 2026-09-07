@@ -6,6 +6,8 @@
   "description": "Client-side GPS track viewer (mock) for sailing practice logs",
   "scripts": {
     "test": "node --test",
-    "serve": "python3 serve.py 8000"
+    "start": "node server/index.js",
+    "serve": "node server/index.js",
+    "import": "node server/import.js"
   }
 }

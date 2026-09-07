@@ -27,5 +27,46 @@ node --test
 ```
 純粋ロジック（パース/投影/補間/時間軸）を単体テスト。描画/操作は手動確認。
 
+## 起動・デプロイ
+
+本番・開発環境は Node サーバー（`server/index.js`）で起動します。
+
+### ローカル開発
+```bash
+SAILVIZ_WRITE_TOKEN=test npm start
+# ブラウザで http://localhost:8000/
+```
+
+環境変数：
+- `PORT`（デフォルト 8000）：バインドポート
+- `DATA_DIR`（デフォルト `./data`）：プロジェクトデータ保存先
+- `SAILVIZ_WRITE_TOKEN`：書き込み認証用パスワード（未設定で書き込み禁止）
+
+### デプロイ
+```bash
+docker build -t sailviz .
+docker run -it -p 8000:8000 \
+  -e SAILVIZ_WRITE_TOKEN=<secret-password> \
+  -v /persistent/data:/data \
+  sailviz
+```
+
+- 永続ボリュームを `/data` にマウント
+- `SAILVIZ_WRITE_TOKEN` は秘密管理ツールで設定
+- 本番環境は HTTPS 前提（リバースプロキシ経由）
+
+### データ移行
+既存のプロジェクトフォルダを新インスタンスに移行：
+```bash
+npm run import -- <既存フォルダ> ./data
+# または DATA_DIR を指定して実行
+DATA_DIR=/persistent/data npm run import -- <既存フォルダ>
+```
+
+### 認証・動画
+- **閲覧**：誰でも可（パスワード不要）
+- **書き込み**：編集モード（ロードマップ編集など）時にパスワード入力
+- **動画**：各自のローカル/Google Drive 同期フォルダを選択（サーバーには置かない）
+
 ## 設計資料
 `docs/2026-08-14-gps-track-viewer-design.md`、`docs/ヨット練習最適化_ハッカソン提案.md`
