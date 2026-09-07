@@ -91,6 +91,19 @@ export function setTextOverride(obj, reflId, field, text) {
   return { ...obj, [reflId]: entry };
 }
 
+// カードの削除フラグ(ゴミ箱)。field ∈ {goal,issue,discovery}。真実源は書き換えず、
+// オーバーレイ上で非表示にする。deleted=false で復元(フラグを外し、空なら deleted 自体を消す)。
+export function setCardDeleted(obj, reflId, field, deleted) {
+  const prev = obj[reflId] || { issueStage: 0, goalDone: false };
+  const del = { ...(prev.deleted || {}) };
+  if (deleted) del[field] = true;
+  else delete del[field];
+  const entry = { issueStage: 0, goalDone: false, ...prev };
+  if (Object.keys(del).length) entry.deleted = del;
+  else delete entry.deleted;
+  return { ...obj, [reflId]: entry };
+}
+
 // 反省の練習日時(ms)。practice.startMs → createdAt の順。
 function reflDateMs(r) {
   return r.practice?.startMs ?? r.createdAt ?? 0;
@@ -98,6 +111,7 @@ function reflDateMs(r) {
 
 export function summarize(reflections, progress, { bins = WIND_BINS } = {}) {
   const byMember = {};
+  const trash = []; // 削除フラグ済みカード(ゴミ箱表示用) {name, field, reflId, text, dateMs, speed?}
   const ensure = (name) => (byMember[name] ||= { goals: [], issues: [], discoveriesByBin: {} });
   // 練習日昇順で走査(累計シリーズの単調性のため)。
   const sorted = [...reflections].sort((a, b) => reflDateMs(a) - reflDateMs(b));
@@ -120,28 +134,36 @@ export function summarize(reflections, progress, { bins = WIND_BINS } = {}) {
     const notes = r.notes || {};
     const ov = st.text || {};
     const cm = st.comments || {};
+    const del = st.deleted || {}; // 削除フラグ済みは表示・集計から除外し trash に回す。
     // 表示テキストはオーバーレイ優先。ただし元反省に存在する項目のみ対象(新規追加はしない)。
-    if (notes.goal) bucket.goals.push({ reflId: r.id, text: ov.goal ?? notes.goal, dateMs, done: !!st.goalDone, comments: cm.goal || [] });
-    if (notes.issue) bucket.issues.push({ reflId: r.id, text: ov.issue ?? notes.issue, dateMs, stage: st.issueStage ?? 0, comments: cm.issue || [] });
+    if (notes.goal) {
+      if (del.goal) trash.push({ name, field: 'goal', reflId: r.id, text: ov.goal ?? notes.goal, dateMs });
+      else bucket.goals.push({ reflId: r.id, text: ov.goal ?? notes.goal, dateMs, done: !!st.goalDone, comments: cm.goal || [] });
+    }
+    if (notes.issue && !del.issue) bucket.issues.push({ reflId: r.id, text: ov.issue ?? notes.issue, dateMs, stage: st.issueStage ?? 0, comments: cm.issue || [] });
+    else if (notes.issue && del.issue) trash.push({ name, field: 'issue', reflId: r.id, text: ov.issue ?? notes.issue, dateMs });
     if (notes.discovery) {
       const speed = r.wind?.speed ?? null;
-      const bk = windBinKey(speed);
-      (bucket.discoveriesByBin[bk] ||= []).push({ reflId: r.id, text: ov.discovery ?? notes.discovery, dateMs, speed, comments: cm.discovery || [] });
+      if (del.discovery) trash.push({ name, field: 'discovery', reflId: r.id, text: ov.discovery ?? notes.discovery, dateMs, speed });
+      else {
+        const bk = windBinKey(speed);
+        (bucket.discoveriesByBin[bk] ||= []).push({ reflId: r.id, text: ov.discovery ?? notes.discovery, dateMs, speed, comments: cm.discovery || [] });
+      }
     }
-    // 課題追加を累計(ステージ無関係)。課題を持つ反省のみ対象。
-    if (notes.issue) {
+    // 課題追加を累計(ステージ無関係)。課題を持つ反省のみ対象。削除済みは数えない。
+    if (notes.issue && !del.issue) {
       allAdded += 1;
       memberAdded[name] = (memberAdded[name] || 0) + 1;
       addedSeries.all.push({ dateMs, value: allAdded });
       (addedSeries[name] ||= []).push({ dateMs, value: memberAdded[name] });
     }
-    // 解決(stage=2)到達を累計。課題を持つ反省のみ対象。
-    if (notes.issue && (st.issueStage ?? 0) === 2) {
+    // 解決(stage=2)到達を累計。課題を持つ反省のみ対象。削除済みは数えない。
+    if (notes.issue && !del.issue && (st.issueStage ?? 0) === 2) {
       allCum += 1;
       memberCum[name] = (memberCum[name] || 0) + 1;
       series.all.push({ dateMs, value: allCum });
       (series[name] ||= []).push({ dateMs, value: memberCum[name] });
     }
   }
-  return { byMember, resolutionSeries: series, issueAddedSeries: addedSeries, firstDateMs };
+  return { byMember, trash, resolutionSeries: series, issueAddedSeries: addedSeries, firstDateMs };
 }

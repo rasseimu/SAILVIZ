@@ -1275,13 +1275,14 @@ function renderReflectionList() {
     row.innerHTML =
       `<span class="refl-snippet" data-edit="${i}">${escapeHtml(snippet)}`
       + `<div class="refl-meta">${escapeHtml(meta)}</div></span>`
-      + `<button data-delrefl="${i}" title="削除">×</button>`;
+      + `<button class="refl-del" data-delrefl="${i}" title="削除">×</button>`;
     list.appendChild(row);
   });
   list.querySelectorAll('span[data-edit]').forEach((s) =>
     s.addEventListener('click', (e) => openReflectionEditor(state.reflections[+e.currentTarget.dataset.edit])));
   list.querySelectorAll('button[data-delrefl]').forEach((b) =>
     b.addEventListener('click', (e) => {
+      if (!window.confirm('この練習データ（反省）を削除しますか？この操作は元に戻せません。')) return;
       state.reflections.splice(+e.target.dataset.delrefl, 1);
       persistReflections(); renderReflectionList();
     }));
