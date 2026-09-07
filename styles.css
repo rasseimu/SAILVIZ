@@ -411,6 +411,32 @@ body.view-roadmap #transport { display: none; }
 .goal-card, .issue-card, .wind-bin li { cursor: pointer; }
 .goal-card.card-selected, .issue-card.card-selected, .wind-bin li.card-selected {
   background: #e8f0fe; box-shadow: 0 0 0 2px #1558d6 inset; border-radius: 6px; }
+/* カード削除(角の赤バツ)。カードを相対配置にして右上角へ重ねる */
+.goal-card, .issue-card, .wind-bin li.disc-card { position: relative; }
+.goal-card, .issue-card { padding-right: 22px; }
+.wind-bin li.disc-card { padding-right: 18px; }
+.card-del { position: absolute; top: 2px; right: 4px; z-index: 1; border: none; background: transparent;
+  cursor: pointer; color: #c00; opacity: 0.45; padding: 0 2px; font-size: 15px; line-height: 1; }
+.card-del:hover { opacity: 1; }
+/* ゴミ箱(削除済みカードの一覧＋復元)。グリッド外のフッター。空なら非表示 */
+#progress-trash:empty { display: none; }
+#progress-trash { flex: 0 0 auto; max-height: 30vh; overflow-y: auto; border-top: 1px solid #e5e5e5;
+  padding: 8px 16px 12px; background: #fbfbfb; }
+.pq-trash h3 { margin: 0 0 6px; font-size: 14px; color: #666; }
+.pq-trash .trash-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.pq-trash .trash-row { display: flex; align-items: baseline; gap: 8px; font-size: 13px;
+  padding: 4px 6px; border: 1px solid #eee; border-radius: 6px; background: #fafafa; color: #666; }
+.pq-trash .trash-kind { flex: 0 0 auto; font-size: 11px; color: #fff; background: #b0b0b0;
+  border-radius: 4px; padding: 1px 6px; }
+.pq-trash .trash-when { flex: 0 0 auto; color: #999; font-size: 11px; }
+.pq-trash .trash-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pq-trash .card-restore { flex: 0 0 auto; font-size: 12px; padding: 2px 10px; cursor: pointer;
+  border: 1px solid #1558d6; border-radius: 4px; background: #fff; color: #1558d6; }
+.pq-trash .card-restore:hover { background: #e8f0fe; }
+/* 反省一覧の削除(角の赤バツ・強調) */
+.refl-row .refl-del { flex: 0 0 auto; align-self: flex-start; font-size: 15px; line-height: 1;
+  opacity: 0.55; padding: 0 2px; }
+.refl-row .refl-del:hover { opacity: 1; }
 /* 推移(右下): 象限いっぱいにグラフ */
 .pq-chart #progress-chart-wrap { flex: 1; min-height: 0; }
 /* インライン編集 */

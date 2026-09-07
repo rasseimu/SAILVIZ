@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   STORAGE_KEY, WIND_BINS, loadProgress, saveProgress,
   setIssueStage, setGoalDone, setTextOverride, windBinKey, summarize,
-  addComment, hasAiComment,
+  addComment, hasAiComment, setCardDeleted,
 } from '../src/progressstore.js';
 
 test('addComment: metaなしは{text,ts}のまま(後方互換)', () => {
@@ -98,6 +98,62 @@ test('summarize は元反省に無い項目は text オーバーレイでも新�
   const b = s.byMember['本間 由真'];
   assert.equal(b.goals.length, 1);
   assert.equal(b.issues.length, 0);
+});
+
+test('setCardDeleted は不変更新で reflId 単位に field の削除フラグを立て/降ろす', () => {
+  const a = {};
+  const b = setCardDeleted(a, 'r1', 'goal', true);
+  assert.notEqual(a, b);
+  assert.deepEqual(b, { r1: { issueStage: 0, goalDone: false, deleted: { goal: true } } });
+  // 既存の進捗トグルは保持しつつ別 field を足す
+  const c = setCardDeleted(setIssueStage(b, 'r1', 2), 'r1', 'issue', true);
+  assert.equal(c.r1.issueStage, 2);
+  assert.deepEqual(c.r1.deleted, { goal: true, issue: true });
+  // false で復元(フラグを外す)。空になったら deleted キー自体を消す
+  const d = setCardDeleted(c, 'r1', 'goal', false);
+  assert.deepEqual(d.r1.deleted, { issue: true });
+  const e = setCardDeleted(d, 'r1', 'issue', false);
+  assert.equal('deleted' in e.r1, false);
+  assert.deepEqual(b.r1.deleted, { goal: true }); // b は不変
+});
+
+test('summarize は削除フラグの項目をバケットから除外し trash に集める', () => {
+  const reflections = [
+    refl('r1', '本間 由真', 1000, { goal: 'g1', issue: 'i1', discovery: 'd1', speed: 2 }),
+  ];
+  const progress = { r1: { deleted: { goal: true, discovery: true } } };
+  const s = summarize(reflections, progress);
+  const b = s.byMember['本間 由真'];
+  assert.equal(b.goals.length, 0);
+  assert.equal(b.issues.length, 1); // issue は残る
+  assert.equal((b.discoveriesByBin[WIND_BINS[0].key] || []).length, 0);
+  // trash には削除した goal と discovery が入る(issue は入らない)
+  const fields = s.trash.map((t) => t.field).sort();
+  assert.deepEqual(fields, ['discovery', 'goal']);
+  const goalTrash = s.trash.find((t) => t.field === 'goal');
+  assert.deepEqual(
+    { name: goalTrash.name, reflId: goalTrash.reflId, text: goalTrash.text, dateMs: goalTrash.dateMs },
+    { name: '本間 由真', reflId: 'r1', text: 'g1', dateMs: 1000 },
+  );
+});
+
+test('summarize は削除した課題を追加/解決の累計からも除外する', () => {
+  const reflections = [
+    refl('r1', '本間 由真', 1000, { issue: 'a' }),
+    refl('r2', '本間 由真', 2000, { issue: 'b' }),
+  ];
+  const progress = { r1: { issueStage: 2 }, r2: { issueStage: 2, deleted: { issue: true } } };
+  const s = summarize(reflections, progress);
+  assert.deepEqual(s.issueAddedSeries.all.map((p) => p.value), [1]); // r2 は除外
+  assert.deepEqual(s.resolutionSeries.all.map((p) => p.value), [1]);
+});
+
+test('summarize は削除項目の trash テキストも text オーバーレイを優先する', () => {
+  const reflections = [refl('r1', '本間 由真', 1000, { goal: '元目標' })];
+  const progress = { r1: { text: { goal: '新目標' }, deleted: { goal: true } } };
+  const s = summarize(reflections, progress);
+  assert.equal(s.byMember['本間 由真'].goals.length, 0);
+  assert.equal(s.trash.find((t) => t.field === 'goal').text, '新目標');
 });
 
 test('windBinKey は境界とnullを正しく分類', () => {

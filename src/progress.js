@@ -4,7 +4,7 @@
 import { memberList } from './members.js';
 import {
   loadProgress, saveProgress, setIssueStage, setGoalDone, setTextOverride,
-  addComment, removeComment, hasAiComment, summarize, WIND_BINS,
+  addComment, removeComment, hasAiComment, summarize, setCardDeleted, WIND_BINS,
 } from './progressstore.js';
 import { renderChart } from './chartview.js';
 import { generateAiComments } from './aicomment.js';
@@ -14,6 +14,7 @@ import { SOURCES } from './references/todaiyacht.js';
 
 const $ = (id) => document.getElementById(id);
 const STAGES = [{ v: 0, label: '未着手' }, { v: 1, label: '取組中' }, { v: 2, label: '解決' }];
+const FIELD_LABEL = { goal: '目標', issue: '課題', discovery: '発見' };
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
@@ -134,6 +135,11 @@ export function createProgress({
     return `class="${baseClass}${sel}" data-card-key="${esc(reflId)}:${field}"`;
   }
 
+  // カード右上角の削除(ゴミ箱行き)ボタン。field ∈ {goal,issue,discovery}。
+  function cardDelBtn(field, reflId) {
+    return `<button class="card-del writes-json" data-delcard-field="${field}" data-delcard-refl="${esc(reflId)}" title="削除">×</button>`;
+  }
+
   // 指定カード(reflId×field)に既にAI生成コメントが付いているか。
   function hasAnyAi(reflId, field) {
     return (progress?.[reflId]?.comments?.[field] || []).some((c) => c.ai);
@@ -176,14 +182,14 @@ export function createProgress({
     const buckets = memberBuckets(sum);
 
     const goalsHtml = buckets.flatMap(([name, b]) => b.goals.map((g) =>
-      `<div ${cardAttrs('goal', g.reflId, 'goal-card')}><div class="gc-head"><span class="gr-date">${fmtDate(g.dateMs)}</span>`
+      `<div ${cardAttrs('goal', g.reflId, 'goal-card')}>${cardDelBtn('goal', g.reflId)}<div class="gc-head"><span class="gr-date">${fmtDate(g.dateMs)}</span>`
       + `<span class="gc-head-right">${commentIcon('goal', g.reflId)}`
       + `<input type="checkbox" class="writes-json" data-goal="${esc(g.reflId)}" ${g.done ? 'checked' : ''} /></span></div>`
       + `<div class="gc-body">${editable('goal', g.reflId, name, g.text)}</div>`
       + `${commentSection('goal', g.reflId, g.comments)}</div>`)).join('');
 
     const issuesHtml = buckets.flatMap(([name, b]) => b.issues.map((it) =>
-      `<div ${cardAttrs('issue', it.reflId, 'issue-card')}><div class="ic-top"><span class="ic-date">${fmtDate(it.dateMs)}</span>`
+      `<div ${cardAttrs('issue', it.reflId, 'issue-card')}>${cardDelBtn('issue', it.reflId)}<div class="ic-top"><span class="ic-date">${fmtDate(it.dateMs)}</span>`
       + `<span class="ic-text">${editable('issue', it.reflId, name, it.text)}</span>${commentIcon('issue', it.reflId)}</div>`
       + `<span class="stage-toggle">${STAGES.map((s) =>
         `<button data-issue="${esc(it.reflId)}" data-stage="${s.v}" class="writes-json${it.stage === s.v ? ' active' : ''}">${s.label}</button>`).join('')}</span>`
@@ -193,7 +199,7 @@ export function createProgress({
     const binOrder = [...WIND_BINS, { key: 'unknown', label: '風速不明' }];
     const discHtml = binOrder.map((bin) => {
       const items = buckets.flatMap(([name, b]) => (b.discoveriesByBin[bin.key] || []).map((d) =>
-        `<li ${cardAttrs('discovery', d.reflId, 'disc-card')}>${editable('discovery', d.reflId, name, d.text)}${commentIcon('discovery', d.reflId)}`
+        `<li ${cardAttrs('discovery', d.reflId, 'disc-card')}>${cardDelBtn('discovery', d.reflId)}${editable('discovery', d.reflId, name, d.text)}${commentIcon('discovery', d.reflId)}`
         + `${commentSection('discovery', d.reflId, d.comments)}</li>`));
       return items.length ? `<div class="wind-bin"><strong>${bin.label}</strong><ul>${items.join('')}</ul></div>` : '';
     }).join('') || '<p>(発見なし)</p>';
@@ -212,8 +218,31 @@ export function createProgress({
       + `<section class="progress-section pq-disc"><h3>風速別の発見</h3>${discHtml}</section>`
       + `<section class="progress-section pq-chart"><h3>解決量の推移</h3><div id="progress-chart-wrap"><canvas id="progress-chart"></canvas></div></section>`;
 
+    renderTrash(sum);
     wireBody();
     renderChartFor(sum);
+  }
+
+  // ゴミ箱(削除済みカード)はグリッド外のフッター #progress-trash に描画。
+  // 現在の選択(部員)でフィルタし、各行に「復元」を付ける。空なら中身なし(CSSで非表示)。
+  function renderTrash(sum) {
+    const el = $('progress-trash');
+    if (!el) return;
+    const items = sum.trash.filter((t) => selected === 'all' || t.name === selected);
+    if (!items.length) { el.innerHTML = ''; return; }
+    const rows = items.map((t) =>
+      `<li class="trash-row"><span class="trash-kind">${FIELD_LABEL[t.field] || ''}</span>`
+      + `<span class="trash-when">${fmtDate(t.dateMs)}</span>`
+      + (selected === 'all' ? `<span class="et-name">${esc(t.name)}：</span>` : '')
+      + `<span class="trash-text">${esc(t.text)}</span>`
+      + `<button class="card-restore" data-restore-field="${t.field}" data-restore-refl="${esc(t.reflId)}">復元</button></li>`).join('');
+    el.innerHTML = `<div class="pq-trash"><h3>🗑 ゴミ箱 (${items.length})</h3><ul class="trash-list">${rows}</ul></div>`;
+    el.querySelectorAll('.card-restore').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        progress = setCardDeleted(progress, btn.dataset.restoreRefl, btn.dataset.restoreField, false);
+        persist();
+        renderBody();
+      }));
   }
 
   function wireBody() {
@@ -314,6 +343,17 @@ export function createProgress({
     content.querySelectorAll('.comment-del').forEach((btn) =>
       btn.addEventListener('click', () => {
         progress = removeComment(progress, btn.dataset.crefl, btn.dataset.cfield, Number(btn.dataset.cidx));
+        persist();
+        renderBody();
+      }));
+
+    // カード削除(角の赤バツ): 確認の上でゴミ箱へ(真実源は書き換えず復元可能)。
+    content.querySelectorAll('.card-del').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        const field = btn.dataset.delcardField;
+        const label = FIELD_LABEL[field] || 'カード';
+        if (!globalThis.confirm(`この${label}カードを削除しますか？（ゴミ箱から復元できます）`)) return;
+        progress = setCardDeleted(progress, btn.dataset.delcardRefl, field, true);
         persist();
         renderBody();
       }));
