@@ -1,6 +1,6 @@
 import { worldToScreen } from './viewport.js';
 import { project } from './projection.js';
-import { positionAt, speedAt } from './interpolate.js';
+import { positionAt, speedAt, positionOnTracksAt } from './interpolate.js';
 import { trackLookupTime } from './timeaxis.js';
 
 function toScreen(lat, lon, T) {
@@ -182,8 +182,7 @@ export function drawScene(ctx, state) {
     let lat = ev.lat;
     let lon = ev.lon;
     if (lat == null || lon == null) {
-      if (!referenceTrack) continue;
-      const pos = positionAt(referenceTrack.points, ev.t);
+      const pos = positionOnTracksAt(tracks, referenceTrack, ev.t);
       if (!pos) continue;
       lat = pos.lat;
       lon = pos.lon;
@@ -198,10 +197,10 @@ export function drawScene(ctx, state) {
     ctx.fill();
   }
 
-  // 動画バッジ。開始時刻(絶対epoch)を基準トラックで補間した位置に置く。
+  // 動画バッジ。開始時刻(絶対epoch)を、その時刻を含むトラック(基準優先)で補間した位置に置く。
+  // 午前・午後を別トラックで読み込んでも、各動画は該当する側のトラックに表示される。
   for (const v of videos) {
-    if (!referenceTrack) continue;
-    const pos = positionAt(referenceTrack.points, v.t);
+    const pos = positionOnTracksAt(tracks, referenceTrack, v.t);
     if (!pos) continue;
     drawVideoBadge(ctx, toScreen(pos.lat, pos.lon, T), v.id === activeVideoId);
   }

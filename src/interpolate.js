@@ -31,6 +31,23 @@ export function positionAt(points, t) {
   return { lat: a.lat + (b.lat - a.lat) * f, lon: a.lon + (b.lon - a.lon) * f };
 }
 
+// 絶対時刻 t を含む可視トラックの位置を返す。動画/イベントバッジを、単一の基準トラックだけ
+// でなく「その時刻を実際に含むトラック」に置くため(午前・午後を別トラックで読み込むと、
+// 基準トラック範囲外の時刻がバッジ非表示になる問題への対処)。基準トラックを優先し、
+// 含まなければ他の可視トラックを順に探す。どれも含まなければ null。
+export function positionOnTracksAt(tracks, referenceTrack, t) {
+  if (referenceTrack) {
+    const p = positionAt(referenceTrack.points, t);
+    if (p) return p;
+  }
+  for (const tr of tracks || []) {
+    if (tr === referenceTrack || tr.visible === false || !tr.points) continue;
+    const p = positionAt(tr.points, t);
+    if (p) return p;
+  }
+  return null;
+}
+
 // 時刻 t の移動速度(m/s)。記録済み speed 列を線形補間し、null 区間は
 // 隣接点の haversine/dt で推定。範囲外・点なしは null。
 export function speedAt(points, t) {

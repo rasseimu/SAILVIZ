@@ -69,14 +69,14 @@ test('renderer draws a video badge at the interpolated reference-track position'
     now: range.start, mode: 'absolute', crop: range, referenceTrack: track,
   });
   const withBadge = ctx.calls.fill || 0;
-  // 基準トラックが無ければバッジは描かれない
+  // 動画時刻がどのトラックの範囲にも無ければバッジは描かれない
   const ctx2 = mockCtx();
   drawScene(ctx2, {
     transform: T, tracks: [track], events: [], marks: [],
-    videos: [{ id: 'v0', t: midT, url: 'blob:x', name: 'clip.mp4' }],
-    now: range.start, mode: 'absolute', crop: range, referenceTrack: null,
+    videos: [{ id: 'v0', t: track.tRange.end + 1e7, url: 'blob:x', name: 'clip.mp4' }],
+    now: range.start, mode: 'absolute', crop: range, referenceTrack: track,
   });
-  assert.ok(withBadge > (ctx2.calls.fill || 0), 'video badge adds fills when reference track present');
+  assert.ok(withBadge > (ctx2.calls.fill || 0), 'video badge adds fills when a track contains the time');
 });
 
 test('renderer pins a lat/lon-less tag via reference-track interpolation', () => {
@@ -91,14 +91,14 @@ test('renderer pins a lat/lon-less tag via reference-track interpolation', () =>
     now: range.start, mode: 'absolute', crop: range, referenceTrack: track,
   });
   const withPin = ctx.calls.fill || 0;
-  // 基準トラックが無ければ補間ピンは描かれない
+  // イベント時刻がどのトラックの範囲にも無ければ補間ピンは描かれない
   const ctx2 = mockCtx();
   drawScene(ctx2, {
     transform: T, tracks: [track],
-    events: [{ kind: 'point', t: midT, tEnd: null, label: 'x', lat: null, lon: null }],
-    now: range.start, mode: 'absolute', crop: range, referenceTrack: null,
+    events: [{ kind: 'point', t: track.tRange.end + 1e7, tEnd: null, label: 'x', lat: null, lon: null }],
+    now: range.start, mode: 'absolute', crop: range, referenceTrack: track,
   });
-  assert.ok(withPin > (ctx2.calls.fill || 0), 'interpolated pin adds a fill when reference track present');
+  assert.ok(withPin > (ctx2.calls.fill || 0), 'interpolated pin adds a fill when a track contains the time');
 });
 
 test('renderer draws a per-track speed label at the current position', () => {
