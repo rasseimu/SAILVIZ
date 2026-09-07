@@ -16,6 +16,19 @@ export function projectFileName(date) {
   return `sailviz-${stamp}.sailviz.json`;
 }
 
+// baseMs から projectFileName を生成し、existing に衝突する間 +1分して一意名を返す。
+// existing はファイル名の配列 or Set。現実には衝突しないための保険(最大1440分=1日)。
+export function uniqueProjectName(baseMs, existing = []) {
+  const has = existing instanceof Set ? (n) => existing.has(n) : (n) => existing.includes(n);
+  let ms = baseMs;
+  let name = projectFileName(new Date(ms));
+  for (let i = 0; i < 1440 && has(name); i++) {
+    ms += 60 * 1000;
+    name = projectFileName(new Date(ms));
+  }
+  return name;
+}
+
 // ファイル名 → 読みやすい日時。合致しなければ名前をそのまま返す。
 export function projectLabel(name) {
   const m = name.match(/sailviz-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/);
