@@ -339,6 +339,10 @@ body.view-progress #transport { display: none; }
 .wind-bin > strong { display: block; margin-bottom: 4px; color: #555; }
 .wind-bin ul { margin: 0; padding-left: 18px; }
 .wind-bin li { margin: 2px 0; }
+/* AIコメント対象に選んだカード(余白クリックで選択・一時的な色付き) */
+.goal-card, .issue-card, .wind-bin li { cursor: pointer; }
+.goal-card.card-selected, .issue-card.card-selected, .wind-bin li.card-selected {
+  background: #e8f0fe; box-shadow: 0 0 0 2px #1558d6 inset; border-radius: 6px; }
 /* 推移(右下): 象限いっぱいにグラフ */
 .pq-chart #progress-chart-wrap { flex: 1; min-height: 0; }
 /* インライン編集 */
