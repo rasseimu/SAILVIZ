@@ -1,0 +1,14 @@
+# ランタイムに不要なものはイメージへ入れない（軽量化 + データはボリューム側に置く）
+.git
+.gitignore
+node_modules
+.worktrees
+.superpowers
+data
+demo-data
+sample-data
+docs
+test
+serve.py
+*.log
+.DS_Store
