@@ -417,10 +417,10 @@ export function createProgress({
     });
   }
 
-  // ローカルPDFを取得して base64 化(Gemini inline 直送用)。日本語ファイル名は encodeURI。
-  async function loadPdfBase64(path) {
+  // ローカル参考資料(PDF/テキスト)を取得して base64 化(Gemini inline 直送用)。日本語ファイル名は encodeURI。
+  async function loadFileBase64(path) {
     const res = await fetch(encodeURI(path));
-    if (!res.ok) throw new Error(`PDF取得失敗 ${res.status}: ${path}`);
+    if (!res.ok) throw new Error(`参考資料の取得失敗 ${res.status}: ${path}`);
     const buf = new Uint8Array(await res.arrayBuffer());
     let bin = '';
     const chunk = 0x8000;
@@ -463,9 +463,9 @@ export function createProgress({
       } else {
         items = allItems;
       }
-      btn.disabled = true; status.textContent = '生成中…(PDF照合には少し時間がかかります)';
+      btn.disabled = true; status.textContent = '生成中…(参考文献の照合には少し時間がかかります)';
       try {
-        const suggestions = await generateAiComments({ items, sources: SOURCES, loadPdfBase64 });
+        const suggestions = await generateAiComments({ items, sources: SOURCES, loadFileBase64 });
         let added = 0;
         const now = Date.now();
         for (const s of suggestions) {

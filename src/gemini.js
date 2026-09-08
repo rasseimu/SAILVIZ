@@ -19,7 +19,7 @@ export async function geminiGenerate({
   return (await res.json()).text;
 }
 
-// PDF(base64)を inline parts 要素にする。
-export function pdfPart(base64) {
-  return { inlineData: { mimeType: 'application/pdf', data: base64 } };
+// ローカルファイル(base64)を inline parts 要素にする。mime は PDF/テキスト等を指定。
+export function filePart(base64, mime = 'application/pdf') {
+  return { inlineData: { mimeType: mime, data: base64 } };
 }
