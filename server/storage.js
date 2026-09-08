@@ -1,5 +1,5 @@
 // data/ 配下のファイル CRUD。baseDir 注入でテスト可能。名前検証でパストラバーサルを防ぐ。
-import { readFile, writeFile, readdir, unlink, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, readdir, unlink, mkdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { projectLabel } from '../src/projectfs.js';
 
@@ -54,4 +54,51 @@ export async function readOverlay(dataDir, name) {
 export async function writeOverlay(dataDir, name, obj) {
   await ensureDir(dataDir);
   await writeFile(overlayPath(dataDir, name), JSON.stringify(obj), 'utf8');
+}
+
+const IMPORT_ID_RE = /^imp_[A-Za-z0-9_]+$/;
+const UPLOAD_FILE_RE = /^[A-Za-z0-9._-]+\.csv$/;
+
+export function isValidImportId(id) {
+  return typeof id === 'string' && !id.includes('..') && IMPORT_ID_RE.test(id);
+}
+export function isValidUploadFile(name) {
+  return typeof name === 'string' && !name.includes('..') && UPLOAD_FILE_RE.test(name);
+}
+
+function uploadsDir(dataDir) { return join(dataDir, 'uploads'); }
+export function uploadPath(dataDir, importId, filename) {
+  if (!isValidImportId(importId)) throw new Error('invalid importId');
+  if (!isValidUploadFile(filename)) throw new Error('invalid upload file');
+  return join(uploadsDir(dataDir), importId, filename);
+}
+
+export async function saveUpload(dataDir, importId, filename, text) {
+  const p = uploadPath(dataDir, importId, filename);
+  await ensureDir(join(uploadsDir(dataDir), importId));
+  await writeFile(p, text, 'utf8');
+  return p;
+}
+export async function readUpload(dataDir, importId, filename) {
+  return readFile(uploadPath(dataDir, importId, filename), 'utf8');
+}
+export async function renameUpload(dataDir, importId, from, to) {
+  const dest = uploadPath(dataDir, importId, to);
+  await rename(uploadPath(dataDir, importId, from), dest);
+  return dest;
+}
+
+// person(=people[0]) と practiceDate(JST 0 時 ms) が一致する Reflection プロジェクトを探す。
+export async function findReflectionByDate(dataDir, person, practiceDate) {
+  const list = await listProjects(dataDir);
+  for (const { name, label } of list) {
+    let proj;
+    try { proj = await readProject(dataDir, name); } catch { continue; }
+    if (Number(proj.practiceDate) !== Number(practiceDate)) continue;
+    const refls = Array.isArray(proj.reflections) ? proj.reflections : [];
+    if (refls.some((r) => Array.isArray(r.people) && r.people[0] === person)) {
+      return { name, label };
+    }
+  }
+  return null;
 }
