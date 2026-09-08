@@ -6,9 +6,9 @@ import {
 } from '../src/aicomment.js';
 
 const sources = [
-  { id: 'ch19', title: 'スタート', summary: 'スタート戦術', link: 'https://x/19.html', pdf: 'p/19.pdf' },
-  { id: 'ch11', title: '微風のランニング', summary: '微風風下', link: 'https://x/11.html', pdf: 'p/11.pdf' },
-  { id: 'video-junpu', title: '順風動画', summary: '順風の実演', link: null, pdf: 'p/v.pdf' },
+  { id: 'ch19', title: 'スタート', summary: 'スタート戦術', link: 'https://x/19.html', file: 'p/19.pdf', mime: 'application/pdf' },
+  { id: 'ch11', title: '微風のランニング', summary: '微風風下', link: 'https://x/11.html', file: 'p/11.pdf', mime: 'application/pdf' },
+  { id: 'video-junpu', title: '順風動画', summary: '順風の実演', link: null, file: 'p/v.pdf', mime: 'application/pdf' },
 ];
 
 test('buildScreenPrompt: ソースと反省を本文に含める／複数選択を許可', () => {
@@ -56,7 +56,7 @@ test('parseGroundObject: 非JSONは例外', () => {
   assert.throws(() => parseGroundObject('これはJSONではない'));
 });
 
-// generateAiComments: fetch と loadPdfBase64 をモックし、複数ソース→詳細コメント＋複数出典を検証。
+// generateAiComments: fetch と loadFileBase64 をモックし、複数ソース→詳細コメント＋複数出典を検証。
 test('generateAiComments: 複数ソースをまとめて根拠付けし出典配列を返す', async () => {
   const calls = [];
   const fetchImpl = async (url, opts) => {
@@ -75,7 +75,7 @@ test('generateAiComments: 複数ソースをまとめて根拠付けし出典配
   const out = await generateAiComments({
     items: [{ reflId: 'r1', field: 'issue', text: 'スタート出遅れ' }],
     sources,
-    loadPdfBase64: async (p) => { loadedPdfs.push(p); return `B64:${p}`; },
+    loadFileBase64: async (p) => { loadedPdfs.push(p); return `B64:${p}`; },
     fetchImpl,
   });
   assert.equal(out.length, 1);
@@ -92,6 +92,28 @@ test('generateAiComments: 複数ソースをまとめて根拠付けし出典配
   assert.deepEqual(loadedPdfs, ['p/19.pdf', 'p/11.pdf']); // 両PDFを読み込む
 });
 
+test('generateAiComments: ソースのmimeをinlineDataに転送する(テキスト資料)', async () => {
+  const txtSources = [
+    { id: 'book1', title: '書籍1章', summary: '基礎', link: null, file: 'p/ch1.txt', mime: 'text/plain' },
+  ];
+  let groundBody;
+  const fetchImpl = async (url, opts) => {
+    const hasFile = opts.body.includes('inlineData');
+    if (hasFile) groundBody = JSON.parse(opts.body);
+    const text = hasFile
+      ? JSON.stringify({ comment: '基礎を固める。', usedSourceIds: ['book1'] })
+      : JSON.stringify([{ reflId: 'r1', field: 'goal', sourceId: 'book1' }]);
+    return { ok: true, status: 200, json: async () => ({ text }) };
+  };
+  const out = await generateAiComments({
+    items: [{ reflId: 'r1', field: 'goal', text: '基礎から' }],
+    sources: txtSources, loadFileBase64: async () => 'B64TXT', fetchImpl,
+  });
+  assert.equal(out.length, 1);
+  const inline = groundBody.parts.find((p) => p.inlineData);
+  assert.deepEqual(inline.inlineData, { mimeType: 'text/plain', data: 'B64TXT' });
+});
+
 test('generateAiComments: usedSourceIds空なら渡した全ソースを出典にする', async () => {
   const fetchImpl = async (url, opts) => {
     const hasPdf = opts.body.includes('inlineData');
@@ -102,7 +124,7 @@ test('generateAiComments: usedSourceIds空なら渡した全ソースを出典�
   };
   const out = await generateAiComments({
     items: [{ reflId: 'r1', field: 'goal', text: '安定して走る' }],
-    sources, loadPdfBase64: async () => 'B64', fetchImpl,
+    sources, loadFileBase64: async () => 'B64', fetchImpl,
   });
   assert.equal(out.length, 1);
   assert.deepEqual(out[0].refs, [{ link: 'https://x/19.html', title: 'スタート' }]);
@@ -110,7 +132,7 @@ test('generateAiComments: usedSourceIds空なら渡した全ソースを出典�
 
 test('generateAiComments: items空は[](fetchを呼ばない)', async () => {
   const never = async () => { throw new Error('呼んではいけない'); };
-  assert.deepEqual(await generateAiComments({ items: [], sources, loadPdfBase64: never, fetchImpl: never }), []);
+  assert.deepEqual(await generateAiComments({ items: [], sources, loadFileBase64: never, fetchImpl: never }), []);
 });
 
 test('generateAiComments: 全PDF読込失敗の反省はスキップ(全体は止めない)', async () => {
@@ -121,7 +143,7 @@ test('generateAiComments: 全PDF読込失敗の反省はスキップ(全体は�
   };
   const out = await generateAiComments({
     items: [{ reflId: 'r1', field: 'issue', text: 't' }],
-    sources, loadPdfBase64: async () => { throw new Error('PDFなし'); }, fetchImpl,
+    sources, loadFileBase64: async () => { throw new Error('PDFなし'); }, fetchImpl,
   });
   assert.deepEqual(out, []);
 });

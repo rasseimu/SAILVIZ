@@ -2,7 +2,7 @@
 // 2段構え: (1)章要約で関連ソースをスクリーニング(複数可) → (2)関連PDFをまとめて inline 直送し
 // 数値やコツを引用した詳しいコメントを生成。純ロジック(プロンプト生成・レスポンス検証)は
 // API 呼び出しから分離してテスト可能にする。
-import { geminiGenerate, pdfPart } from './gemini.js';
+import { geminiGenerate, filePart } from './gemini.js';
 
 const FIELDS = new Set(['goal', 'issue', 'discovery']);
 
@@ -53,25 +53,25 @@ export function parseScreen(rawText, sources) {
 
 // --- 根拠付け(該当PDFを inline 直送。1反省=複数PDFをまとめて渡し詳しいコメント) ---
 
-// item: {field, text}、sources: [{id, title}](添付PDFの順に対応)。
+// item: {field, text}、sources: [{id, title}](添付資料の順に対応)。
 export function buildGroundPrompt(item, sources) {
   const srcLines = sources.map((s) => `- id=${s.id} | ${s.title}`).join('\n');
   const system = [
-    'あなたは経験豊富なセーリングコーチです。添付した参考文献PDFの内容だけを根拠に、',
-    '対象の反省へ具体的で実践的な助言コメントを日本語で書きます。PDF内の要点・数値・コツを',
-    '引用しながら3〜5文で詳しく述べ、複数のPDFにまたがって引用してもかまいません。',
-    'PDFに根拠が無い内容は憶測で書かないこと。',
+    'あなたは経験豊富なセーリングコーチです。添付した参考文献(PDF・テキスト)の内容だけを根拠に、',
+    '対象の反省へ具体的で実践的な助言コメントを日本語で書きます。資料内の要点・数値・コツを',
+    '引用しながら3〜5文で詳しく述べ、複数の資料にまたがって引用してもかまいません。',
+    '資料に根拠が無い内容は憶測で書かないこと。',
   ].join('');
   const user = [
     '# 対象の反省',
     `field=${item.field} text=${JSON.stringify(item.text)}`,
     '',
-    '# 添付PDFのソース(id | タイトル) — 添付した順に対応',
+    '# 添付資料のソース(id | タイトル) — 添付した順に対応',
     srcLines,
     '',
     '# 出力形式(JSONオブジェクト、前後に説明文を付けない)',
     '{"comment":"...(3〜5文の詳しい助言)","usedSourceIds":["実際に根拠にしたid",...]}',
-    '根拠にできるPDFが無ければ {"comment":"","usedSourceIds":[]} を返す。',
+    '根拠にできる資料が無ければ {"comment":"","usedSourceIds":[]} を返す。',
   ].join('\n');
   return { system, user };
 }
@@ -90,10 +90,10 @@ export function parseGroundObject(rawText) {
   return { comment, usedSourceIds };
 }
 
-// items: [{reflId, field, text}]、sources: SOURCES、loadPdfBase64: (path)=>Promise<base64>。
+// items: [{reflId, field, text}]、sources: SOURCES、loadFileBase64: (path)=>Promise<base64>。
 // 戻り値: [{reflId, field, comment, url, refs:[{link,title}]}]。関連なし/失敗は含めない。
 export async function generateAiComments({
-  items, sources, loadPdfBase64,
+  items, sources, loadFileBase64,
   model = 'gemini-3.6-flash', fetchImpl = globalThis.fetch, maxSourcesPerItem = 3,
 }) {
   if (!items || items.length === 0) return [];
@@ -120,14 +120,14 @@ export async function generateAiComments({
     if (!g.ids.includes(m.sourceId) && g.ids.length < maxSourcesPerItem) g.ids.push(m.sourceId);
   }
 
-  // (2) 根拠付け: 反省ごとに、関連PDF群をまとめて inline 直送
+  // (2) 根拠付け: 反省ごとに、関連資料群をまとめて inline 直送
   const out = [];
   for (const g of groups.values()) {
     const loaded = []; // { source, base64 }
     for (const id of g.ids) {
       const source = byId.get(id);
       if (!source) continue;
-      try { loaded.push({ source, base64: await loadPdfBase64(source.pdf) }); } catch { /* skip */ }
+      try { loaded.push({ source, base64: await loadFileBase64(source.file) }); } catch { /* skip */ }
     }
     if (loaded.length === 0) continue;
     const gp = buildGroundPrompt(g, loaded.map((x) => ({ id: x.source.id, title: x.source.title })));
@@ -135,7 +135,7 @@ export async function generateAiComments({
     try {
       const text = await geminiGenerate({
         model, system: gp.system,
-        parts: [{ text: gp.user }, ...loaded.map((x) => pdfPart(x.base64))],
+        parts: [{ text: gp.user }, ...loaded.map((x) => filePart(x.base64, x.source.mime))],
         responseMimeType: 'application/json', fetchImpl,
       });
       res = parseGroundObject(text);

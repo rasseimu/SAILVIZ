@@ -1,9 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { geminiGenerate, pdfPart } from '../src/gemini.js';
+import { geminiGenerate, filePart } from '../src/gemini.js';
 
-test('pdfPart: inlineData(application/pdf)を作る', () => {
-  assert.deepEqual(pdfPart('BASE64'), { inlineData: { mimeType: 'application/pdf', data: 'BASE64' } });
+test('filePart: mime省略時は application/pdf の inlineData を作る', () => {
+  assert.deepEqual(filePart('BASE64'), { inlineData: { mimeType: 'application/pdf', data: 'BASE64' } });
+});
+
+test('filePart: mime指定で text/plain 等の inlineData を作る', () => {
+  assert.deepEqual(filePart('B64', 'text/plain'), { inlineData: { mimeType: 'text/plain', data: 'B64' } });
 });
 
 test('geminiGenerate: /api/ai-comment へ same-origin POST し text を返す', async () => {
