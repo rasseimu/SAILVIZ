@@ -23,6 +23,10 @@ test('parseSensorCsv: GPS 点ゼロは throw', () => {
   assert.throws(() => parseSensorCsv('time,latitude,longitude\n'));
 });
 
+test('parseSensorCsv: 非GPSヘッダーは throw', () => {
+  assert.throws(() => parseSensorCsv('label,start,end\n'), /not a gps csv/);
+});
+
 test('jstStamp: JST の YYYYMMDD-HHMM', () => {
   assert.equal(jstStamp(t0), '20260908-0906');
 });
@@ -30,8 +34,11 @@ test('jstStamp: JST の YYYYMMDD-HHMM', () => {
 test('buildTrack: 既存 Track 形状', () => {
   const { points, bounds } = parseSensorCsv(CSV);
   const tr = buildTrack({ id: 'imp_x', name: '4649', points, bounds, colorIndex: 0, source: { importId: 'imp_x' } });
+  assert.equal(tr.id, 'imp_x');
+  assert.equal(tr.name, '4649');
   assert.equal(tr.visible, true);
   assert.ok(typeof tr.color === 'string');
   assert.equal(tr.points.length, 3);
+  assert.ok(tr.bounds && typeof tr.bounds.minLat === 'number');
   assert.deepEqual(tr.source, { importId: 'imp_x' });
 });
