@@ -3,7 +3,7 @@
 import {
   listProjects, readProject, writeProject, deleteProject,
   readOverlay, writeOverlay, OVERLAY_NAMES, isValidProjectName,
-  saveUpload, findReflectionByDate, readUpload, renameUpload, isValidImportId,
+  saveUpload, findReflectionByDate, readUpload, renameUpload, isValidImportId, isValidUploadFile,
 } from './storage.js';
 import { isAuthorized } from './auth.js';
 import { practiceSummary } from '../src/summary.js';
@@ -147,6 +147,21 @@ export function createApi({ dataDir, token, geminiKey }) {
 
         await writeProject(dataDir, name, proj);
         send(res, 200, { name });
+        return true;
+      }
+
+      const upMatch = path.match(/^\/api\/uploads\/([^/]+)\/([^/]+)$/);
+      if (upMatch && method === 'GET') {
+        const importId = decodeURIComponent(upMatch[1]);
+        const file = decodeURIComponent(upMatch[2]);
+        if (!isValidImportId(importId) || !isValidUploadFile(file)) {
+          send(res, 400, { error: 'bad path' }); return true;
+        }
+        try {
+          const text = await readUpload(dataDir, importId, file);
+          res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store' });
+          res.end(text);
+        } catch { send(res, 404, { error: 'not found' }); }
         return true;
       }
 

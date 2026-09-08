@@ -108,3 +108,29 @@ test('commit: 未認証は 401 / name 欠如は 400 / 不明 importId は 404', 
   });
   assert.equal(missing.status, 404);
 });
+
+test('uploads GET: コミット済み CSV を text/csv で配信', async () => {
+  const name = 'sailviz-20260908-0906-m2.sailviz.json';
+  await fetch(`${base}/api/projects/${name}`, {
+    method: 'PUT', headers: bearer,
+    body: JSON.stringify({ version: 1, practiceDate: t0, reflections: [{ people: ['佐藤 花子'] }] }),
+  });
+  const pv = await (await fetch(`${base}/api/sensor-imports`, {
+    method: 'POST', headers: bearer,
+    body: JSON.stringify({ person: '佐藤 花子', filename: 'Location.csv', csv: CSV }),
+  })).json();
+  await fetch(`${base}/api/sensor-imports/${pv.importId}/commit`, {
+    method: 'POST', headers: bearer, body: JSON.stringify({ name, boatNumber: '7' }),
+  });
+  const proj = await (await fetch(`${base}/api/projects/${name}`)).json();
+  const file = proj.sensorLogs[0].filename;
+  const r = await fetch(`${base}/api/uploads/${pv.importId}/${file}`);
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get('content-type'), /text\/csv/);
+  assert.match(await r.text(), /latitude/);
+});
+
+test('uploads GET: 不明ファイルは 404', async () => {
+  const r = await fetch(`${base}/api/uploads/imp_zzz/none.csv`);
+  assert.equal(r.status, 404);
+});
