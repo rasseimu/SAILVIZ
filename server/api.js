@@ -3,10 +3,13 @@
 import {
   listProjects, readProject, writeProject, deleteProject,
   readOverlay, writeOverlay, OVERLAY_NAMES, isValidProjectName,
+  saveUpload, findReflectionByDate, readUpload, renameUpload, isValidImportId, isValidUploadFile,
 } from './storage.js';
 import { isAuthorized } from './auth.js';
 import { practiceSummary } from '../src/summary.js';
 import { geminiGenerate } from './gemini.js';
+import { parseSensorCsv, jstStamp, buildTrack } from './sensorimport.js';
+import { randomBytes } from 'node:crypto';
 
 function send(res, status, obj, extraHeaders = {}) {
   const body = JSON.stringify(obj);
@@ -80,6 +83,87 @@ export function createApi({ dataDir, token, geminiKey }) {
       }
 
       if (path === '/api/auth') { send(res, 200, { unlocked: isAuthorized(req, token) }); return true; }
+
+      if (path === '/api/sensor-imports' && method === 'POST') {
+        if (!isAuthorized(req, token)) { send(res, 401, { error: 'unauthorized' }); return true; }
+        const body = await readBody(req) || {};
+        const { person, csv } = body;
+        if (typeof csv !== 'string' || typeof person !== 'string') {
+          send(res, 400, { error: 'person と csv が必要' }); return true;
+        }
+        let parsed;
+        try { parsed = parseSensorCsv(csv); }
+        catch (e) { send(res, 422, { error: String(e.message || e) }); return true; }
+        const importId = `imp_${jstStamp(parsed.practiceDate).replace(/-/g, '_')}_${randomBytes(4).toString('hex')}`;
+        await saveUpload(dataDir, importId, 'raw.csv', csv);
+        const matched = await findReflectionByDate(dataDir, person, parsed.practiceDate);
+        send(res, 200, {
+          importId,
+          practiceDate: parsed.practiceDate,
+          points: parsed.points.length,
+          bounds: parsed.bounds,
+          matched,
+        });
+        return true;
+      }
+
+      const commitMatch = path.match(/^\/api\/sensor-imports\/([^/]+)\/commit$/);
+      if (commitMatch && method === 'POST') {
+        if (!isAuthorized(req, token)) { send(res, 401, { error: 'unauthorized' }); return true; }
+        const importId = decodeURIComponent(commitMatch[1]);
+        if (!isValidImportId(importId)) { send(res, 400, { error: 'bad importId' }); return true; }
+        const body = await readBody(req) || {};
+        const { name, boatNumber } = body;
+        if (typeof name !== 'string' || !isValidProjectName(name) ||
+            typeof boatNumber !== 'string' || !boatNumber.trim()) {
+          send(res, 400, { error: 'name と boatNumber が必要' }); return true;
+        }
+        let csv;
+        try { csv = await readUpload(dataDir, importId, 'raw.csv'); }
+        catch { send(res, 404, { error: 'import not found' }); return true; }
+        let proj;
+        try { proj = await readProject(dataDir, name); }
+        catch { send(res, 404, { error: 'project not found' }); return true; }
+
+        const parsed = parseSensorCsv(csv);
+        const finalName = `${boatNumber.trim()}_${jstStamp(parsed.points[0].t)}.csv`;
+        await renameUpload(dataDir, importId, 'raw.csv', finalName);
+
+        const uploadedAt = Date.now();
+        const tracks = Array.isArray(proj.tracks) ? proj.tracks : [];
+        const track = buildTrack({
+          id: importId,
+          name: boatNumber.trim(),
+          points: parsed.points,
+          bounds: parsed.bounds,
+          colorIndex: tracks.length,
+          source: { importId, filename: finalName, boatNumber: boatNumber.trim(), uploadedAt },
+        });
+        tracks.push(track);
+        proj.tracks = tracks;
+        const logs = Array.isArray(proj.sensorLogs) ? proj.sensorLogs : [];
+        logs.push({ id: importId, filename: finalName, size: Buffer.byteLength(csv, 'utf8'), uploadedAt });
+        proj.sensorLogs = logs;
+
+        await writeProject(dataDir, name, proj);
+        send(res, 200, { name });
+        return true;
+      }
+
+      const upMatch = path.match(/^\/api\/uploads\/([^/]+)\/([^/]+)$/);
+      if (upMatch && method === 'GET') {
+        const importId = decodeURIComponent(upMatch[1]);
+        const file = decodeURIComponent(upMatch[2]);
+        if (!isValidImportId(importId) || !isValidUploadFile(file)) {
+          send(res, 400, { error: 'bad path' }); return true;
+        }
+        try {
+          const text = await readUpload(dataDir, importId, file);
+          res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store' });
+          res.end(text);
+        } catch { send(res, 404, { error: 'not found' }); }
+        return true;
+      }
 
       if (path === '/api/unlock' && method === 'POST') {
         if (!token) { send(res, 503, { error: 'write disabled' }); return true; }
