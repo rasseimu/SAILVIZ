@@ -3,12 +3,12 @@
 import {
   listProjects, readProject, writeProject, deleteProject,
   readOverlay, writeOverlay, OVERLAY_NAMES, isValidProjectName,
-  saveUpload, findReflectionByDate, readUpload, renameUpload, isValidImportId,
+  saveUpload, findReflectionByDate,
 } from './storage.js';
 import { isAuthorized } from './auth.js';
 import { practiceSummary } from '../src/summary.js';
 import { geminiGenerate } from './gemini.js';
-import { parseSensorCsv, buildTrack, jstStamp } from './sensorimport.js';
+import { parseSensorCsv, jstStamp } from './sensorimport.js';
 import { randomBytes } from 'node:crypto';
 
 function send(res, status, obj, extraHeaders = {}) {

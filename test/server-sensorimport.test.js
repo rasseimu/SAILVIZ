@@ -44,10 +44,11 @@ test('preview: 認証あり -> importId と practiceDate、matched は null', as
   });
   assert.equal(r.status, 200);
   const j = await r.json();
-  assert.match(j.importId, /^imp_/);
+  assert.match(j.importId, /^imp_[A-Za-z0-9_]+$/);
   assert.equal(j.points, 2);
   assert.equal(j.matched, null);
   assert.ok(j.practiceDate > 0);
+  assert.ok(j.bounds && typeof j.bounds.minLat === 'number' && typeof j.bounds.maxLon === 'number');
 });
 
 test('preview: GPS 点ゼロは 422', async () => {
@@ -56,4 +57,12 @@ test('preview: GPS 点ゼロは 422', async () => {
     body: JSON.stringify({ person: 'x', filename: 'a.csv', csv: 'time,latitude,longitude\n' }),
   });
   assert.equal(r.status, 422);
+});
+
+test('preview: person/csv 欠落は 400', async () => {
+  const r = await fetch(`${base}/api/sensor-imports`, {
+    method: 'POST', headers: bearer,
+    body: JSON.stringify({ person: 'x' }),
+  });
+  assert.equal(r.status, 400);
 });
