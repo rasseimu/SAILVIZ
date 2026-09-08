@@ -66,3 +66,45 @@ test('preview: person/csv 欠落は 400', async () => {
   });
   assert.equal(r.status, 400);
 });
+
+test('commit: 既存プロジェクトの tracks/sensorLogs に反映', async () => {
+  // 対象プロジェクトを用意
+  const name = 'sailviz-20260908-0906-m1.sailviz.json';
+  await fetch(`${base}/api/projects/${name}`, {
+    method: 'PUT', headers: bearer,
+    body: JSON.stringify({ version: 1, practiceDate: t0, reflections: [{ people: ['山田 太郎'] }] }),
+  });
+  // プレビュー
+  const pv = await (await fetch(`${base}/api/sensor-imports`, {
+    method: 'POST', headers: bearer,
+    body: JSON.stringify({ person: '山田 太郎', filename: 'Location.csv', csv: CSV }),
+  })).json();
+  // コミット
+  const r = await fetch(`${base}/api/sensor-imports/${pv.importId}/commit`, {
+    method: 'POST', headers: bearer,
+    body: JSON.stringify({ name, boatNumber: '4649' }),
+  });
+  assert.equal(r.status, 200);
+  assert.equal((await r.json()).name, name);
+  // 反映確認
+  const proj = await (await fetch(`${base}/api/projects/${name}`)).json();
+  assert.equal(proj.tracks.length, 1);
+  assert.equal(proj.tracks[0].source.boatNumber, '4649');
+  assert.equal(proj.sensorLogs.length, 1);
+  assert.match(proj.sensorLogs[0].filename, /^4649_\d{8}-\d{4}\.csv$/);
+});
+
+test('commit: 未認証は 401 / name 欠如は 400 / 不明 importId は 404', async () => {
+  const noauth = await fetch(`${base}/api/sensor-imports/imp_x/commit`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  });
+  assert.equal(noauth.status, 401);
+  const bad = await fetch(`${base}/api/sensor-imports/imp_x/commit`, {
+    method: 'POST', headers: bearer, body: JSON.stringify({ boatNumber: '1' }),
+  });
+  assert.equal(bad.status, 400);
+  const missing = await fetch(`${base}/api/sensor-imports/imp_notexist/commit`, {
+    method: 'POST', headers: bearer, body: JSON.stringify({ name: 'sailviz-20260101-0900.sailviz.json', boatNumber: '1' }),
+  });
+  assert.equal(missing.status, 404);
+});
