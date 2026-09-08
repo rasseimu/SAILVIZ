@@ -3,10 +3,13 @@
 import {
   listProjects, readProject, writeProject, deleteProject,
   readOverlay, writeOverlay, OVERLAY_NAMES, isValidProjectName,
+  saveUpload, findReflectionByDate, readUpload, renameUpload, isValidImportId,
 } from './storage.js';
 import { isAuthorized } from './auth.js';
 import { practiceSummary } from '../src/summary.js';
 import { geminiGenerate } from './gemini.js';
+import { parseSensorCsv, buildTrack, jstStamp } from './sensorimport.js';
+import { randomBytes } from 'node:crypto';
 
 function send(res, status, obj, extraHeaders = {}) {
   const body = JSON.stringify(obj);
@@ -80,6 +83,29 @@ export function createApi({ dataDir, token, geminiKey }) {
       }
 
       if (path === '/api/auth') { send(res, 200, { unlocked: isAuthorized(req, token) }); return true; }
+
+      if (path === '/api/sensor-imports' && method === 'POST') {
+        if (!isAuthorized(req, token)) { send(res, 401, { error: 'unauthorized' }); return true; }
+        const body = await readBody(req) || {};
+        const { person, csv } = body;
+        if (typeof csv !== 'string' || typeof person !== 'string') {
+          send(res, 400, { error: 'person と csv が必要' }); return true;
+        }
+        let parsed;
+        try { parsed = parseSensorCsv(csv); }
+        catch (e) { send(res, 422, { error: String(e.message || e) }); return true; }
+        const importId = `imp_${jstStamp(parsed.practiceDate).replace(/-/g, '_')}_${randomBytes(4).toString('hex')}`;
+        await saveUpload(dataDir, importId, 'raw.csv', csv);
+        const matched = await findReflectionByDate(dataDir, person, parsed.practiceDate);
+        send(res, 200, {
+          importId,
+          practiceDate: parsed.practiceDate,
+          points: parsed.points.length,
+          bounds: parsed.bounds,
+          matched,
+        });
+        return true;
+      }
 
       if (path === '/api/unlock' && method === 'POST') {
         if (!token) { send(res, 503, { error: 'write disabled' }); return true; }
