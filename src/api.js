@@ -42,3 +42,12 @@ export async function apiUnlock(password) {
   return (await res.json()).unlocked === true;
 }
 export async function apiLock() { await send('/api/lock', 'POST'); }
+
+export async function apiCommitMinutes({ practiceDate, rows }) {
+  const res = await send('/api/minutes-imports/commit', 'POST', { practiceDate, rows });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error(d.error || `取込に失敗 (${res.status})`);
+  }
+  return res.json();
+}
