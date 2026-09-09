@@ -102,3 +102,14 @@ export async function findReflectionByDate(dataDir, person, practiceDate) {
   }
   return null;
 }
+
+// practiceDate(JST 0 時 ms)が一致する最初のプロジェクト {name,label} を返す。無ければ null。
+export async function findProjectByPracticeDate(dataDir, practiceDate) {
+  const list = await listProjects(dataDir);
+  for (const { name, label } of list) {
+    let proj;
+    try { proj = await readProject(dataDir, name); } catch { continue; }
+    if (Number(proj.practiceDate) === Number(practiceDate)) return { name, label };
+  }
+  return null;
+}

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   isValidProjectName, listProjects, readProject, writeProject, deleteProject,
-  readOverlay, writeOverlay,
+  readOverlay, writeOverlay, findProjectByPracticeDate,
 } from '../server/storage.js';
 
 async function withTmp(fn) {
@@ -52,5 +52,15 @@ test('overlay read is forgiving, write round-trips', async () => {
     assert.deepEqual(await readOverlay(dir, 'progress'), {});
     await writeOverlay(dir, 'progress', { a: 1 });
     assert.deepEqual(await readOverlay(dir, 'progress'), { a: 1 });
+  });
+});
+
+test('findProjectByPracticeDate は practiceDate 一致を返し、無ければ null', async () => {
+  await withTmp(async (dir) => {
+    const name = 'sailviz-20260909-0000.sailviz.json';
+    await writeProject(dir, name, { version: 1, practiceDate: 1_700_000_000_000, reflections: [] });
+    const hit = await findProjectByPracticeDate(dir, 1_700_000_000_000);
+    assert.equal(hit.name, name);
+    assert.equal(await findProjectByPracticeDate(dir, 999), null);
   });
 });
