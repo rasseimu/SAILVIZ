@@ -4,7 +4,12 @@ import {
   listProjects, readProject, writeProject, deleteProject,
   readOverlay, writeOverlay, OVERLAY_NAMES, isValidProjectName,
   saveUpload, findReflectionByDate, readUpload, renameUpload, isValidImportId, isValidUploadFile,
+  findProjectByPracticeDate,
 } from './storage.js';
+import { uniqueProjectName } from '../src/projectfs.js';
+import {
+  validateCommitRows, mergeRowsByMember, reflectionsFromRows, emptyProject,
+} from './minutesimport.js';
 import { isAuthorized } from './auth.js';
 import { practiceSummary } from '../src/summary.js';
 import { geminiGenerate } from './gemini.js';
@@ -104,6 +109,34 @@ export function createApi({ dataDir, token, geminiKey }) {
           bounds: parsed.bounds,
           matched,
         });
+        return true;
+      }
+
+      if (path === '/api/minutes-imports/commit' && method === 'POST') {
+        if (!isAuthorized(req, token)) { send(res, 401, { error: 'unauthorized' }); return true; }
+        const body = await readBody(req) || {};
+        const practiceDate = Number(body.practiceDate);
+        const rows = Array.isArray(body.rows) ? body.rows : [];
+        const bad = validateCommitRows(rows, practiceDate);
+        if (bad) { send(res, 400, { error: bad }); return true; }
+
+        const reflections = reflectionsFromRows({ rows: mergeRowsByMember(rows), now: Date.now() });
+        const found = await findProjectByPracticeDate(dataDir, practiceDate);
+        let name, created = false, proj;
+        if (found) {
+          name = found.name;
+          proj = await readProject(dataDir, name);
+          if (!Array.isArray(proj.reflections)) proj.reflections = [];
+        } else {
+          const existing = (await listProjects(dataDir)).map((p) => p.name);
+          name = uniqueProjectName(practiceDate, existing);
+          proj = emptyProject(practiceDate, new Date().toISOString());
+          created = true;
+        }
+        proj.reflections.push(...reflections);
+        if (typeof proj.practiceDate !== 'number') proj.practiceDate = practiceDate;
+        await writeProject(dataDir, name, proj);
+        send(res, 200, { name, added: reflections.length, created });
         return true;
       }
 
