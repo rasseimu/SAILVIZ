@@ -111,3 +111,35 @@ export function parseMinutesDate(text, { defaultYear } = {}) {
   if (h > 23 || mi > 59) { h = 0; mi = 0; }
   return { y, mo, d, h, mi };
 }
+
+// Gemini への system 指示。roster の fullName に限定し、部員別 JSON 配列で返させる。
+export function buildMinutesSystemPrompt(roster = memberList()) {
+  const names = roster.map((m) => m.fullName).join('、');
+  return [
+    'あなたはヨット部の振り返り会議の書記です。会話テキストを部員別の構造化議事録に整形します。',
+    '出力は JSON 配列のみ。各要素は {"fullName","goal","issue","discovery","raw"} を持つオブジェクト。',
+    `fullName は次の名簿のいずれかに正確一致する氏名のみ使う: ${names}。`,
+    '名簿に無い人物や話者不明の内容は出力しない(その要素を作らない)。',
+    'goal=その人の目標、issue=課題/反省、discovery=発見/気づき/今後。該当が無ければ空文字。',
+    'raw=その部員に関する会話の該当部分の原文抜粋。',
+    '説明文やコードフェンスは付けず、JSON 配列だけを返す。',
+  ].join('\n');
+}
+
+// AI(Gemini)応答 JSON → 検証済み行配列。壊れた入力は握りつぶして [] を返す(呼び出し側でフォールバック導線)。
+export function parseAiMinutes(jsonText, roster = memberList()) {
+  let data;
+  try { data = JSON.parse(String(jsonText)); } catch { return []; }
+  if (!Array.isArray(data)) return [];
+  const names = new Set(roster.map((m) => m.fullName));
+  const str = (v) => (typeof v === 'string' ? v.trim() : '');
+  const out = [];
+  for (const it of data) {
+    if (!it || typeof it !== 'object') continue;
+    out.push({
+      fullName: names.has(it.fullName) ? it.fullName : null,
+      goal: str(it.goal), issue: str(it.issue), discovery: str(it.discovery), raw: str(it.raw),
+    });
+  }
+  return out;
+}
