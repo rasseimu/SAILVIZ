@@ -2,6 +2,7 @@
 import { readFile, writeFile, readdir, unlink, mkdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { projectLabel } from '../src/projectfs.js';
+import { jstMidnightMs } from './sensorimport.js';
 
 const PROJECT_RE = /^[A-Za-z0-9._-]+\.sailviz\.json$/;
 export const OVERLAY_NAMES = ['progress', 'roadmap'];
@@ -103,13 +104,18 @@ export async function findReflectionByDate(dataDir, person, practiceDate) {
   return null;
 }
 
-// practiceDate(JST 0 時 ms)が一致する最初のプロジェクト {name,label} を返す。無ければ null。
+// practiceDate が同じ JST 日に属する最初のプロジェクト {name,label} を返す。無ければ null。
+// デスクトップは「練習日時」に時刻を含む ms を保存する場合があるため、
+// 厳密ミリ秒一致ではなく JST 日単位(00:00〜23:59:59.999)で照合する。
 export async function findProjectByPracticeDate(dataDir, practiceDate) {
+  const target = jstMidnightMs(Number(practiceDate));
   const list = await listProjects(dataDir);
   for (const { name, label } of list) {
     let proj;
     try { proj = await readProject(dataDir, name); } catch { continue; }
-    if (Number(proj.practiceDate) === Number(practiceDate)) return { name, label };
+    const pd = Number(proj.practiceDate);
+    if (!Number.isFinite(pd)) continue;
+    if (jstMidnightMs(pd) === target) return { name, label };
   }
   return null;
 }

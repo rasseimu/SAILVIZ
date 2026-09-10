@@ -77,3 +77,30 @@ test('commit: 既存(practiceDate 一致)へ append し同一部員はマージ'
   assert.equal(proj.reflections.length, 1);
   assert.equal(proj.reflections[0].notes.goal, 'a\nb');
 });
+
+// JST 日単位一致テスト:デスクトップ作成プロジェクト(時刻付き practiceDate)を
+// モバイル commit(JST midnight)で正しく検出し -0000 重複ファイルを作らない
+// 2026-09-11 00:00 JST = Date.UTC(2026, 8, 10, 15) = 1789052400000
+// 2026-09-11 13:30 JST = 1789052400000 + 13.5*3600*1000 = 1789101000000
+test('commit: デスクトップ作成の時刻付き practiceDate プロジェクトに JST 同日 midnight で append', async () => {
+  // 既存プロジェクト: practiceDate が JST 2026-09-11 13:30(非 midnight)
+  const PD_NONMID = 1_789_101_000_000; // JST 2026-09-11 13:30
+  const PD_11_MIDNIGHT = 1_789_052_400_000; // JST 2026-09-11 00:00
+  const existingName = 'sailviz-20260911-1330.sailviz.json';
+  await fetch(`${base}/api/projects/${existingName}`, {
+    method: 'PUT', headers: bearer,
+    body: JSON.stringify({ version: 1, practiceDate: PD_NONMID, reflections: [] }),
+  });
+
+  // モバイルは JST midnight で commit → 同じ JST 日を指す
+  const r = await commit({
+    practiceDate: PD_11_MIDNIGHT,
+    rows: [{ fullName: '西本 亜美', goal: 'テスト目標', issue: '', discovery: '', raw: 'rawtext' }],
+  });
+  assert.equal(r.status, 200);
+  const j = await r.json();
+  // 既存プロジェクトへ append できている(重複 -0000 ファイルを作っていない)
+  assert.equal(j.created, false, '既存プロジェクトへ append するはず(created=false)');
+  assert.equal(j.name, existingName, '既存ファイル名を返すはず');
+  assert.equal(j.added, 1);
+});
