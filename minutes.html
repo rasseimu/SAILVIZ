@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>振り返り議事録 入力 — SailViz</title>
+  <link rel="stylesheet" href="minutes.css">
+</head>
+<body class="mn-body">
+  <main class="mn-wrap">
+    <h1 class="mn-title">振り返り議事録 入力</h1>
+
+    <section id="mn-lock" class="mn-card hidden">
+      <p>編集モードのパスワードを入力してください。</p>
+      <input id="mn-password" type="password" inputmode="text" autocomplete="current-password" placeholder="パスワード">
+      <button id="mn-unlock-btn" type="button">ログイン</button>
+      <p id="mn-lock-msg" class="mn-msg"></p>
+    </section>
+
+    <section id="mn-app" class="hidden">
+      <label class="mn-label" for="mn-text">会議テキスト(音声入力 or 貼り付け)</label>
+      <textarea id="mn-text" class="mn-text" rows="10" placeholder="キーボードのマイクで話すか、貼り付けてください"></textarea>
+
+      <div class="mn-btnrow">
+        <button id="mn-ai-btn" type="button" class="mn-primary">AI整形</button>
+        <button id="mn-manual-btn" type="button">AIなしで整形</button>
+      </div>
+      <p id="mn-status" class="mn-msg" aria-live="polite"></p>
+
+      <div id="mn-preview" class="mn-preview"></div>
+
+      <label class="mn-label" for="mn-date">練習日</label>
+      <input id="mn-date" type="date">
+
+      <button id="mn-commit-btn" type="button" class="mn-primary mn-commit">取込(保存)</button>
+    </section>
+  </main>
+  <div id="mn-toast" class="mn-toast hidden"></div>
+  <script type="module" src="src/minutes-input.js"></script>
+</body>
+</html>
