@@ -379,6 +379,21 @@ body.view-roadmap #transport { display: none; }
 .rm-row-ctrl button:disabled { opacity: 0.35; cursor: default; }
 .rm-add { display: flex; gap: 8px; margin-top: 8px; }
 .rm-add-input { flex: 1; padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; }
+/* 段階の達成数(ステッパー上の 2/3 表示) */
+.rm-child-count { margin-top: 2px; font-size: 11px; color: #888; }
+/* 子ありの段階の自動達成マーク(手動チェックの代わり) */
+.rm-check-auto { display: inline-flex; width: 18px; justify-content: center; color: #3aa657; }
+/* 段階の下の小目標リスト(編集画面) */
+.rm-row { flex-wrap: wrap; }
+.rm-child-list { list-style: none; margin: 4px 0 0; padding: 0 0 0 30px; flex-basis: 100%; }
+.rm-child-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
+.rm-child-title { flex: 1; font-size: 13px; }
+.rm-crename-input { flex: 1; padding: 3px 6px; border: 1px solid #ccc; border-radius: 4px; }
+.rm-child-row .rm-cedit, .rm-child-row .rm-cdel, .rm-crename-save, .rm-crename-cancel {
+  border: 1px solid #ddd; background: #fafafa; border-radius: 4px; padding: 1px 6px; cursor: pointer; font-size: 12px; }
+.rm-child-add { display: flex; gap: 6px; padding: 4px 0 2px; }
+.rm-cadd-input { flex: 1; padding: 4px 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; }
+.rm-cadd-btn { border: 1px solid #ddd; background: #fafafa; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px; }
 
 #progress-bar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid #e5e5e5; }
 #progress-nav { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; border-bottom: 1px solid #eee; overflow-x: auto; }
@@ -406,6 +421,15 @@ body.view-roadmap #transport { display: none; }
 .pq-roadmap-edit-btn { font: inherit; font-size: 13px; color: var(--gd-blue); background: none;
   border: 1px solid var(--gd-border); padding: 6px 14px; border-radius: 8px; cursor: pointer; }
 .pq-roadmap-edit-btn:hover { background: rgba(26,115,232,0.06); }
+/* ロードマップ表示の小目標内訳(単一部員・読み取り専用) */
+.pq-rm-children { margin-top: 6px; padding-left: 8px; }
+.pq-rm-stage { margin-bottom: 6px; }
+.pq-rm-stage-title { font-size: 12px; font-weight: 600; color: #555; }
+.pq-rm-childlist { list-style: none; margin: 2px 0 0; padding: 0 0 0 12px; }
+.pq-rm-child { font-size: 12px; color: #666; padding: 1px 0; }
+.pq-rm-child-done { color: #3aa657; text-decoration: line-through; }
+/* 練習集計中バナー(ロードマップ枠を先に描画する間) */
+.pq-loading { grid-column: 1 / -1; font-size: 12px; color: #888; padding: 2px 4px; }
 /* 目標(左上): カードを横スクロール */
 .pq-goals .goal-cards { flex: 1; display: flex; gap: 10px; overflow-x: auto; overflow-y: hidden;
   align-items: stretch; padding-bottom: 4px; }

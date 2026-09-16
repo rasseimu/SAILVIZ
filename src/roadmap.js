@@ -8,6 +8,7 @@ import {
   loadRoadmap, saveRoadmap,
   setGoal, addMilestone, renameMilestone, removeMilestone,
   moveMilestone, toggleMilestone, roadmapProgress,
+  addChild, toggleChild, renameChild, removeChild, childProgress,
 } from './roadmapstore.js';
 
 const $ = (id) => document.getElementById(id);
@@ -31,9 +32,11 @@ export function stepperHtml(milestones = []) {
     const state = m.done ? 'done' : (i === currentIndex ? 'current' : 'future');
     const here = i === currentIndex ? '<span class="rm-here">現在地</span>' : '';
     const mark = m.done ? '✓' : (i + 1);
+    const cp = childProgress(m);
+    const count = cp.total ? `<span class="rm-child-count">${cp.done} / ${cp.total}</span>` : '';
     return `<li class="rm-step rm-${state}">${here}`
       + `<span class="rm-dot">${mark}</span>`
-      + `<span class="rm-step-title">${esc(m.title)}</span></li>`;
+      + `<span class="rm-step-title">${esc(m.title)}</span>${count}</li>`;
   }).join('');
   const goal = currentIndex >= milestones.length
     ? '<li class="rm-step rm-goal"><span class="rm-here">達成！</span><span class="rm-dot">🏁</span><span class="rm-step-title">ゴール</span></li>'
@@ -50,6 +53,7 @@ export function createRoadmap({
   let data = {};          // sailviz.roadmap
   let selected = null;    // 選択中の部員フルネーム
   let editingId = null;   // 改名中のマイルストーン id(null=非編集)
+  let editingChildId = null; // 改名中の小目標 id(null=非編集)
 
   // 保存は UI を止めないよう非同期・投げっぱなし(失敗はログのみ)。
   function persist() {
@@ -76,6 +80,7 @@ export function createRoadmap({
         if (selected === btn.dataset.key) return;
         selected = btn.dataset.key;
         editingId = null;
+        editingChildId = null;
         renderNav();
         renderBody();
       }));
@@ -86,23 +91,51 @@ export function createRoadmap({
     return { goal: e.goal || '', milestones: e.milestones || [] };
   }
 
-  // 段階の編集リスト(達成トグル・改名・並べ替え・削除)。
+  // 段階の下の小目標リスト(達成トグル・改名・削除・追加)。子の達成で親段階が自動完了する。
+  function childListHtml(m) {
+    const children = m.children || [];
+    const rows = children.map((c) => {
+      const title = editingChildId === c.id
+        ? `<input class="rm-crename-input" data-mid="${esc(m.id)}" data-cid="${esc(c.id)}" value="${esc(c.title)}" />`
+          + `<button class="rm-crename-save writes-json" data-mid="${esc(m.id)}" data-cid="${esc(c.id)}">保存</button>`
+          + '<button class="rm-crename-cancel">取消</button>'
+        : `<span class="rm-child-title${c.done ? ' rm-row-done' : ''}">${esc(c.title)}</span>`
+          + `<button class="rm-cedit" data-cid="${esc(c.id)}" title="名前を変更">✎</button>`;
+      return `<li class="rm-child-row">`
+        + `<input type="checkbox" class="rm-ccheck writes-json" data-mid="${esc(m.id)}" data-cid="${esc(c.id)}" ${c.done ? 'checked' : ''} title="達成" />`
+        + `${title}`
+        + `<button class="rm-cdel writes-json" data-mid="${esc(m.id)}" data-cid="${esc(c.id)}" title="削除">🗑</button>`
+        + `</li>`;
+    }).join('');
+    return `<ul class="rm-child-list">${rows}`
+      + `<li class="rm-child-add"><input class="rm-cadd-input" data-mid="${esc(m.id)}" placeholder="小目標を追加" />`
+      + `<button class="rm-cadd-btn writes-json" data-mid="${esc(m.id)}">＋ 小目標</button></li></ul>`;
+  }
+
+  // 段階の編集リスト(達成トグル・改名・並べ替え・削除＋小目標)。
   function editorHtml(milestones) {
     const rows = milestones.map((m, i) => {
+      const hasChildren = (m.children || []).length > 0;
       const title = editingId === m.id
         ? `<input class="rm-rename-input" data-id="${esc(m.id)}" value="${esc(m.title)}" />`
           + `<button class="rm-rename-save writes-json" data-id="${esc(m.id)}">保存</button>`
           + '<button class="rm-rename-cancel">取消</button>'
         : `<span class="rm-row-title${m.done ? ' rm-row-done' : ''}">${esc(m.title)}</span>`
           + `<button class="rm-edit" data-id="${esc(m.id)}" title="名前を変更">✎</button>`;
+      // 子ありの段階は達成が子に連動(自動)。手動チェックではなく導出マークを出す。
+      const check = hasChildren
+        ? `<span class="rm-check-auto" title="小目標の達成で自動完了">${m.done ? '✓' : '▢'}</span>`
+        : `<input type="checkbox" class="rm-check writes-json" data-id="${esc(m.id)}" ${m.done ? 'checked' : ''} title="達成" />`;
       return `<li class="rm-row">`
-        + `<input type="checkbox" class="rm-check writes-json" data-id="${esc(m.id)}" ${m.done ? 'checked' : ''} title="達成" />`
+        + check
         + `${title}`
         + `<span class="rm-row-ctrl">`
         + `<button class="rm-up writes-json" data-id="${esc(m.id)}" title="上へ" ${i === 0 ? 'disabled' : ''}>↑</button>`
         + `<button class="rm-down writes-json" data-id="${esc(m.id)}" title="下へ" ${i === milestones.length - 1 ? 'disabled' : ''}>↓</button>`
         + `<button class="rm-del writes-json" data-id="${esc(m.id)}" title="削除">🗑</button>`
-        + `</span></li>`;
+        + `</span>`
+        + childListHtml(m)
+        + `</li>`;
     }).join('');
     return `<ul class="rm-editor">${rows}</ul>`
       + `<div class="rm-add"><input class="rm-add-input" placeholder="新しい段階を追加" />`
@@ -183,6 +216,60 @@ export function createRoadmap({
     };
     if (addBtn) addBtn.addEventListener('click', doAdd);
     if (addInput) addInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } });
+
+    // ---- 小目標(children) ----
+
+    // 子の達成トグル(親段階の達成は自動連動)。
+    content.querySelectorAll('.rm-ccheck').forEach((cb) =>
+      cb.addEventListener('change', () => {
+        data = toggleChild(data, selected, cb.dataset.mid, cb.dataset.cid, cb.checked, Date.now());
+        persist();
+        renderBody();
+      }));
+
+    // 子の改名(開始/確定/取消)。
+    content.querySelectorAll('.rm-cedit').forEach((b) =>
+      b.addEventListener('click', () => { editingChildId = b.dataset.cid; renderBody(); }));
+    content.querySelectorAll('.rm-crename-cancel').forEach((b) =>
+      b.addEventListener('click', () => { editingChildId = null; renderBody(); }));
+    const saveChildRename = (input) => {
+      data = renameChild(data, selected, input.dataset.mid, input.dataset.cid, input.value);
+      persist();
+      editingChildId = null;
+      renderBody();
+    };
+    content.querySelectorAll('.rm-crename-save').forEach((b) =>
+      b.addEventListener('click', () => {
+        const input = content.querySelector(`.rm-crename-input[data-cid="${CSS.escape(b.dataset.cid)}"]`);
+        if (input) saveChildRename(input); else { editingChildId = null; renderBody(); }
+      }));
+    content.querySelectorAll('.rm-crename-input').forEach((input) =>
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); saveChildRename(input); }
+        if (e.key === 'Escape') { editingChildId = null; renderBody(); }
+      }));
+
+    // 子の削除。
+    content.querySelectorAll('.rm-cdel').forEach((b) =>
+      b.addEventListener('click', () => {
+        data = removeChild(data, selected, b.dataset.mid, b.dataset.cid, Date.now());
+        persist();
+        renderBody();
+      }));
+
+    // 子の追加(段階ごと)。
+    content.querySelectorAll('.rm-cadd-btn').forEach((btn) => {
+      const mid = btn.dataset.mid;
+      const input = content.querySelector(`.rm-cadd-input[data-mid="${CSS.escape(mid)}"]`);
+      const addChildRow = () => {
+        if (!input || input.value.trim() === '') return;
+        data = addChild(data, selected, mid, newId(), input.value);
+        persist();
+        renderBody();
+      };
+      btn.addEventListener('click', addChildRow);
+      if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addChildRow(); } });
+    });
   }
 
   return { render };

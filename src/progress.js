@@ -51,6 +51,7 @@ export function createProgress({
   let editing = null;     // 編集中の `${reflId}:${field}`(null=非編集)
   let commenting = null;  // コメント入力中の `${reflId}:${field}`(null=非入力)
   let goalView = 'changes'; // 目標の変化枠の表示 'changes'(目標の変化) | 'roadmap'(現在地ステッパー・一時状態)
+  let entriesLoading = false; // 練習(反省)読込中=true。軽量なロードマップ枠を先に描画するための一時状態。
   const selectedCards = new Set(); // AIコメント対象に選んだカード `${reflId}:${field}`(一時的・保存しない)
   let hideComments = (() => { try { return globalThis.localStorage?.getItem(HIDE_COMMENTS_KEY) === '1'; } catch { return false; } })();
 
@@ -100,6 +101,15 @@ export function createProgress({
   // 目標の変化枠の「ロードマップ」表示(読み取り専用)。編集は「目標ロードマップの変更」画面で。
   // 特定部員=その人の大目標＋現在地ステッパー。全て=段階を持つ部員のみ名前付きで縦に並べる。
   function roadmapPanelHtml() {
+    // 段階の下の小目標を読み取り専用でインデント表示(子を持つ段階のみ)。
+    const childBreakdownHtml = (ms) => {
+      const rows = ms.filter((m) => (m.children || []).length).map((m) => {
+        const items = m.children.map((c) =>
+          `<li class="pq-rm-child${c.done ? ' pq-rm-child-done' : ''}">${c.done ? '✓' : '▢'} ${esc(c.title)}</li>`).join('');
+        return `<div class="pq-rm-stage"><div class="pq-rm-stage-title">${esc(m.title)}</div><ul class="pq-rm-childlist">${items}</ul></div>`;
+      }).join('');
+      return rows ? `<div class="pq-rm-children">${rows}</div>` : '';
+    };
     const one = (name, withName) => {
       const e = roadmapData[name] || {};
       const ms = e.milestones || [];
@@ -107,7 +117,9 @@ export function createProgress({
       const head = withName
         ? `<div class="pq-rm-name">${esc(name)}${goal}</div>`
         : (goal ? `<div class="pq-rm-name">${goal}</div>` : '');
-      return `<div class="pq-rm-member">${head}${stepperHtml(ms)}</div>`;
+      // 単一部員表示のみ小目標の内訳を出す(全員表示は俯瞰のステッパーのみ)。
+      const breakdown = withName ? '' : childBreakdownHtml(ms);
+      return `<div class="pq-rm-member">${head}${stepperHtml(ms)}${breakdown}</div>`;
     };
     if (selected === 'all') {
       const names = memberList().map((m) => m.fullName).filter((n) => (roadmapData[n]?.milestones || []).length);
@@ -212,8 +224,11 @@ export function createProgress({
         + '<div class="pq-roadmap-edit"><button type="button" class="pq-roadmap-edit-btn" data-roadmap-edit>🎯 目標ロードマップを変更</button></div>'
       : `<div class="goal-cards">${goalsHtml || '<p>(目標なし)</p>'}</div>`;
 
+    const loadingBanner = entriesLoading
+      ? '<div class="pq-loading">練習データを集計中…</div>' : '';
     content.innerHTML =
-      `<section class="progress-section pq-goals"><div class="pq-goals-head"><h3>目標の変化</h3>${goalToggle}</div>${goalBody}</section>`
+      loadingBanner
+      + `<section class="progress-section pq-goals"><div class="pq-goals-head"><h3>目標の変化</h3>${goalToggle}</div>${goalBody}</section>`
       + `<section class="progress-section pq-issues"><h3>課題の進捗</h3>${issuesHtml}</section>`
       + `<section class="progress-section pq-disc"><h3>風速別の発見</h3>${discHtml}</section>`
       + `<section class="progress-section pq-chart"><h3>解決量の推移</h3><div id="progress-chart-wrap"><canvas id="progress-chart"></canvas></div></section>`;
@@ -487,10 +502,18 @@ export function createProgress({
   }
 
   async function render() {
-    const entries = await loadEntries();
-    reflections = allReflections(entries);
+    // 1st pass: 軽量オーバーレイ(進捗・ロードマップ)を先に取得し、骨組みを即描画。
+    // 保存済み全練習の読込(重い)を待たずにロードマップ枠が見えるようにする。
     progress = await loadProgressData();
     roadmapData = await loadRoadmapData();
+    reflections = [];
+    entriesLoading = true;
+    renderNav();
+    renderBody();
+    // 2nd pass: 練習(反省)を読み込み、集計部を反映。
+    const entries = await loadEntries();
+    reflections = allReflections(entries);
+    entriesLoading = false;
     wireHideComments();
     wireAiControls();
     renderNav();

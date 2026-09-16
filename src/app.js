@@ -414,6 +414,7 @@ async function saveProject() {
   } catch (e) {
     statusEl.textContent = `保存に失敗: ${e.message}`; return;
   }
+  invalidateProjectEntriesCache();
   statusEl.textContent = `保存しました: ${name}`;
 }
 
@@ -588,6 +589,7 @@ async function renderHome() {
       if (!window.confirm(`練習「${label}」を削除しますか？この操作は元に戻せません。`)) return;
       try {
         await store.deleteProject(it.name);
+        invalidateProjectEntriesCache();
         renderHome();
       } catch (err) {
         statusEl.textContent = `削除に失敗: ${err.message}`;
@@ -1228,16 +1230,21 @@ const NOTE_LABELS = {
 };
 
 // 保存済み全練習を deserialize して {name, project}[] で返す。
-// ダッシュボードと進捗画面で共有。
+// ダッシュボードと進捗画面で共有。読み込みは並列化し、結果をキャッシュする
+// (保存/削除時に invalidateProjectEntriesCache で破棄)。呼び出し側が push で
+// 加工する(進捗画面の現在練習など)ため、キャッシュは複製して返す。
+let projectEntriesCache = null;
 async function loadProjectEntries() {
+  if (projectEntriesCache) return [...projectEntriesCache];
   const names = (await store.listProjects()).map((f) => f.name);
-  const entries = [];
-  for (const name of names) {
-    try { entries.push({ name, project: deserializeProject(await store.readProject(name)) }); }
-    catch { /* 壊れたファイルはスキップ */ }
-  }
-  return entries;
+  const settled = await Promise.all(names.map(async (name) => {
+    try { return { name, project: deserializeProject(await store.readProject(name)) }; }
+    catch { return null; } // 壊れたファイルはスキップ
+  }));
+  projectEntriesCache = settled.filter(Boolean);
+  return [...projectEntriesCache];
 }
+function invalidateProjectEntriesCache() { projectEntriesCache = null; }
 
 const dashboard = createDashboard({
   rigLabels: RIG_LABELS,
