@@ -7,6 +7,19 @@ import { summarize, windBinKey } from './progressstore.js';
 
 const FIELD_LABEL = { goal: '目標', issue: '課題', discovery: '発見' };
 
+const FIELDS = new Set(['goal', 'issue']);
+
+// JSON配列をコードフェンス等を無視して取り出す。非配列/非JSONは例外。
+function extractJsonArray(rawText) {
+  const text = String(rawText).replace(/```(?:json)?/gi, '').trim();
+  const start = text.indexOf('[');
+  const end = text.lastIndexOf(']');
+  if (start === -1 || end === -1 || end < start) throw new Error('AI応答にJSON配列がありません');
+  const arr = JSON.parse(text.slice(start, end + 1));
+  if (!Array.isArray(arr)) throw new Error('AI応答が配列ではありません');
+  return arr;
+}
+
 // 解決アイテムごとに、同一部員が"以降"に書いた発見・課題/目標の変化を最大 maxEvidence 件添える。
 // reflections=全反省, progress=sailviz.progress。
 export function buildHistoryPool(reflections, progress, { maxEvidence = 5 } = {}) {
@@ -50,4 +63,40 @@ export function buildHistoryPool(reflections, progress, { maxEvidence = 5 } = {}
     }
   }
   return pool;
+}
+
+// --- (1) スクリーニング(プール要約のみ・evidence本文は渡さずトークン節約) ---
+
+export function buildPeerScreenPrompt(items, pool) {
+  const poolLines = pool.map((p) =>
+    `- poolId=${p.poolId} | ${p.member} | ${FIELD_LABEL[p.field]} | ${JSON.stringify(p.text)}`).join('\n');
+  const reflLines = items.map((it) =>
+    `- reflId=${it.reflId} field=${it.field} text=${JSON.stringify(it.text)}`).join('\n');
+  const system = [
+    'あなたは経験豊富なセーリングコーチです。未解決の目標・課題それぞれに対し、過去に似た',
+    '目標・課題を解決した事例(解決事例プール)から関連するものを選びます。同一人物の過去事例が',
+    'あれば優先し、無ければ他部員の事例を選びます。関連が薄ければ選びません。憶測で紐付けないこと。',
+  ].join('');
+  const user = [
+    '# 解決事例プール(poolId | 部員 | 種別 | テキスト)',
+    poolLines,
+    '',
+    '# 未解決の目標・課題',
+    reflLines,
+    '',
+    '# 出力形式',
+    '関連するものだけを次のJSON配列で返す(前後に説明文を付けない):',
+    '[{"reflId":"...","field":"goal|issue","poolId":"...(上のpoolIdから選ぶ)"}]',
+    '関連が無ければ [] を返す。1つのアイテムに複数事例が関連するなら、関連度の高い順に',
+    '最大3つまで別々の行として挙げてよい(reflId/fieldを同じにしてpoolIdだけ変える)。',
+  ].join('\n');
+  return { system, user };
+}
+
+// スクリーニング応答を検証。存在する poolId・正しい field のみ採用。
+export function parsePeerScreen(rawText, pool) {
+  const validIds = new Set(pool.map((p) => p.poolId));
+  return extractJsonArray(rawText).filter((s) =>
+    s && typeof s.reflId === 'string' && FIELDS.has(s.field) && validIds.has(s.poolId))
+    .map((s) => ({ reflId: s.reflId, field: s.field, poolId: s.poolId }));
 }

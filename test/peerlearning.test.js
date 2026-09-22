@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildHistoryPool } from '../src/peerlearning.js';
+import { buildHistoryPool, buildPeerScreenPrompt, parsePeerScreen } from '../src/peerlearning.js';
 
 // 反省を1件作るヘルパ。dateMs は practice.startMs に入れる(summarize の reflDateMs 準拠)。
 function refl(id, name, notes, { speed = null, dateMs = 0 } = {}) {
@@ -88,4 +88,33 @@ test('buildHistoryPool: unknown 風速帯は同一bin判定から除外される
   // unknown 同士は同一bin判定されないため、発見順(新しい順)で '最近の発見' が先頭
   assert.equal(pool[0].evidence[0].text, '最近の発見');
   assert.equal(pool[0].evidence[1].text, '過去の発見');
+});
+
+const POOL = [
+  { poolId: 'p0', member: '村瀬 礼', field: 'issue', text: '走らない', dateMs: 1, windBin: 'lt3', evidence: [] },
+  { poolId: 'p1', member: '本間 由真', field: 'goal', text: '予選突破', dateMs: 2, windBin: 'mid', evidence: [] },
+];
+
+test('buildPeerScreenPrompt: poolId・部員・未解決アイテムが本文に載る', () => {
+  const { system, user } = buildPeerScreenPrompt(
+    [{ reflId: 'x1', field: 'issue', text: '走らない' }], POOL);
+  assert.match(system, /コーチ/);
+  assert.match(user, /poolId=p0/);
+  assert.match(user, /村瀬 礼/);
+  assert.match(user, /reflId=x1/);
+});
+
+test('parsePeerScreen: 未知poolId・不正field・非文字列reflIdを除去', () => {
+  const raw = JSON.stringify([
+    { reflId: 'x1', field: 'issue', poolId: 'p0' },   // OK
+    { reflId: 'x2', field: 'discovery', poolId: 'p0' }, // field不正 → 除去
+    { reflId: 'x3', field: 'goal', poolId: 'p9' },     // 未知poolId → 除去
+    { reflId: 42, field: 'goal', poolId: 'p1' },       // reflId非文字列 → 除去
+  ]);
+  assert.deepEqual(parsePeerScreen(raw, POOL), [{ reflId: 'x1', field: 'issue', poolId: 'p0' }]);
+});
+
+test('parsePeerScreen: コードフェンス付き応答でも配列を取り出す', () => {
+  const raw = '```json\n[{"reflId":"x1","field":"goal","poolId":"p1"}]\n```';
+  assert.deepEqual(parsePeerScreen(raw, POOL), [{ reflId: 'x1', field: 'goal', poolId: 'p1' }]);
 });
