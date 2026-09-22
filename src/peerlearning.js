@@ -105,8 +105,8 @@ export function parsePeerScreen(rawText, pool) {
 
 export function buildPeerGroundPrompt(item, matches) {
   const blocks = matches.map((m) => {
-    const ev = m.evidence.length
-      ? m.evidence.map((e) => `    - ${FIELD_LABEL[e.field] || e.field}: ${JSON.stringify(e.text)}`).join('\n')
+    const ev = (m.evidence || []).length
+      ? (m.evidence || []).map((e) => `    - ${FIELD_LABEL[e.field] || e.field}: ${JSON.stringify(e.text)}`).join('\n')
       : '    - (その後の記録なし)';
     return `- poolId=${m.poolId} | ${m.member} | ${FIELD_LABEL[m.field]} | ${JSON.stringify(m.text)}\n`
       + `  その後の記録(解決の手がかり):\n${ev}`;

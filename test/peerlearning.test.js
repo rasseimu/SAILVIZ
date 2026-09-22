@@ -131,6 +131,11 @@ test('buildPeerGroundPrompt: 実名・手がかりが本文に載り、実名引
   assert.match(user, /poolId=p0/);
 });
 
+test('buildPeerGroundPrompt: 空matchesでも throw しない', () => {
+  const { system, user } = buildPeerGroundPrompt({ field: 'issue', text: 'x' }, []);
+  assert.match(user, /根拠にできる事例が無ければ/);
+});
+
 test('parsePeerGroundObject: comment と usedPoolIds を取り出す', () => {
   const raw = '{"comment":"村瀬さんの発見が使えます。","usedPoolIds":["p0","x"]}';
   assert.deepEqual(parsePeerGroundObject(raw), { comment: '村瀬さんの発見が使えます。', usedPoolIds: ['p0', 'x'] });
