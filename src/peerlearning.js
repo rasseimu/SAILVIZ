@@ -39,8 +39,8 @@ export function buildHistoryPool(reflections, progress, { maxEvidence = 5 } = {}
       ];
       // 風速帯が近い発見を優先し、次に新しい順。最大 maxEvidence 件。
       cand.sort((a, c) => {
-        const am = a.windBin && a.windBin === wb ? 0 : 1;
-        const cm = c.windBin && c.windBin === wb ? 0 : 1;
+        const am = a.windBin && a.windBin !== 'unknown' && a.windBin === wb ? 0 : 1;
+        const cm = c.windBin && c.windBin !== 'unknown' && c.windBin === wb ? 0 : 1;
         if (am !== cm) return am - cm;
         return c.dateMs - a.dateMs;
       });
