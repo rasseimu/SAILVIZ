@@ -7,13 +7,46 @@
   <link rel="icon" type="image/png" href="src/favicon.png" />
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body class="view-home">
+<body class="view-landing">
+  <!-- 全画面共通のハンバーガーメニュー -->
+  <button id="nav-menu-btn" type="button" aria-label="メニュー" title="メニュー" aria-expanded="false">☰</button>
+  <nav id="nav-menu" class="hidden" aria-label="メインナビゲーション">
+    <button type="button" class="nav-item" data-nav="landing">🏠 トップ</button>
+    <button type="button" class="nav-item" data-nav="home">🗂 練習データ</button>
+    <button type="button" class="nav-item" data-nav="dashboard">🔧 チューニングダッシュボード</button>
+    <button type="button" class="nav-item" data-nav="progress">📈 進捗管理</button>
+  </nav>
+
+  <section id="landing-screen">
+    <div id="landing-overlay"></div>
+    <div id="landing-content">
+      <img id="landing-logo" src="src/logo.png" alt="SailViz" />
+      <h1 id="landing-title">SailViz</h1>
+      <p id="landing-sub">セーリング練習データ分析</p>
+      <div id="landing-cards">
+        <button type="button" class="landing-card" data-nav="home">
+          <span class="lc-icon">🗂</span>
+          <span class="lc-title">練習データ</span>
+          <span class="lc-desc">GPS軌跡・動画・反省を見る</span>
+        </button>
+        <button type="button" class="landing-card" data-nav="dashboard">
+          <span class="lc-icon">🔧</span>
+          <span class="lc-title">チューニングダッシュボード</span>
+          <span class="lc-desc">全艇のセッティングを見比べる</span>
+        </button>
+        <button type="button" class="landing-card" data-nav="progress">
+          <span class="lc-icon">📈</span>
+          <span class="lc-title">進捗管理</span>
+          <span class="lc-desc">部員ごとの練習進捗を見る</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
   <section id="home-screen">
     <header id="home-bar">
       <img id="home-logo" src="src/logo.png" alt="SailViz" />
       <strong>SailViz</strong>
-      <a id="home-dashboard-link" class="home-link" title="全艇チューニングを見比べる">🔧 チューニングダッシュボード</a>
-      <a id="home-progress-link" class="home-link" title="部員ごとの練習進捗を見る">📈 練習進捗管理</a>
       <span id="home-folder"></span>
       <button id="editModeBtn" type="button">編集モード</button>
       <dialog id="loginDialog">
@@ -39,7 +72,6 @@
 
   <section id="dashboard-screen">
     <header id="dashboard-bar">
-      <a id="dashboard-home-link" class="home-link" title="ホームへ戻る">← ホーム</a>
       <img id="dashboard-icon" src="src/Component 2.png" alt="" />
       <strong id="dashboard-title">全艇チューニングダッシュボード</strong>
       <div id="dashboard-legend"></div>
@@ -74,7 +106,6 @@
 
   <section id="progress-screen">
     <header id="progress-bar">
-      <a id="progress-home-link" class="home-link" title="ホームへ戻る">← ホーム</a>
       <strong id="progress-title">練習進捗管理</strong>
       <label id="progress-hide-comments-label"><input type="checkbox" id="progress-hide-comments" />コメント非表示</label>
       <button type="button" id="progress-ai-generate" class="writes-json">🤖 AIコメント生成</button>
@@ -87,7 +118,7 @@
 
   <section id="roadmap-screen">
     <header id="roadmap-bar">
-      <a id="roadmap-home-link" class="home-link" title="ホームへ戻る">← ホーム</a>
+      <a id="roadmap-home-link" class="home-link" title="進捗管理へ戻る">← 進捗管理</a>
       <strong id="roadmap-title">目標ロードマップの変更</strong>
     </header>
     <nav id="roadmap-nav"></nav>

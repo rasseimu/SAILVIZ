@@ -455,38 +455,30 @@ async function loadPractice(name) {
 
 // ================= ホーム画面(カード型ランチャー) =================
 
-function showHome() { document.body.classList.add('view-home'); renderHome(); }
+// 画面(view)は body の view-* クラスで排他切替。遷移時は必ず全 view を外してから付与する。
+const ALL_VIEWS = ['view-landing', 'view-home', 'view-dashboard', 'view-progress', 'view-roadmap'];
+function clearViews() { for (const c of ALL_VIEWS) document.body.classList.remove(c); }
+function showLanding() { clearViews(); document.body.classList.add('view-landing'); }
+function showHome() { clearViews(); document.body.classList.add('view-home'); renderHome(); }
 async function showDashboard() {
-  document.body.classList.remove('view-home');
+  clearViews();
   document.body.classList.add('view-dashboard');
   await dashboard.render();
 }
-function backToHomeFromDashboard() {
-  document.body.classList.remove('view-dashboard');
-  showHome();
-}
 async function showProgress() {
-  document.body.classList.remove('view-home');
+  clearViews();
   document.body.classList.add('view-progress');
   await progress.render();
-}
-function backToHomeFromProgress() {
-  document.body.classList.remove('view-progress');
-  showHome();
 }
 // member を渡すと、その部員を選択して編集画面を開く(進捗画面の導線用)。
 async function showRoadmap(member) {
   // ロードマップは自己完結データ(目標/段階)。永続化は API(store)。
-  document.body.classList.remove('view-home');
+  clearViews();
   document.body.classList.add('view-roadmap');
   await roadmap.render(typeof member === 'string' ? member : undefined);
 }
-function backToHomeFromRoadmap() {
-  document.body.classList.remove('view-roadmap');
-  showHome();
-}
 function showTrack() {
-  document.body.classList.remove('view-home');
+  clearViews();
   // ホーム中は stage が display:none だった → canvas バッファを再計算しないと潰れる
   resizeCanvas(); refitTransform(); draw();
 }
@@ -855,16 +847,47 @@ const NOTICE_KEY = 'sailviz.noticeDismissed.v1';
     const h = await loadDirHandle();
     if (h && await ensurePermission(h)) { projectDir = h; }
   } catch { /* 復元失敗は無視 */ }
-  showHome(); // 起動時はホーム画面（renderHome が過去の練習を一覧化）
+  showLanding(); // 起動時はランディング画面。各機能へはハンバーガーメニュー/カードで遷移。
 })();
 
+// ===== ハンバーガーメニュー(全画面共通ナビ) =====
+const navMenu = $('nav-menu');
+const navMenuBtn = $('nav-menu-btn');
+function closeNavMenu() {
+  navMenu.classList.add('hidden');
+  navMenuBtn.setAttribute('aria-expanded', 'false');
+}
+function toggleNavMenu() {
+  const willOpen = navMenu.classList.contains('hidden');
+  navMenu.classList.toggle('hidden', !willOpen);
+  navMenuBtn.setAttribute('aria-expanded', String(willOpen));
+}
+const NAV_ACTIONS = {
+  landing: showLanding,
+  home: showHome,
+  dashboard: showDashboard,
+  progress: showProgress,
+};
+// メニュー/ランディングカードの data-nav をまとめて配線(委譲)。
+function wireNav(el) {
+  el.addEventListener('click', (e) => {
+    const target = e.target.closest('[data-nav]');
+    if (!target) return;
+    closeNavMenu();
+    NAV_ACTIONS[target.dataset.nav]?.();
+  });
+}
+wireNav(navMenu);
+wireNav($('landing-screen'));
+navMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleNavMenu(); });
+document.addEventListener('click', (e) => {
+  if (!navMenu.classList.contains('hidden') && !navMenu.contains(e.target)) closeNavMenu();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNavMenu(); });
+
 $('app-title').addEventListener('click', showHome); // タイトルクリックでホームへ
-$('home-dashboard-link').addEventListener('click', showDashboard);
-$('dashboard-home-link').addEventListener('click', backToHomeFromDashboard);
-$('home-progress-link').addEventListener('click', showProgress);
-$('progress-home-link').addEventListener('click', backToHomeFromProgress);
 // ロードマップ編集への導線は進捗画面のロードマップ表示の下に集約(onEditRoadmap)。
-$('roadmap-home-link').addEventListener('click', backToHomeFromRoadmap);
+$('roadmap-home-link').addEventListener('click', showProgress);
 $('home-new').addEventListener('click', startNewPractice);
 
 $('play-btn').addEventListener('click', () => {
