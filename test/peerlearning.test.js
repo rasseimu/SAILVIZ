@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildHistoryPool, buildPeerScreenPrompt, parsePeerScreen } from '../src/peerlearning.js';
+import { buildHistoryPool, buildPeerScreenPrompt, parsePeerScreen, buildPeerGroundPrompt, parsePeerGroundObject } from '../src/peerlearning.js';
 
 // 反省を1件作るヘルパ。dateMs は practice.startMs に入れる(summarize の reflDateMs 準拠)。
 function refl(id, name, notes, { speed = null, dateMs = 0 } = {}) {
@@ -117,4 +117,25 @@ test('parsePeerScreen: 未知poolId・不正field・非文字列reflIdを除去'
 test('parsePeerScreen: コードフェンス付き応答でも配列を取り出す', () => {
   const raw = '```json\n[{"reflId":"x1","field":"goal","poolId":"p1"}]\n```';
   assert.deepEqual(parsePeerScreen(raw, POOL), [{ reflId: 'x1', field: 'goal', poolId: 'p1' }]);
+});
+
+test('buildPeerGroundPrompt: 実名・手がかりが本文に載り、実名引用を指示する', () => {
+  const matches = [{
+    poolId: 'p0', member: '村瀬 礼', field: 'issue', text: '微風で走らない', dateMs: 1,
+    windBin: 'lt3', evidence: [{ dateMs: 2, field: 'discovery', text: 'カニンガムを緩める' }],
+  }];
+  const { system, user } = buildPeerGroundPrompt({ field: 'issue', text: '微風で遅い' }, matches);
+  assert.match(system, /実名/);
+  assert.match(user, /村瀬 礼/);
+  assert.match(user, /カニンガムを緩める/);
+  assert.match(user, /poolId=p0/);
+});
+
+test('parsePeerGroundObject: comment と usedPoolIds を取り出す', () => {
+  const raw = '{"comment":"村瀬さんの発見が使えます。","usedPoolIds":["p0","x"]}';
+  assert.deepEqual(parsePeerGroundObject(raw), { comment: '村瀬さんの発見が使えます。', usedPoolIds: ['p0', 'x'] });
+});
+
+test('parsePeerGroundObject: comment空はnull', () => {
+  assert.equal(parsePeerGroundObject('{"comment":"  ","usedPoolIds":[]}'), null);
 });

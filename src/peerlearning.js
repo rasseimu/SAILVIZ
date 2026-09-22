@@ -100,3 +100,48 @@ export function parsePeerScreen(rawText, pool) {
     s && typeof s.reflId === 'string' && FIELDS.has(s.field) && validIds.has(s.poolId))
     .map((s) => ({ reflId: s.reflId, field: s.field, poolId: s.poolId }));
 }
+
+// --- (2) 根拠付け(選ばれた解決事例を本文で渡し、実名引用のコメントを生成) ---
+
+export function buildPeerGroundPrompt(item, matches) {
+  const blocks = matches.map((m) => {
+    const ev = m.evidence.length
+      ? m.evidence.map((e) => `    - ${FIELD_LABEL[e.field] || e.field}: ${JSON.stringify(e.text)}`).join('\n')
+      : '    - (その後の記録なし)';
+    return `- poolId=${m.poolId} | ${m.member} | ${FIELD_LABEL[m.field]} | ${JSON.stringify(m.text)}\n`
+      + `  その後の記録(解決の手がかり):\n${ev}`;
+  }).join('\n');
+  const system = [
+    'あなたは経験豊富なセーリングコーチです。以下のチーム内の解決事例だけを根拠に、対象の',
+    '未解決の目標/課題へ具体的で実践的な助言を日本語3〜5文で書きます。誰(実名)が似た目標/課題を',
+    'どう解決したかを引用します(例「村瀬さんも同様の課題を『カニンガムを緩める』という発見で',
+    '解決しています」)。対象本人自身の過去事例なら「自分の△△の時の発見が使えます」と促します。',
+    '事例に無い内容は憶測で書かないこと。',
+  ].join('');
+  const user = [
+    '# 対象の未解決アイテム',
+    `field=${item.field} text=${JSON.stringify(item.text)}`,
+    '',
+    '# チーム内の解決事例(poolId | 部員 | 種別 | テキスト と その後の記録)',
+    blocks,
+    '',
+    '# 出力形式(JSONオブジェクト、前後に説明文を付けない)',
+    '{"comment":"...(3〜5文の助言。実名を引用)","usedPoolIds":["実際に根拠にしたpoolId",...]}',
+    '根拠にできる事例が無ければ {"comment":"","usedPoolIds":[]} を返す。',
+  ].join('\n');
+  return { system, user };
+}
+
+// 根拠付け応答(単一オブジェクト)を検証。comment 非空でなければ null。
+export function parsePeerGroundObject(rawText) {
+  const text = String(rawText).replace(/```(?:json)?/gi, '').trim();
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end === -1 || end < start) throw new Error('AI応答にJSONオブジェクトがありません');
+  const obj = JSON.parse(text.slice(start, end + 1));
+  const comment = typeof obj.comment === 'string' ? obj.comment.trim() : '';
+  if (!comment) return null;
+  const usedPoolIds = Array.isArray(obj.usedPoolIds)
+    ? obj.usedPoolIds.filter((x) => typeof x === 'string') : [];
+  return { comment, usedPoolIds };
+}
