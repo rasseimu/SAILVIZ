@@ -71,3 +71,21 @@ test('buildHistoryPool: textOverride(st.text)を優先する', () => {
   const pool = buildHistoryPool(reflections, progress);
   assert.equal(pool[0].text, '修正後テキスト');
 });
+
+test('buildHistoryPool: unknown 風速帯は同一bin判定から除外される', () => {
+  const reflections = [
+    // 解決済み課題：風速なし(unknown)
+    refl('r1', '村瀬 礼', { issue: '風速不明で走らない' }, { speed: null, dateMs: 100 }),
+    // より新しい発見：風速なし(unknown)
+    refl('d1', '村瀬 礼', { discovery: '最近の発見' }, { speed: null, dateMs: 200 }),
+    // より古い発見：速度4(known)
+    refl('d2', '村瀬 礼', { discovery: '過去の発見' }, { speed: 4, dateMs: 150 }),
+  ];
+  const progress = { r1: { issueStage: 2 } };
+  const pool = buildHistoryPool(reflections, progress);
+  assert.equal(pool.length, 1);
+  assert.equal(pool[0].evidence.length, 2);
+  // unknown 同士は同一bin判定されないため、発見順(新しい順)で '最近の発見' が先頭
+  assert.equal(pool[0].evidence[0].text, '最近の発見');
+  assert.equal(pool[0].evidence[1].text, '過去の発見');
+});
