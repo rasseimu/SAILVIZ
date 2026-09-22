@@ -43,6 +43,23 @@ export async function apiUnlock(password) {
 }
 export async function apiLock() { await send('/api/lock', 'POST'); }
 
+// ===== 閲覧ログイン(データ閲覧ゲート) =====
+export async function apiSession() {
+  const res = await fetch('/api/session', OPTS);
+  if (!res.ok) return { loggedIn: false, gate: true };
+  return res.json();
+}
+export async function apiLogin(user, password) {
+  const res = await send('/api/login', 'POST', { user, password });
+  if (res.status === 401) {
+    const d = await res.json().catch(() => ({}));
+    return { ok: false, error: d.error || 'ログインに失敗しました' };
+  }
+  if (!res.ok) return { ok: false, error: `ログインに失敗 (${res.status})` };
+  return { ok: true };
+}
+export async function apiLogout() { await send('/api/logout', 'POST'); }
+
 export async function apiCommitMinutes({ practiceDate, rows }) {
   const res = await send('/api/minutes-imports/commit', 'POST', { practiceDate, rows });
   if (!res.ok) {

@@ -458,16 +458,18 @@ async function loadPractice(name) {
 // 画面(view)は body の view-* クラスで排他切替。遷移時は必ず全 view を外してから付与する。
 const ALL_VIEWS = ['view-landing', 'view-home', 'view-dashboard', 'view-progress', 'view-roadmap'];
 function clearViews() { for (const c of ALL_VIEWS) document.body.classList.remove(c); }
-function showLanding() { clearViews(); document.body.classList.add('view-landing'); }
-function showHome() { clearViews(); document.body.classList.add('view-home'); renderHome(); }
+function showLanding() { clearViews(); document.body.classList.add('view-landing'); setActiveNav(null); }
+function showHome() { clearViews(); document.body.classList.add('view-home'); setActiveNav('home'); renderHome(); }
 async function showDashboard() {
   clearViews();
   document.body.classList.add('view-dashboard');
+  setActiveNav('dashboard');
   await dashboard.render();
 }
 async function showProgress() {
   clearViews();
   document.body.classList.add('view-progress');
+  setActiveNav('progress');
   await progress.render();
 }
 // member を渡すと、その部員を選択して編集画面を開く(進捗画面の導線用)。
@@ -475,10 +477,12 @@ async function showRoadmap(member) {
   // ロードマップは自己完結データ(目標/段階)。永続化は API(store)。
   clearViews();
   document.body.classList.add('view-roadmap');
+  setActiveNav('progress');
   await roadmap.render(typeof member === 'string' ? member : undefined);
 }
 function showTrack() {
   clearViews();
+  setActiveNav('home');
   // ホーム中は stage が display:none だった → canvas バッファを再計算しないと潰れる
   resizeCanvas(); refitTransform(); draw();
 }
@@ -839,7 +843,11 @@ const NOTICE_KEY = 'sailviz.noticeDismissed.v1';
   });
 })();
 
-// 起動時: 認証状態を取得し、動画フォルダを IndexedDB から復元してホームを表示。
+// ログイン後にアプリ本体(練習データ)へ入る。
+function enterApp() { showHome(); }
+
+// 起動時: 編集認証・動画フォルダ復元のあと、閲覧セッションを確認して
+// ログイン済ならアプリ、未ログインならランディング(公開LP)を表示。
 (async () => {
   try { await store.refreshAuth(); } catch { /* 認証取得失敗は無視(未ログイン扱い) */ }
   applyEditableState();
@@ -847,43 +855,93 @@ const NOTICE_KEY = 'sailviz.noticeDismissed.v1';
     const h = await loadDirHandle();
     if (h && await ensurePermission(h)) { projectDir = h; }
   } catch { /* 復元失敗は無視 */ }
-  showLanding(); // 起動時はランディング画面。各機能へはハンバーガーメニュー/カードで遷移。
+  let sess = { loggedIn: false };
+  try { sess = await store.session(); } catch { /* 未ログイン扱い */ }
+  if (sess.loggedIn) enterApp(); else showLanding();
 })();
 
-// ===== ハンバーガーメニュー(全画面共通ナビ) =====
-const navMenu = $('nav-menu');
-const navMenuBtn = $('nav-menu-btn');
-function closeNavMenu() {
-  navMenu.classList.add('hidden');
-  navMenuBtn.setAttribute('aria-expanded', 'false');
-}
-function toggleNavMenu() {
-  const willOpen = navMenu.classList.contains('hidden');
-  navMenu.classList.toggle('hidden', !willOpen);
-  navMenuBtn.setAttribute('aria-expanded', String(willOpen));
+// ===== サイドバー(ログイン後の共通ナビ) =====
+async function doLogout() {
+  try { await store.logout(); } catch { /* 失敗しても画面は戻す */ }
+  showLanding();
 }
 const NAV_ACTIONS = {
-  landing: showLanding,
   home: showHome,
   dashboard: showDashboard,
   progress: showProgress,
 };
-// メニュー/ランディングカードの data-nav をまとめて配線(委譲)。
-function wireNav(el) {
-  el.addEventListener('click', (e) => {
-    const target = e.target.closest('[data-nav]');
-    if (!target) return;
-    closeNavMenu();
-    NAV_ACTIONS[target.dataset.nav]?.();
-  });
+// 現在地をサイドバーでハイライト。home/dashboard/progress のみ対象。
+const sbItems = [...document.querySelectorAll('.sb-item')];
+function setActiveNav(view) {
+  for (const el of sbItems) el.classList.toggle('active', el.dataset.nav === view);
 }
-wireNav(navMenu);
-wireNav($('landing-screen'));
-navMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleNavMenu(); });
-document.addEventListener('click', (e) => {
-  if (!navMenu.classList.contains('hidden') && !navMenu.contains(e.target)) closeNavMenu();
+document.querySelector('.sb-nav').addEventListener('click', (e) => {
+  const target = e.target.closest('[data-nav]');
+  if (!target) return;
+  NAV_ACTIONS[target.dataset.nav]?.();
 });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNavMenu(); });
+
+// サイドバー折りたたみ(状態は localStorage に保持)。
+const SIDEBAR_KEY = 'sailviz_sidebar_collapsed';
+try {
+  if (globalThis.localStorage?.getItem(SIDEBAR_KEY) === '1') document.body.classList.add('sidebar-collapsed');
+} catch { /* noop */ }
+$('sb-collapse').addEventListener('click', () => {
+  const collapsed = document.body.classList.toggle('sidebar-collapsed');
+  try { globalThis.localStorage?.setItem(SIDEBAR_KEY, collapsed ? '1' : '0'); } catch { /* noop */ }
+});
+
+// ===== アカウントメニュー(サイドバー下部) =====
+const accountBtn = $('sb-account');
+const accountMenu = $('account-menu');
+function closeAccountMenu() {
+  accountMenu.classList.add('hidden');
+  accountBtn.setAttribute('aria-expanded', 'false');
+}
+accountBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const willOpen = accountMenu.classList.contains('hidden');
+  accountMenu.classList.toggle('hidden', !willOpen);
+  accountBtn.setAttribute('aria-expanded', String(willOpen));
+});
+$('account-logout').addEventListener('click', () => { closeAccountMenu(); doLogout(); });
+
+// メニュー外クリック / Esc でアカウントメニューを閉じる。
+document.addEventListener('click', (e) => {
+  if (!accountMenu.classList.contains('hidden')
+      && !accountMenu.contains(e.target) && !accountBtn.contains(e.target)) {
+    closeAccountMenu();
+  }
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAccountMenu(); });
+
+// ===== 閲覧ログイン / 登録(問い合わせ) =====
+const viewLoginDialog = $('viewLoginDialog');
+const viewLoginForm = $('viewLoginForm');
+const viewLoginUser = $('viewLoginUser');
+const viewLoginPassword = $('viewLoginPassword');
+const viewLoginError = $('viewLoginError');
+const contactDialog = $('contactDialog');
+function openViewLogin() {
+  viewLoginError.hidden = true;
+  viewLoginForm.reset();
+  viewLoginDialog.showModal();
+  viewLoginUser.focus();
+}
+function openContact() { contactDialog.showModal(); }
+viewLoginForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  viewLoginError.hidden = true;
+  const r = await store.login(viewLoginUser.value.trim(), viewLoginPassword.value);
+  if (r.ok) { viewLoginDialog.close(); enterApp(); }
+  else { viewLoginError.textContent = r.error || 'ログインに失敗しました'; viewLoginError.hidden = false; }
+});
+$('viewLoginCancel').addEventListener('click', () => viewLoginDialog.close());
+// ランディング上のログイン/登録トリガ(ヘッダー・ヒーロー・CTAをまとめて委譲)。
+$('landing-screen').addEventListener('click', (e) => {
+  if (e.target.closest('#landing-login, [data-lp-login]')) openViewLogin();
+  else if (e.target.closest('#landing-register, [data-lp-register]')) openContact();
+});
 
 $('app-title').addEventListener('click', showHome); // タイトルクリックでホームへ
 // ロードマップ編集への導線は進捗画面のロードマップ表示の下に集約(onEditRoadmap)。
