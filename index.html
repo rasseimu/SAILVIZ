@@ -7,26 +7,193 @@
   <link rel="icon" type="image/png" href="src/favicon.png" />
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body class="view-home">
+<body class="view-landing">
+  <!-- 全画面共通のサイドバー(ログイン後のみ表示) -->
+  <aside id="app-sidebar" aria-label="メインナビゲーション">
+    <div class="sb-brand">
+      <img class="sb-logo" src="src/logo.png" alt="" />
+      <span class="sb-label sb-brand-name">SailViz</span>
+      <button id="sb-collapse" type="button" class="sb-collapse" title="サイドバーを折りたたむ" aria-label="サイドバーを折りたたむ">⟨</button>
+    </div>
+    <p class="sb-section sb-label">メニュー</p>
+    <nav class="sb-nav">
+      <button type="button" class="sb-item" data-nav="home" title="練習データ"><span class="sb-ic">🗂</span><span class="sb-label">練習データ</span></button>
+      <button type="button" class="sb-item" data-nav="dashboard" title="チューニングダッシュボード"><span class="sb-ic">🔧</span><span class="sb-label">チューニングダッシュボード</span></button>
+      <button type="button" class="sb-item" data-nav="progress" title="進捗管理"><span class="sb-ic">📈</span><span class="sb-label">進捗管理</span></button>
+    </nav>
+    <div class="sb-footer">
+      <button id="sb-account" type="button" class="sb-account" aria-expanded="false" title="アカウント">
+        <span class="account-avatar">芝</span>
+        <span class="sb-label sb-account-name">芝浦工業大学体育会ヨット部</span>
+      </button>
+      <div id="account-menu" class="hidden">
+        <button id="editModeBtn" type="button" class="menu-item">編集モード</button>
+        <button id="account-logout" type="button" class="menu-item menu-danger">🚪 ログアウト</button>
+      </div>
+    </div>
+  </aside>
+  <dialog id="loginDialog">
+    <form method="dialog" id="loginForm">
+      <p>編集用パスワード</p>
+      <input id="loginPassword" type="password" autocomplete="current-password" />
+      <menu>
+        <button value="cancel">キャンセル</button>
+        <button id="loginSubmit" value="ok">ログイン</button>
+      </menu>
+      <p id="loginError" class="error" hidden>パスワードが違います</p>
+    </form>
+  </dialog>
+
+  <!-- ランディングページ(公開・未ログイン時の入口) -->
+  <section id="landing-screen">
+    <!-- ヒーロー -->
+    <div id="landing-hero">
+      <div class="lh-overlay"></div>
+      <nav id="landing-topbar">
+        <span class="lt-brand"><img src="src/logo.png" alt="" /> SailViz</span>
+        <span class="lt-actions">
+          <button type="button" id="landing-login" class="lp-btn lp-btn-ghost">ログイン</button>
+          <button type="button" id="landing-register" class="lp-btn lp-btn-primary">登録</button>
+        </span>
+      </nav>
+      <div class="lh-inner">
+        <span class="lp-badge">SDGs × AI</span>
+        <h1 class="lh-title">ヨット練習を<br />「見返せる・比較できる・共有できる」記録に</h1>
+        <p class="lh-lead">
+          ドライブに溜まる一方の練習・コーチング動画を、AIで自動整理。<br />
+          「誰が・どの状況で・何を言われたか」を検索・比較・共有できる練習ログに変えます。
+        </p>
+        <div class="lh-cta">
+          <button type="button" class="lp-btn lp-btn-primary lp-btn-lg" data-lp-login>ログインして練習データを見る</button>
+          <button type="button" class="lp-btn lp-btn-ghost lp-btn-lg" data-lp-register>導入について問い合わせる</button>
+        </div>
+        <p class="lh-note">既存データは部内共有アカウントでログインしてご覧いただけます。</p>
+      </div>
+    </div>
+
+    <!-- 課題 -->
+    <section class="lp-section">
+      <div class="lp-container">
+        <p class="lp-eyebrow">課題</p>
+        <h2 class="lp-h2">「撮って終わり」になっている練習動画</h2>
+        <p class="lp-sub">コーチが海上で出す指摘も、日々のセッティングも、記録に残らず消えていきます。部内ヒアリングから見えた5つの痛み。</p>
+        <div class="lp-cards">
+          <div class="lp-card"><h3>溜まる一方で整理されない</h3><p>ドライブに大量に蓄積されるが分類されず、価値ある動画も埋もれ、結局見返されない。</p></div>
+          <div class="lp-card"><h3>反復指摘に気づけない</h3><p>毎回「同じこと」を言われているのに、本人も指導側も気づけず改善サイクルが回らない。</p></div>
+          <div class="lp-card"><h3>知見が横展開されない</h3><p>ある部員への有効なアドバイスが、同じ状況を通る他の部員に共有されない。</p></div>
+          <div class="lp-card"><h3>速いセッティングを再現できない</h3><p>リグを日々変えているのに記録が残らず、「あの日速かった設定」を再現できない。</p></div>
+          <div class="lp-card"><h3>海上の音声が聞き取れない</h3><p>風・波・エンジンの騒音で、せっかくのコーチの指摘が録音上ほとんど聞き取れない。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ソリューション -->
+    <section class="lp-section lp-section-alt">
+      <div class="lp-container">
+        <p class="lp-eyebrow">ソリューション</p>
+        <h2 class="lp-h2">動画をアップロードするだけで、練習ログに</h2>
+        <p class="lp-sub">AIが自動で「クリーン化 → 文字起こし → 話者分離 → 状況タグ付け → 要約」を行い、選手ごと・状況ごとに検索・比較・共有できる練習ログを生成します。</p>
+        <ol class="lp-pipeline">
+          <li><span class="pp-step">①</span><span class="pp-body"><b>音声クリーン化</b><br />海上ノイズを除去(実装済み)</span></li>
+          <li><span class="pp-step">②</span><span class="pp-body"><b>文字起こし</b><br />タイムスタンプ付きで日本語化</span></li>
+          <li><span class="pp-step">③</span><span class="pp-body"><b>話者分離</b><br />誰が誰に言ったかを特定</span></li>
+          <li><span class="pp-step">④</span><span class="pp-body"><b>状況タグ付け</b><br />風速・波・走り方で分類</span></li>
+          <li><span class="pp-step">⑤</span><span class="pp-body"><b>要約・反復指摘検出</b><br />成長を可視化(LLM)</span></li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- 主要機能 -->
+    <section class="lp-section">
+      <div class="lp-container">
+        <p class="lp-eyebrow">主要機能</p>
+        <h2 class="lp-h2">課題に一対一で効く3機能</h2>
+        <div class="lp-cards lp-cards-3">
+          <div class="lp-card"><span class="lp-card-ic">🏷️</span><h3>状況タグの自動付与</h3><p>波・風・艇の走り方からタグを割り振り、動画を「検索できる資産」に変える。</p></div>
+          <div class="lp-card"><span class="lp-card-ic">🗣️</span><h3>文字起こし・話者分離・成長管理</h3><p>誰が誰に何を言ったかを記録・要約し、反復指摘を可視化。他部員の知見も引ける。</p></div>
+          <div class="lp-card"><span class="lp-card-ic">🎞️</span><h3>映像系(フォーム・セールNo.)</h3><p>真後ろ艇のフォーム抽出、セール番号識別、手ぶれ補正で見返しやすく(後段)。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 技術要素 -->
+    <section class="lp-section lp-section-alt">
+      <div class="lp-container">
+        <p class="lp-eyebrow">技術要素</p>
+        <h2 class="lp-h2">段階連結パイプライン</h2>
+        <p class="lp-sub">各段は独立して差し替え可能。実装状況は正直に区別しています。</p>
+        <div class="lp-tech">
+          <div class="lp-tech-row"><span class="tag tag-done">実装済</span><b>DeepFilterNet3</b><span>海上ノイズ除去。実練習動画23本を処理済み・実測リアルタイム約16倍速。</span></div>
+          <div class="lp-tech-row"><span class="tag tag-plan">予定</span><b>faster-whisper large-v3</b><span>クリーン音声をタイムスタンプ付き日本語テキストへ。</span></div>
+          <div class="lp-tech-row"><span class="tag tag-plan">予定</span><b>pyannote.audio 3.1</b><span>話者分離で「いつ・誰が」を区間分割。</span></div>
+          <div class="lp-tech-row"><span class="tag tag-plan">予定</span><b>Claude(Anthropic)</b><span>選手別サマリ・反復指摘検出・状況別の知見抽出。</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 新規性 -->
+    <section class="lp-section">
+      <div class="lp-container">
+        <p class="lp-eyebrow">新規性・競合優位</p>
+        <h2 class="lp-h2">誰も入れなかった難所「海上音声」を突破</h2>
+        <p class="lp-sub">既存のセーリング分析はGPSトラック中心で、口頭コーチングの音声はほぼ扱いません。理由は風・波・エンジン音で屋外の音声系が機能しないため。SailVizはDeepFilterNet3による海上ノイズ除去を実装済みで、この壁を越えています。</p>
+        <div class="lp-compare">
+          <div class="cmp-row cmp-head"><span>サービス</span><span>主入力</span><span>口頭コーチング音声</span></div>
+          <div class="cmp-row"><span>kTool / OutSail / SailViewer</span><span>GPS・テレメトリ</span><span>扱わない</span></div>
+          <div class="cmp-row"><span>SailingMetrics / ChartedSails</span><span>GPS・動画同期</span><span>扱わない</span></div>
+          <div class="cmp-row cmp-us"><span>SailViz</span><span>口頭コーチング＋映像</span><span>✔ 構造化・検索・比較</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="lp-cta-band">
+      <div class="lp-container">
+        <h2>消えていくコーチの言葉を、成長の記録に。</h2>
+        <p>指導リソースが限られた学生スポーツの現場から、口頭コーチング活用の新しい標準をつくります。</p>
+        <div class="lh-cta">
+          <button type="button" class="lp-btn lp-btn-primary lp-btn-lg" data-lp-login>ログイン</button>
+          <button type="button" class="lp-btn lp-btn-ghost lp-btn-lg" data-lp-register>登録・お問い合わせ</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="lp-footer">
+      <span><img src="src/logo.png" alt="" /> SailViz</span>
+      <span>芝浦工業大学体育会ヨット部 — SDGs × AI</span>
+    </footer>
+  </section>
+
+  <!-- 閲覧ログイン -->
+  <dialog id="viewLoginDialog" class="lp-dialog">
+    <form method="dialog" id="viewLoginForm">
+      <h3>ログイン</h3>
+      <label>ユーザー名<input id="viewLoginUser" type="text" autocomplete="username" required /></label>
+      <label>パスワード<input id="viewLoginPassword" type="password" autocomplete="current-password" required /></label>
+      <p id="viewLoginError" class="error" hidden>ユーザー名またはパスワードが違います</p>
+      <menu>
+        <button type="button" id="viewLoginCancel" class="lp-btn lp-btn-ghost">キャンセル</button>
+        <button type="submit" id="viewLoginSubmit" class="lp-btn lp-btn-primary">ログイン</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <!-- 登録・問い合わせ -->
+  <dialog id="contactDialog" class="lp-dialog">
+    <form method="dialog">
+      <h3>導入・登録のお問い合わせ</h3>
+      <p class="contact-lead">現在は芝浦工業大学体育会ヨット部で運用・検証中です。導入のご相談は下記までお気軽にご連絡ください。</p>
+      <p class="contact-line">✉️ <a href="mailto:cy23247@shibaura-it.ac.jp">cy23247@shibaura-it.ac.jp</a></p>
+      <menu>
+        <button type="submit" class="lp-btn lp-btn-primary">閉じる</button>
+      </menu>
+    </form>
+  </dialog>
+
   <section id="home-screen">
     <header id="home-bar">
-      <img id="home-logo" src="src/logo.png" alt="SailViz" />
-      <strong>SailViz</strong>
-      <a id="home-dashboard-link" class="home-link" title="全艇チューニングを見比べる">🔧 チューニングダッシュボード</a>
-      <a id="home-progress-link" class="home-link" title="部員ごとの練習進捗を見る">📈 練習進捗管理</a>
+      <strong>練習データ</strong>
       <span id="home-folder"></span>
-      <button id="editModeBtn" type="button">編集モード</button>
-      <dialog id="loginDialog">
-        <form method="dialog" id="loginForm">
-          <p>編集用パスワード</p>
-          <input id="loginPassword" type="password" autocomplete="current-password" />
-          <menu>
-            <button value="cancel">キャンセル</button>
-            <button id="loginSubmit" value="ok">ログイン</button>
-          </menu>
-          <p id="loginError" class="error" hidden>パスワードが違います</p>
-        </form>
-      </dialog>
     </header>
     <div id="home-body">
       <div id="home-toolbar">
@@ -39,8 +206,6 @@
 
   <section id="dashboard-screen">
     <header id="dashboard-bar">
-      <a id="dashboard-home-link" class="home-link" title="ホームへ戻る">← ホーム</a>
-      <img id="dashboard-icon" src="src/Component 2.png" alt="" />
       <strong id="dashboard-title">全艇チューニングダッシュボード</strong>
       <div id="dashboard-legend"></div>
     </header>
@@ -52,9 +217,12 @@
         </div>
         <div id="dashboard-table"></div>
         <canvas id="dashboard-timebar"></canvas>
-        <section id="vmg-section" class="hidden">
-          <h3>VMG 比較</h3>
-          <div id="vmg-panel"></div>
+        <section id="tuning-guide-section" class="collapsed">
+          <div id="tuning-guide-tabs">
+            <button type="button" class="tg-tab" data-guide="n12">N12</button>
+            <button type="button" class="tg-tab" data-guide="n9">N9</button>
+          </div>
+          <iframe id="tuning-guide-frame" title="チューニングガイド"></iframe>
         </section>
       </div>
     </div>
@@ -71,7 +239,6 @@
 
   <section id="progress-screen">
     <header id="progress-bar">
-      <a id="progress-home-link" class="home-link" title="ホームへ戻る">← ホーム</a>
       <strong id="progress-title">練習進捗管理</strong>
       <label id="progress-hide-comments-label"><input type="checkbox" id="progress-hide-comments" />コメント非表示</label>
       <button type="button" id="progress-ai-generate" class="writes-json">🤖 AIコメント生成</button>
@@ -84,7 +251,7 @@
 
   <section id="roadmap-screen">
     <header id="roadmap-bar">
-      <a id="roadmap-home-link" class="home-link" title="ホームへ戻る">← ホーム</a>
+      <a id="roadmap-home-link" class="home-link" title="進捗管理へ戻る">← 進捗管理</a>
       <strong id="roadmap-title">目標ロードマップの変更</strong>
     </header>
     <nav id="roadmap-nav"></nav>

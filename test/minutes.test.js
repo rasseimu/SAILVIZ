@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMinutes, matchMember, parseMinutesDate } from '../src/minutes.js';
+import { parseMinutes, matchMember, parseMinutesDate, parseAiMinutes, buildMinutesSystemPrompt } from '../src/minutes.js';
 import { memberList } from '../src/members.js';
 
 const SAMPLE = `# 練習振り返り 議事録
@@ -121,4 +121,37 @@ test('parseMinutesDate: 年なしで defaultYear 無しは null', () => {
 
 test('parseMinutesDate: 日付が無ければ null', () => {
   assert.equal(parseMinutesDate('今日は良い風でした', { defaultYear: 2026 }), null);
+});
+
+test('parseAiMinutes は名簿内 fullName の行を検証して返す', () => {
+  const json = JSON.stringify([
+    { fullName: '本間 由真', goal: 'g', issue: 'i', discovery: 'd', raw: 'r' },
+  ]);
+  const rows = parseAiMinutes(json);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0], { fullName: '本間 由真', goal: 'g', issue: 'i', discovery: 'd', raw: 'r' });
+});
+
+test('parseAiMinutes は名簿外 fullName を null にする', () => {
+  const rows = parseAiMinutes(JSON.stringify([{ fullName: '存在 しない', goal: 'g' }]));
+  assert.equal(rows[0].fullName, null);
+  assert.equal(rows[0].goal, 'g');
+  assert.equal(rows[0].issue, '');
+});
+
+test('parseAiMinutes は壊れた JSON で [] を返す(throw しない)', () => {
+  assert.deepEqual(parseAiMinutes('これは JSON ではない'), []);
+  assert.deepEqual(parseAiMinutes('{"not":"array"}'), []);
+});
+
+test('parseAiMinutes は非オブジェクト要素をスキップし文字列強制する', () => {
+  const rows = parseAiMinutes(JSON.stringify([null, 5, { fullName: '本間 由真', goal: 42 }]));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].goal, ''); // 数値は文字列でないため空
+});
+
+test('buildMinutesSystemPrompt は全部員の fullName を含む', () => {
+  const s = buildMinutesSystemPrompt();
+  for (const m of memberList()) assert.ok(s.includes(m.fullName), `${m.fullName} が無い`);
+  assert.match(s, /JSON/);
 });

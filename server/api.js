@@ -4,8 +4,13 @@ import {
   listProjects, readProject, writeProject, deleteProject,
   readOverlay, writeOverlay, OVERLAY_NAMES, isValidProjectName,
   saveUpload, findReflectionByDate, readUpload, renameUpload, isValidImportId, isValidUploadFile,
+  findProjectByPracticeDate,
 } from './storage.js';
-import { isAuthorized } from './auth.js';
+import { uniqueProjectName } from '../src/projectfs.js';
+import {
+  validateCommitRows, mergeRowsByMember, reflectionsFromRows, emptyProject,
+} from './minutesimport.js';
+import { isAuthorized, isViewer } from './auth.js';
 import { practiceSummary } from '../src/summary.js';
 import { geminiGenerate } from './gemini.js';
 import { parseSensorCsv, jstStamp, buildTrack } from './sensorimport.js';
@@ -28,13 +33,24 @@ async function readBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-export function createApi({ dataDir, token, geminiKey }) {
+export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword }) {
+  // 閲覧ゲート: user/password が両方設定されている時のみ有効。
+  // 有効時はランダム秘密を発行し、ログイン成功で Cookie に載せる(パスワードは載せない)。
+  const viewEnabled = Boolean(viewUser && viewPassword);
+  const viewSecret = viewEnabled ? randomBytes(24).toString('hex') : null;
+
   return async function api(req, res) {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname;
     if (!path.startsWith('/api/')) return false;
     const method = req.method;
     const secureCookie = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+    // 閲覧セッションを要求するヘルパ。未ログインなら 401 を返して true(処理済み)。
+    const requireViewer = () => {
+      if (isViewer(req, viewSecret, token)) return false;
+      send(res, 401, { error: 'login required' });
+      return true;
+    };
 
     try {
       if (path === '/api/health') { send(res, 200, { ok: true }); return true; }
@@ -84,6 +100,31 @@ export function createApi({ dataDir, token, geminiKey }) {
 
       if (path === '/api/auth') { send(res, 200, { unlocked: isAuthorized(req, token) }); return true; }
 
+      // 閲覧セッションの状態。ゲート無効時は常にログイン済み扱い。
+      if (path === '/api/session' && method === 'GET') {
+        send(res, 200, { loggedIn: isViewer(req, viewSecret, token), gate: viewEnabled });
+        return true;
+      }
+
+      // 閲覧ログイン。user/password を照合し、成功で sailviz_view Cookie を発行。
+      if (path === '/api/login' && method === 'POST') {
+        if (!viewEnabled) { send(res, 200, { loggedIn: true }); return true; }
+        const body = await readBody(req) || {};
+        if (body.user === viewUser && body.password === viewPassword) {
+          send(res, 200, { loggedIn: true }, {
+            'set-cookie': `sailviz_view=${viewSecret}; HttpOnly; SameSite=Lax; Path=/${secureCookie}`,
+          });
+        } else send(res, 401, { error: 'ユーザー名またはパスワードが違います' });
+        return true;
+      }
+
+      if (path === '/api/logout' && method === 'POST') {
+        send(res, 200, { loggedIn: false }, {
+          'set-cookie': `sailviz_view=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secureCookie}`,
+        });
+        return true;
+      }
+
       if (path === '/api/sensor-imports' && method === 'POST') {
         if (!isAuthorized(req, token)) { send(res, 401, { error: 'unauthorized' }); return true; }
         const body = await readBody(req) || {};
@@ -104,6 +145,34 @@ export function createApi({ dataDir, token, geminiKey }) {
           bounds: parsed.bounds,
           matched,
         });
+        return true;
+      }
+
+      if (path === '/api/minutes-imports/commit' && method === 'POST') {
+        if (!isAuthorized(req, token)) { send(res, 401, { error: 'unauthorized' }); return true; }
+        const body = await readBody(req) || {};
+        const practiceDate = Number(body.practiceDate);
+        const rows = Array.isArray(body.rows) ? body.rows : [];
+        const bad = validateCommitRows(rows, practiceDate);
+        if (bad) { send(res, 400, { error: bad }); return true; }
+
+        const reflections = reflectionsFromRows({ rows: mergeRowsByMember(rows), now: Date.now() });
+        const found = await findProjectByPracticeDate(dataDir, practiceDate);
+        let name, created = false, proj;
+        if (found) {
+          name = found.name;
+          proj = await readProject(dataDir, name);
+          if (!Array.isArray(proj.reflections)) proj.reflections = [];
+        } else {
+          const existing = (await listProjects(dataDir)).map((p) => p.name);
+          name = uniqueProjectName(practiceDate, existing);
+          proj = emptyProject(practiceDate, new Date().toISOString());
+          created = true;
+        }
+        proj.reflections.push(...reflections);
+        if (typeof proj.practiceDate !== 'number') proj.practiceDate = practiceDate;
+        await writeProject(dataDir, name, proj);
+        send(res, 200, { name, added: reflections.length, created });
         return true;
       }
 
@@ -152,6 +221,7 @@ export function createApi({ dataDir, token, geminiKey }) {
 
       const upMatch = path.match(/^\/api\/uploads\/([^/]+)\/([^/]+)$/);
       if (upMatch && method === 'GET') {
+        if (requireViewer()) return true;
         const importId = decodeURIComponent(upMatch[1]);
         const file = decodeURIComponent(upMatch[2]);
         if (!isValidImportId(importId) || !isValidUploadFile(file)) {
@@ -184,10 +254,12 @@ export function createApi({ dataDir, token, geminiKey }) {
       }
 
       if (path === '/api/projects' && method === 'GET') {
+        if (requireViewer()) return true;
         send(res, 200, await listProjects(dataDir)); return true;
       }
 
       if (path === '/api/summaries' && method === 'GET') {
+        if (requireViewer()) return true;
         const list = await listProjects(dataDir);
         const rows = [];
         for (const { name } of list) {
@@ -202,6 +274,7 @@ export function createApi({ dataDir, token, geminiKey }) {
         const name = decodeURIComponent(projMatch[1]);
         if (!isValidProjectName(name)) { send(res, 400, { error: 'bad name' }); return true; }
         if (method === 'GET') {
+          if (requireViewer()) return true;
           try { send(res, 200, await readProject(dataDir, name)); }
           catch { send(res, 404, { error: 'not found' }); }
           return true;
@@ -222,7 +295,10 @@ export function createApi({ dataDir, token, geminiKey }) {
       if (ovMatch) {
         const name = ovMatch[1];
         if (!OVERLAY_NAMES.includes(name)) { send(res, 400, { error: 'bad overlay' }); return true; }
-        if (method === 'GET') { send(res, 200, await readOverlay(dataDir, name)); return true; }
+        if (method === 'GET') {
+          if (requireViewer()) return true;
+          send(res, 200, await readOverlay(dataDir, name)); return true;
+        }
         if (method === 'PUT') {
           if (!isAuthorized(req, token)) { send(res, 401, { error: 'unauthorized' }); return true; }
           await writeOverlay(dataDir, name, await readBody(req));

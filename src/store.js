@@ -17,6 +17,9 @@ export function createStore(api) {
     isUnlocked: () => unlocked,
     async unlock(pw) { unlocked = await api.apiUnlock(pw); return unlocked; },
     async lock() { await api.apiLock(); unlocked = false; },
+    session: () => api.apiSession(),
+    login: (user, pw) => api.apiLogin(user, pw),
+    logout: () => api.apiLogout(),
   };
 }
 

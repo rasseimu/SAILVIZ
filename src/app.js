@@ -34,8 +34,7 @@ import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
 import { createDashboard } from './dashboard.js';
 import { createProgress } from './progress.js';
 import { createRoadmap } from './roadmap.js';
-import { analyzeFleetVmg, unifyWindAxis, rankVmg, summarizeNeonShare } from './vmg.js';
-import { createVmgPanel } from './vmgview.js';
+import { summarizeNeonShare } from './vmg.js';
 
 // トラック自動割当＆色変更メニューの共通パレット(識別しやすい12色)。
 const PALETTE = [
@@ -67,13 +66,6 @@ const state = {
   crop: { start: 0, end: 0 },
   transform: { scale: 1, cx: 0, cy: 0, w: 1, h: 1, proj: null },
   basemap: null,           // 背景地図 {image(dataURL), bounds, z, img(Image)}。初回CSV取込時に1回だけ取得。
-  // VMG比較 ---
-  vmgEnabled: false,
-  vmgHighlights: [],      // renderer に渡すハイライト区間 {boatId,color,lo,hi,...}[]
-  vmgLegs: [],            // 高コスト解析キャッシュ: perBoatLegVmg
-  vmgHighlightsAll: [],   // 同上: highlights（全期間）
-  vmgColors: {},          // {boatId: color}
-  vmgWindSeries: [],      // unifyWindAxis の結果キャッシュ
 };
 
 const $ = (id) => document.getElementById(id);
@@ -93,7 +85,7 @@ function resizeCanvas() {
 
 const playback = createPlayback({ onTick: () => draw() });
 const timeline = createTimeline($('timeline'), {
-  onCropChange: (c) => { state.crop = c; playback.setRange(c); recomputeVmgCrop(); draw(); },
+  onCropChange: (c) => { state.crop = c; playback.setRange(c); draw(); },
   onScrub: (t) => {
     // 動画パネル表示中は動画がマスター。バーのスクラブで動画の再生位置を動かす(seekedでplayhead追従)。
     if (currentVideo) seekVideoToAxisTime(t);
@@ -414,6 +406,7 @@ async function saveProject() {
   } catch (e) {
     statusEl.textContent = `保存に失敗: ${e.message}`; return;
   }
+  invalidateProjectEntriesCache();
   statusEl.textContent = `保存しました: ${name}`;
 }
 
@@ -445,7 +438,6 @@ async function loadPractice(name) {
   saveReflections(state.reflections); // localStorage にも反映
   $('align-mode').value = state.mode;
   $('accuracy-filter').checked = state.accuracyFilter;
-  invalidateVmgCache();
   recomputeView(); // tracks から transform と既定 crop を再計算
   // 保存されたクロップ範囲が妥当なら復元(recomputeView の全域クロップを上書き)
   if (data.crop && data.crop.end > data.crop.start) {
@@ -453,7 +445,6 @@ async function loadPractice(name) {
     playback.setRange(state.crop);
   }
   renderSidebar();
-  if (state.vmgEnabled) recomputeVmgFull();
   draw();
   const n = state.videos.length;
   statusEl.textContent = n
@@ -464,38 +455,34 @@ async function loadPractice(name) {
 
 // ================= ホーム画面(カード型ランチャー) =================
 
-function showHome() { document.body.classList.add('view-home'); renderHome(); }
+// 画面(view)は body の view-* クラスで排他切替。遷移時は必ず全 view を外してから付与する。
+const ALL_VIEWS = ['view-landing', 'view-home', 'view-dashboard', 'view-progress', 'view-roadmap'];
+function clearViews() { for (const c of ALL_VIEWS) document.body.classList.remove(c); }
+function showLanding() { clearViews(); document.body.classList.add('view-landing'); setActiveNav(null); }
+function showHome() { clearViews(); document.body.classList.add('view-home'); setActiveNav('home'); renderHome(); }
 async function showDashboard() {
-  document.body.classList.remove('view-home');
+  clearViews();
   document.body.classList.add('view-dashboard');
+  setActiveNav('dashboard');
   await dashboard.render();
 }
-function backToHomeFromDashboard() {
-  document.body.classList.remove('view-dashboard');
-  showHome();
-}
 async function showProgress() {
-  document.body.classList.remove('view-home');
+  clearViews();
   document.body.classList.add('view-progress');
+  setActiveNav('progress');
   await progress.render();
-}
-function backToHomeFromProgress() {
-  document.body.classList.remove('view-progress');
-  showHome();
 }
 // member を渡すと、その部員を選択して編集画面を開く(進捗画面の導線用)。
 async function showRoadmap(member) {
   // ロードマップは自己完結データ(目標/段階)。永続化は API(store)。
-  document.body.classList.remove('view-home');
+  clearViews();
   document.body.classList.add('view-roadmap');
+  setActiveNav('progress');
   await roadmap.render(typeof member === 'string' ? member : undefined);
 }
-function backToHomeFromRoadmap() {
-  document.body.classList.remove('view-roadmap');
-  showHome();
-}
 function showTrack() {
-  document.body.classList.remove('view-home');
+  clearViews();
+  setActiveNav('home');
   // ホーム中は stage が display:none だった → canvas バッファを再計算しないと潰れる
   resizeCanvas(); refitTransform(); draw();
 }
@@ -511,7 +498,6 @@ function resetState() {
   state.basemap = null; // 新規練習では背景地図もクリア(次の初回取込で再取得)
   state.currentFileName = null;
   saveReflections(state.reflections);
-  invalidateVmgCache();
   recomputeView(); renderSidebar(); draw();
 }
 
@@ -588,6 +574,7 @@ async function renderHome() {
       if (!window.confirm(`練習「${label}」を削除しますか？この操作は元に戻せません。`)) return;
       try {
         await store.deleteProject(it.name);
+        invalidateProjectEntriesCache();
         renderHome();
       } catch (err) {
         statusEl.textContent = `削除に失敗: ${err.message}`;
@@ -687,7 +674,6 @@ function addTrack(name, header, rows) {
     bounds: computeBounds([{ visible: true, points: clean }]),
     tRange: { start: clean[0].t, end: clean[clean.length - 1].t },
   });
-  invalidateVmgCache();
   statusEl.textContent = `${name}: ${clean.length}点 (外れ値${removed}点除外)`;
 }
 
@@ -715,13 +701,11 @@ function renderSidebar() {
   tl.querySelectorAll('input[type=checkbox]').forEach((cb) =>
     cb.addEventListener('change', (e) => {
       state.tracks[+e.target.dataset.i].visible = e.target.checked;
-      invalidateVmgCache(); if (state.vmgEnabled) recomputeVmgFull();
       recomputeView(); draw();
     }));
   tl.querySelectorAll('button[data-del]').forEach((b) =>
     b.addEventListener('click', (e) => {
       state.tracks.splice(+e.target.dataset.del, 1);
-      invalidateVmgCache(); if (state.vmgEnabled) recomputeVmgFull();
       recomputeView(); draw(); renderSidebar();
     }));
 
@@ -859,7 +843,11 @@ const NOTICE_KEY = 'sailviz.noticeDismissed.v1';
   });
 })();
 
-// 起動時: 認証状態を取得し、動画フォルダを IndexedDB から復元してホームを表示。
+// ログイン後にアプリ本体(練習データ)へ入る。
+function enterApp() { showHome(); }
+
+// 起動時: 編集認証・動画フォルダ復元のあと、閲覧セッションを確認して
+// ログイン済ならアプリ、未ログインならランディング(公開LP)を表示。
 (async () => {
   try { await store.refreshAuth(); } catch { /* 認証取得失敗は無視(未ログイン扱い) */ }
   applyEditableState();
@@ -867,16 +855,97 @@ const NOTICE_KEY = 'sailviz.noticeDismissed.v1';
     const h = await loadDirHandle();
     if (h && await ensurePermission(h)) { projectDir = h; }
   } catch { /* 復元失敗は無視 */ }
-  showHome(); // 起動時はホーム画面（renderHome が過去の練習を一覧化）
+  let sess = { loggedIn: false };
+  try { sess = await store.session(); } catch { /* 未ログイン扱い */ }
+  if (sess.loggedIn) enterApp(); else showLanding();
 })();
 
+// ===== サイドバー(ログイン後の共通ナビ) =====
+async function doLogout() {
+  try { await store.logout(); } catch { /* 失敗しても画面は戻す */ }
+  showLanding();
+}
+const NAV_ACTIONS = {
+  home: showHome,
+  dashboard: showDashboard,
+  progress: showProgress,
+};
+// 現在地をサイドバーでハイライト。home/dashboard/progress のみ対象。
+const sbItems = [...document.querySelectorAll('.sb-item')];
+function setActiveNav(view) {
+  for (const el of sbItems) el.classList.toggle('active', el.dataset.nav === view);
+}
+document.querySelector('.sb-nav').addEventListener('click', (e) => {
+  const target = e.target.closest('[data-nav]');
+  if (!target) return;
+  NAV_ACTIONS[target.dataset.nav]?.();
+});
+
+// サイドバー折りたたみ(状態は localStorage に保持)。
+const SIDEBAR_KEY = 'sailviz_sidebar_collapsed';
+try {
+  if (globalThis.localStorage?.getItem(SIDEBAR_KEY) === '1') document.body.classList.add('sidebar-collapsed');
+} catch { /* noop */ }
+$('sb-collapse').addEventListener('click', () => {
+  const collapsed = document.body.classList.toggle('sidebar-collapsed');
+  try { globalThis.localStorage?.setItem(SIDEBAR_KEY, collapsed ? '1' : '0'); } catch { /* noop */ }
+});
+
+// ===== アカウントメニュー(サイドバー下部) =====
+const accountBtn = $('sb-account');
+const accountMenu = $('account-menu');
+function closeAccountMenu() {
+  accountMenu.classList.add('hidden');
+  accountBtn.setAttribute('aria-expanded', 'false');
+}
+accountBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const willOpen = accountMenu.classList.contains('hidden');
+  accountMenu.classList.toggle('hidden', !willOpen);
+  accountBtn.setAttribute('aria-expanded', String(willOpen));
+});
+$('account-logout').addEventListener('click', () => { closeAccountMenu(); doLogout(); });
+
+// メニュー外クリック / Esc でアカウントメニューを閉じる。
+document.addEventListener('click', (e) => {
+  if (!accountMenu.classList.contains('hidden')
+      && !accountMenu.contains(e.target) && !accountBtn.contains(e.target)) {
+    closeAccountMenu();
+  }
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAccountMenu(); });
+
+// ===== 閲覧ログイン / 登録(問い合わせ) =====
+const viewLoginDialog = $('viewLoginDialog');
+const viewLoginForm = $('viewLoginForm');
+const viewLoginUser = $('viewLoginUser');
+const viewLoginPassword = $('viewLoginPassword');
+const viewLoginError = $('viewLoginError');
+const contactDialog = $('contactDialog');
+function openViewLogin() {
+  viewLoginError.hidden = true;
+  viewLoginForm.reset();
+  viewLoginDialog.showModal();
+  viewLoginUser.focus();
+}
+function openContact() { contactDialog.showModal(); }
+viewLoginForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  viewLoginError.hidden = true;
+  const r = await store.login(viewLoginUser.value.trim(), viewLoginPassword.value);
+  if (r.ok) { viewLoginDialog.close(); enterApp(); }
+  else { viewLoginError.textContent = r.error || 'ログインに失敗しました'; viewLoginError.hidden = false; }
+});
+$('viewLoginCancel').addEventListener('click', () => viewLoginDialog.close());
+// ランディング上のログイン/登録トリガ(ヘッダー・ヒーロー・CTAをまとめて委譲)。
+$('landing-screen').addEventListener('click', (e) => {
+  if (e.target.closest('#landing-login, [data-lp-login]')) openViewLogin();
+  else if (e.target.closest('#landing-register, [data-lp-register]')) openContact();
+});
+
 $('app-title').addEventListener('click', showHome); // タイトルクリックでホームへ
-$('home-dashboard-link').addEventListener('click', showDashboard);
-$('dashboard-home-link').addEventListener('click', backToHomeFromDashboard);
-$('home-progress-link').addEventListener('click', showProgress);
-$('progress-home-link').addEventListener('click', backToHomeFromProgress);
 // ロードマップ編集への導線は進捗画面のロードマップ表示の下に集約(onEditRoadmap)。
-$('roadmap-home-link').addEventListener('click', backToHomeFromRoadmap);
+$('roadmap-home-link').addEventListener('click', showProgress);
 $('home-new').addEventListener('click', startNewPractice);
 
 $('play-btn').addEventListener('click', () => {
@@ -884,7 +953,7 @@ $('play-btn').addEventListener('click', () => {
   $('play-btn').textContent = playback.isPlaying() ? '⏸' : '▶';
 });
 $('speed-select').addEventListener('change', (e) => playback.setSpeed(+e.target.value));
-$('align-mode').addEventListener('change', (e) => { state.mode = e.target.value; if (state.vmgEnabled) recomputeVmgFull(); recomputeView(); draw(); });
+$('align-mode').addEventListener('change', (e) => { state.mode = e.target.value; recomputeView(); draw(); });
 $('accuracy-filter').addEventListener('change', (e) => {
   state.accuracyFilter = e.target.checked;
   statusEl.textContent = '精度フィルタ変更は次回読込から反映されます';
@@ -1228,16 +1297,21 @@ const NOTE_LABELS = {
 };
 
 // 保存済み全練習を deserialize して {name, project}[] で返す。
-// ダッシュボードと進捗画面で共有。
+// ダッシュボードと進捗画面で共有。読み込みは並列化し、結果をキャッシュする
+// (保存/削除時に invalidateProjectEntriesCache で破棄)。呼び出し側が push で
+// 加工する(進捗画面の現在練習など)ため、キャッシュは複製して返す。
+let projectEntriesCache = null;
 async function loadProjectEntries() {
+  if (projectEntriesCache) return [...projectEntriesCache];
   const names = (await store.listProjects()).map((f) => f.name);
-  const entries = [];
-  for (const name of names) {
-    try { entries.push({ name, project: deserializeProject(await store.readProject(name)) }); }
-    catch { /* 壊れたファイルはスキップ */ }
-  }
-  return entries;
+  const settled = await Promise.all(names.map(async (name) => {
+    try { return { name, project: deserializeProject(await store.readProject(name)) }; }
+    catch { return null; } // 壊れたファイルはスキップ
+  }));
+  projectEntriesCache = settled.filter(Boolean);
+  return [...projectEntriesCache];
 }
+function invalidateProjectEntriesCache() { projectEntriesCache = null; }
 
 const dashboard = createDashboard({
   rigLabels: RIG_LABELS,
@@ -1269,82 +1343,42 @@ const roadmap = createRoadmap({
   saveRoadmapData: async (obj) => { await store.writeRoadmap(obj); },
 });
 
-// VMGキャッシュをクリアして無効化。トラック変更時に呼ぶ。
-function invalidateVmgCache() {
-  state.vmgLegs = []; state.vmgHighlightsAll = []; state.vmgColors = {};
-  state.vmgWindSeries = []; state.vmgHighlights = [];
-}
-
-// ================= VMG比較 =================
-// VMGパネル: DOM-less なテスト環境等で要素が無い場合に備え null ガード。
-const vmgPanelEl = $('vmg-panel');
-const vmgPanel = vmgPanelEl ? createVmgPanel({ mount: vmgPanelEl }) : null;
-
-const setVmgSectionVisible = (show) => { const el = document.getElementById('vmg-section'); if (el) el.classList.toggle('hidden', !show); };
-
-// 高コスト解析（crop非依存）。トグルON時・トラック変更時に1回だけ実行。
-function recomputeVmgFull() {
-  if (!state.vmgEnabled) return;
-  if (state.mode !== 'absolute') {
-    state.vmgHighlights = [];
-    if (vmgPanel) vmgPanel.render([], [], { colors: {} });
-    // elapsed モード通知
-    if (vmgPanelEl) vmgPanelEl.querySelector('.vmg-mode-notice')?.remove();
-    if (vmgPanelEl) {
-      const notice = document.createElement('p');
-      notice.className = 'vmg-mode-notice';
-      notice.textContent = '絶対時刻モードでのみVMG比較できます';
-      vmgPanelEl.prepend(notice);
-    }
-    setVmgSectionVisible(false); return;
-  }
-  // elapsed モード通知を消す
-  if (vmgPanelEl) vmgPanelEl.querySelector('.vmg-mode-notice')?.remove();
-
-  const visibleTracks = state.tracks.filter((t) => t.visible);
-  if (visibleTracks.length === 0) {
-    state.vmgHighlights = [];
-    state.vmgLegs = []; state.vmgHighlightsAll = []; state.vmgColors = {}; state.vmgWindSeries = [];
-    if (vmgPanel) vmgPanel.render([], [], { colors: {} });
-    setVmgSectionVisible(false); return;
-  }
-  let windSeries;
-  try {
-    windSeries = unifyWindAxis(visibleTracks, {
-      estimator: (t, o) => applyWindAxisOverrides(t, { ...o, overrides: t.windAxisOverrides }),
-      marks: state.marks,
+// ================= チューニングガイド =================
+// ダッシュボード下部に North Sails のチューニングガイド(PDF)をタブで表示する。
+// N12 艇(4899/4859/4807)と N9 艇(4677/4519/4304)でガイドが異なるため切替式。
+// 既定は最小表示(畳んだ状態=タブだけ)。60vh の PDF が常時開くとダッシュボードの
+// グラフ領域(dashboard-stage)が高さ0まで潰れるため、タブクリックで初めて展開する。
+(function initTuningGuide() {
+  const section = $('tuning-guide-section');
+  const frame = $('tuning-guide-frame');
+  const tabs = document.querySelectorAll('#tuning-guide-tabs .tg-tab');
+  if (!section || !frame || !tabs.length) return;
+  const SRC = {
+    n12: 'src/references/tuning_guide_n12.pdf',
+    n9: 'src/references/tuning_guide_n9.pdf',
+  };
+  let openGuide = null; // 現在展開中のガイド('n12'|'n9')。畳んでいれば null。
+  const collapse = () => {
+    openGuide = null;
+    section.classList.add('collapsed');
+    tabs.forEach((t) => t.classList.remove('active'));
+    frame.removeAttribute('src'); // PDF を破棄して負荷を下げる(次回展開で再取得)
+  };
+  const expand = (guide) => {
+    openGuide = guide;
+    section.classList.remove('collapsed');
+    tabs.forEach((t) => t.classList.toggle('active', t.dataset.guide === guide));
+    frame.src = SRC[guide] || SRC.n12;
+  };
+  collapse(); // 初期状態=最小表示
+  for (const tab of tabs) {
+    tab.addEventListener('click', () => {
+      const g = tab.dataset.guide;
+      if (openGuide === g) collapse(); // 展開中の同じタブ→畳む(トグル)
+      else expand(g);                  // それ以外→そのガイドを展開
     });
-  } catch {
-    windSeries = [];
   }
-  state.vmgWindSeries = windSeries;
-  if (windSeries.length === 0) {
-    state.vmgHighlights = [];
-    state.vmgLegs = []; state.vmgHighlightsAll = []; state.vmgColors = {};
-    if (vmgPanel) vmgPanel.render([], [], { colors: {} });
-    setVmgSectionVisible(false); return;
-  }
-  const colors = Object.fromEntries(visibleTracks.map((t) => [t.id, t.color]));
-  const { perBoatLegVmg, highlights, ranks } = analyzeFleetVmg(visibleTracks, windSeries, {});
-  state.vmgLegs = perBoatLegVmg;
-  state.vmgHighlightsAll = highlights;
-  state.vmgColors = colors;
-  state.vmgHighlights = highlights;
-  if (vmgPanel) vmgPanel.render(perBoatLegVmg, ranks, { colors });
-  setVmgSectionVisible(true);
-}
-
-// 安価なクロップ再ウィンドウ（drag中に呼ばれる）。高コスト再解析はしない。
-function recomputeVmgCrop() {
-  if (!state.vmgEnabled || state.vmgLegs.length === 0) return;
-  const ranks = rankVmg(state.vmgLegs, {
-    from: state.crop.start, to: state.crop.end, highlights: state.vmgHighlightsAll,
-  });
-  if (vmgPanel) vmgPanel.render(state.vmgLegs, ranks, { colors: state.vmgColors });
-}
-
-// VMG勝ちレグの地図ハイライト（VMG強調ボタン）は、風軸横の🏆VMGチェックボックス
-// (vmg-minute-toggle) で代替されたため撤去。state.vmgEnabled は常に false のまま。
+})();
 
 // 反省エディタの艇セッティング(数値12項目)と反省内容(テキスト5項目)を動的生成。
 (function buildReflFields() {

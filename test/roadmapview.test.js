@@ -33,3 +33,17 @@ test('stepperHtml: HTML特殊文字をエスケープ', () => {
   assert.match(html, /&lt;b&gt;x&lt;\/b&gt;/);
   assert.doesNotMatch(html, /<b>x<\/b>/);
 });
+
+test('stepperHtml: 子を持つ段階は達成数(done/total)を表示', () => {
+  const html = stepperHtml([{
+    id: 'm1', title: 'A', done: false, doneAt: null,
+    children: [{ id: 'c1', done: true }, { id: 'c2', done: false }, { id: 'c3', done: false }],
+  }]);
+  assert.match(html, /rm-child-count/);
+  assert.match(html, /1\s*\/\s*3/);
+});
+
+test('stepperHtml: 子なしの段階には達成数を出さない', () => {
+  const html = stepperHtml(ms([{ title: 'A' }]));
+  assert.doesNotMatch(html, /rm-child-count/);
+});

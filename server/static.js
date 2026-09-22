@@ -15,6 +15,7 @@ const TYPES = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.ico': 'image/x-icon',
+  '.pdf': 'application/pdf',
 };
 
 export function contentType(pathname) {

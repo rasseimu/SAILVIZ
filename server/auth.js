@@ -22,3 +22,11 @@ export function isAuthorized(req, token) {
   if (!token) return false;
   return extractToken(req) === token;
 }
+
+// 閲覧セッションの判定。編集モード(write token)は閲覧を内包する。
+// viewSecret が未設定(閲覧ゲート無効)なら誰でも閲覧可として true を返す。
+export function isViewer(req, viewSecret, writeToken) {
+  if (!viewSecret) return true;
+  if (writeToken && extractToken(req) === writeToken) return true;
+  return parseCookies(req.headers.cookie).sailviz_view === viewSecret;
+}

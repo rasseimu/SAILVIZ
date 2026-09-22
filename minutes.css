@@ -1,0 +1,29 @@
+/* --- スマホ議事録入力ページ (minutes.html) --- */
+.mn-body { margin: 0; background: #f5f6f8; color: #1a1a1a;
+  font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", sans-serif; }
+.mn-wrap { max-width: 640px; margin: 0 auto; padding: 16px 14px 40px; }
+.mn-title { font-size: 1.25rem; margin: 8px 0 16px; }
+.mn-card { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+.mn-label { display: block; font-weight: 600; margin: 14px 0 6px; }
+.mn-text { width: 100%; box-sizing: border-box; font-size: 16px; padding: 10px;
+  border: 1px solid #c9ccd1; border-radius: 8px; resize: vertical; }
+.mn-btnrow { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.mn-btnrow button, .mn-commit, #mn-unlock-btn { font-size: 16px; padding: 12px 16px;
+  border-radius: 8px; border: 1px solid #c9ccd1; background: #fff; cursor: pointer; }
+.mn-primary { background: #1e66d0; color: #fff; border-color: #1e66d0; }
+.mn-commit { width: 100%; margin-top: 16px; }
+#mn-password { width: 100%; box-sizing: border-box; font-size: 16px; padding: 12px;
+  border: 1px solid #c9ccd1; border-radius: 8px; margin-bottom: 10px; }
+.mn-msg { color: #555; min-height: 1.2em; margin: 8px 0; font-size: .9rem; }
+.mn-preview { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.mn-row { background: #fff; border: 1px solid #e0e2e6; border-radius: 8px; padding: 10px; }
+.mn-row.mn-unmatched { border-color: #e0a800; background: #fffdf3; }
+.mn-row-head { display: flex; align-items: center; gap: 10px; }
+.mn-row-head input[type=checkbox] { width: 22px; height: 22px; }
+.mn-row-head select { flex: 1; font-size: 16px; padding: 8px; border-radius: 6px; border: 1px solid #c9ccd1; }
+.mn-row-body { margin-top: 8px; font-size: .92rem; }
+.mn-row-body p { margin: 4px 0; }
+#mn-date { font-size: 16px; padding: 10px; border: 1px solid #c9ccd1; border-radius: 8px; }
+.mn-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  background: #222; color: #fff; padding: 10px 18px; border-radius: 20px; font-size: .95rem; }
+.hidden { display: none !important; }

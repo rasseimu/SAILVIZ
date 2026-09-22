@@ -4,6 +4,7 @@ import {
   STORAGE_KEY, loadRoadmap, saveRoadmap,
   setGoal, addMilestone, renameMilestone, removeMilestone,
   moveMilestone, toggleMilestone, roadmapProgress,
+  addChild, toggleChild, renameChild, removeChild, childProgress,
   ROADMAP_FILE, readRoadmapFile, writeRoadmapFile,
 } from '../src/roadmapstore.js';
 
@@ -139,6 +140,103 @@ test('readRoadmapFile は壊れたJSONでも {} を返す', async () => {
   const dir = fakeRWDir();
   dir.files.set(ROADMAP_FILE, 'not json');
   assert.deepEqual(await readRoadmapFile(dir), {});
+});
+
+// ===== 小目標(children): 大目標 > 段階 > 小目標 の3階層 =====
+
+test('addChild: 段階の子として {id,title,done:false,doneAt:null} を追加', () => {
+  let o = addMilestone({}, '村瀬 礼', 'm1', 'クローズで速く');
+  o = addChild(o, '村瀬 礼', 'm1', 'c1', 'ヒールを一定に');
+  assert.deepEqual(o['村瀬 礼'].milestones[0].children, [
+    { id: 'c1', title: 'ヒールを一定に', done: false, doneAt: null },
+  ]);
+});
+
+test('addChild: 空白のみタイトルは無視', () => {
+  let o = addMilestone({}, '村瀬 礼', 'm1', 'a');
+  const before = o;
+  o = addChild(o, '村瀬 礼', 'm1', 'c1', '   ');
+  assert.equal(o, before);
+});
+
+test('addChild: 済みの段階に未達の子を足すと親が未達に戻る', () => {
+  let o = addMilestone({}, '村瀬 礼', 'm1', 'a');
+  o = toggleMilestone(o, '村瀬 礼', 'm1', true, 100); // 子なしは手動達成
+  o = addChild(o, '村瀬 礼', 'm1', 'c1', '子');
+  assert.equal(o['村瀬 礼'].milestones[0].done, false);
+  assert.equal(o['村瀬 礼'].milestones[0].doneAt, null);
+});
+
+test('toggleChild: 全子達成で親が自動 done(doneAt=ts)', () => {
+  let o = addMilestone({}, '村瀬 礼', 'm1', 'a');
+  o = addChild(o, '村瀬 礼', 'm1', 'c1', 'x');
+  o = addChild(o, '村瀬 礼', 'm1', 'c2', 'y');
+  o = toggleChild(o, '村瀬 礼', 'm1', 'c1', true, 111);
+  assert.equal(o['村瀬 礼'].milestones[0].done, false); // まだ c2 が未達
+  o = toggleChild(o, '村瀬 礼', 'm1', 'c2', true, 222);
+  assert.equal(o['村瀬 礼'].milestones[0].done, true);
+  assert.equal(o['村瀬 礼'].milestones[0].doneAt, 222);
+});
+
+test('toggleChild: 子を外すと親も未達に戻る', () => {
+  let o = addMilestone({}, '村瀬 礼', 'm1', 'a');
+  o = addChild(o, '村瀬 礼', 'm1', 'c1', 'x');
+  o = toggleChild(o, '村瀬 礼', 'm1', 'c1', true, 111);
+  assert.equal(o['村瀬 礼'].milestones[0].done, true);
+  o = toggleChild(o, '村瀬 礼', 'm1', 'c1', false, 222);
+  assert.equal(o['村瀬 礼'].milestones[0].done, false);
+  assert.equal(o['村瀬 礼'].milestones[0].doneAt, null);
+});
+
+test('renameChild: 子のtitleを更新(done不変)、空白は無視', () => {
+  let o = addMilestone({}, '村瀬 礼', 'm1', 'a');
+  o = addChild(o, '村瀬 礼', 'm1', 'c1', '旧');
+  o = renameChild(o, '村瀬 礼', 'm1', 'c1', '新');
+  assert.equal(o['村瀬 礼'].milestones[0].children[0].title, '新');
+  o = renameChild(o, '村瀬 礼', 'm1', 'c1', '  ');
+  assert.equal(o['村瀬 礼'].milestones[0].children[0].title, '新');
+});
+
+test('removeChild: 該当子を削除', () => {
+  let o = addMilestone({}, '村瀬 礼', 'm1', 'a');
+  o = addChild(o, '村瀬 礼', 'm1', 'c1', 'x');
+  o = addChild(o, '村瀬 礼', 'm1', 'c2', 'y');
+  o = removeChild(o, '村瀬 礼', 'm1', 'c1', 1);
+  assert.deepEqual(o['村瀬 礼'].milestones[0].children.map((c) => c.id), ['c2']);
+});
+
+test('removeChild: 最後の未達の子を削除して残り全達成なら親が自動完了', () => {
+  let o = addMilestone({}, '村瀬 礼', 'm1', 'a');
+  o = addChild(o, '村瀬 礼', 'm1', 'c1', 'x');
+  o = addChild(o, '村瀬 礼', 'm1', 'c2', 'y');
+  o = toggleChild(o, '村瀬 礼', 'm1', 'c1', true, 111);
+  assert.equal(o['村瀬 礼'].milestones[0].done, false);
+  o = removeChild(o, '村瀬 礼', 'm1', 'c2', 333); // 残りは c1(済)のみ
+  assert.equal(o['村瀬 礼'].milestones[0].done, true);
+  assert.equal(o['村瀬 礼'].milestones[0].doneAt, 333);
+});
+
+test('toggleMilestone: 子を持つ段階は手動トグル不可(不変)', () => {
+  let o = addMilestone({}, '村瀬 礼', 'm1', 'a');
+  o = addChild(o, '村瀬 礼', 'm1', 'c1', 'x');
+  const before = o;
+  o = toggleMilestone(o, '村瀬 礼', 'm1', true, 999);
+  assert.equal(o, before);
+});
+
+test('childProgress: 子の達成数を返す(子なしは total:0)', () => {
+  assert.deepEqual(childProgress({ id: 'm', title: '', done: false, doneAt: null }), { done: 0, total: 0 });
+  assert.deepEqual(childProgress({
+    id: 'm', title: '', done: false, doneAt: null,
+    children: [{ done: true }, { done: false }, { done: true }],
+  }), { done: 2, total: 3 });
+});
+
+test('子の不変更新: 元オブジェクトを破壊しない', () => {
+  const a = addChild(addMilestone({}, '村瀬 礼', 'm1', 'a'), '村瀬 礼', 'm1', 'c1', 'x');
+  const b = toggleChild(a, '村瀬 礼', 'm1', 'c1', true, 1);
+  assert.equal(a['村瀬 礼'].milestones[0].children[0].done, false);
+  assert.equal(b['村瀬 礼'].milestones[0].children[0].done, true);
 });
 
 test('roadmapProgress: 現在地=最初の未達index、全達成なら total', () => {
