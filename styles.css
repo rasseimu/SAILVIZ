@@ -322,6 +322,16 @@ table.tuning-table tbody tr:nth-child(even) { background: #fafafa; }
 
 #dashboard-timebar { width: 100%; height: 44px; border-top: 1px solid #ccc; display: block; }
 
+/* チューニングガイド(PDF): ダッシュボード下部にタブ切替で表示 */
+#tuning-guide-section { flex: 0 0 auto; display: flex; flex-direction: column; border-top: 1px solid #ccc; padding-top: 8px; }
+#tuning-guide-tabs { display: flex; gap: 6px; margin-bottom: 6px; }
+#tuning-guide-tabs .tg-tab { padding: 4px 16px; border: 1px solid var(--gd-border, #ccc); border-radius: 6px 6px 0 0;
+  background: #f2f2f2; cursor: pointer; font-weight: 600; color: var(--gd-text2, #555); }
+#tuning-guide-tabs .tg-tab.active { background: #fff; color: var(--gd-text, #222); border-bottom-color: #fff; }
+#tuning-guide-frame { width: 100%; height: 40vh; border: 1px solid var(--gd-border, #ccc); border-radius: 0 6px 6px 6px; background: #fff; }
+/* 最小表示(既定): タブだけ残し PDF を畳んでグラフに縦空間を空ける */
+#tuning-guide-section.collapsed #tuning-guide-frame { display: none; }
+
 /* ===== 練習進捗管理画面 ===== */
 #progress-screen { display: none; }
 body.view-progress #progress-screen { display: flex; flex-direction: column; position: fixed; inset: 0; background: #fff; z-index: 50; }
