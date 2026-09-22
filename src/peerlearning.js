@@ -132,6 +132,13 @@ export function buildPeerGroundPrompt(item, matches) {
   return { system, user };
 }
 
+// 出典表示用の短い日付(JST, YYYY-MM-DD)。
+function fmtDay(ms) {
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(ms));
+}
+
 // 根拠付け応答(単一オブジェクト)を検証。comment 非空でなければ null。
 export function parsePeerGroundObject(rawText) {
   const text = String(rawText).replace(/```(?:json)?/gi, '').trim();
@@ -144,4 +151,64 @@ export function parsePeerGroundObject(rawText) {
   const usedPoolIds = Array.isArray(obj.usedPoolIds)
     ? obj.usedPoolIds.filter((x) => typeof x === 'string') : [];
   return { comment, usedPoolIds };
+}
+
+// items:[{reflId, field, text}] は未解決の goal/issue。reflections/progress から履歴プールを作り、
+// スクリーニング→根拠付けの2段で実名引用コメントを生成する。戻り値は addComment 互換の候補。
+export async function generatePeerComments({
+  items, reflections, progress, geminiGenerate,
+  model = 'gemini-3.6-flash', maxMatchesPerItem = 3, maxEvidence = 5,
+}) {
+  if (!items || items.length === 0) return [];
+  const pool = buildHistoryPool(reflections, progress, { maxEvidence });
+  if (pool.length === 0) return [];
+  const byId = new Map(pool.map((p) => [p.poolId, p]));
+
+  // (1) スクリーニング: 各未解決アイテムに関連する解決事例(複数可)を選ぶ。
+  const sc = buildPeerScreenPrompt(items, pool);
+  const screenText = await geminiGenerate({
+    model, system: sc.system, parts: [{ text: sc.user }], responseMimeType: 'application/json',
+  });
+  const matches = parsePeerScreen(screenText, pool);
+  if (matches.length === 0) return [];
+
+  // アイテム(reflId×field)ごとに事例をまとめる(最大 maxMatchesPerItem)。
+  const textOf = new Map(items.map((it) => [`${it.reflId} ${it.field}`, it.text]));
+  const groups = new Map();
+  for (const m of matches) {
+    const key = `${m.reflId} ${m.field}`;
+    const text = textOf.get(key);
+    if (text == null) continue;
+    if (!groups.has(key)) groups.set(key, { reflId: m.reflId, field: m.field, text, ids: [] });
+    const g = groups.get(key);
+    if (!g.ids.includes(m.poolId) && g.ids.length < maxMatchesPerItem) g.ids.push(m.poolId);
+  }
+
+  // (2) 根拠付け: アイテムごとに、選ばれた事例をまとめて渡す。
+  const out = [];
+  for (const g of groups.values()) {
+    const matched = g.ids.map((id) => byId.get(id)).filter(Boolean);
+    if (matched.length === 0) continue;
+    const gp = buildPeerGroundPrompt({ field: g.field, text: g.text }, matched);
+    let res;
+    try {
+      const text = await geminiGenerate({
+        model, system: gp.system, parts: [{ text: gp.user }], responseMimeType: 'application/json',
+      });
+      res = parsePeerGroundObject(text);
+    } catch { continue; } // 1アイテムの失敗で全体を止めない
+    if (!res) continue;
+
+    // 実際に使われた事例(なければ渡した全事例)を出典にする。
+    const provided = new Set(matched.map((m) => m.poolId));
+    let usedIds = res.usedPoolIds.filter((id) => provided.has(id));
+    if (usedIds.length === 0) usedIds = [...provided];
+    const refs = usedIds.map((id) => {
+      const p = byId.get(id);
+      return { link: null, title: `${p.member}・${FIELD_LABEL[p.field]}(${fmtDay(p.dateMs)})` };
+    });
+    const url = `peer:${g.reflId}:${g.field}:${[...usedIds].sort().join(',')}`;
+    out.push({ reflId: g.reflId, field: g.field, comment: res.comment, url, refs });
+  }
+  return out;
 }

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildHistoryPool, buildPeerScreenPrompt, parsePeerScreen, buildPeerGroundPrompt, parsePeerGroundObject } from '../src/peerlearning.js';
+import { generatePeerComments } from '../src/peerlearning.js';
 
 // 反省を1件作るヘルパ。dateMs は practice.startMs に入れる(summarize の reflDateMs 準拠)。
 function refl(id, name, notes, { speed = null, dateMs = 0 } = {}) {
@@ -143,4 +144,86 @@ test('parsePeerGroundObject: comment と usedPoolIds を取り出す', () => {
 
 test('parsePeerGroundObject: comment空はnull', () => {
   assert.equal(parsePeerGroundObject('{"comment":"  ","usedPoolIds":[]}'), null);
+});
+
+// 2回呼ばれる geminiGenerate をスタブ: 1回目=スクリーニング応答, 2回目以降=根拠付け応答。
+function stubGemini(responses) {
+  let i = 0;
+  return async () => responses[i++];
+}
+
+test('generatePeerComments: 空itemsは即[]', async () => {
+  const out = await generatePeerComments({ items: [], reflections: [], progress: {}, geminiGenerate: stubGemini([]) });
+  assert.deepEqual(out, []);
+});
+
+test('generatePeerComments: 解決履歴が空なら即[](geminiは呼ばれない)', async () => {
+  let called = 0;
+  const gg = async () => { called++; return '[]'; };
+  const out = await generatePeerComments({
+    items: [{ reflId: 'x1', field: 'issue', text: 'a' }],
+    reflections: [], progress: {}, geminiGenerate: gg,
+  });
+  assert.deepEqual(out, []);
+  assert.equal(called, 0);
+});
+
+test('generatePeerComments: スクリーニング→根拠付けを組み立て、url/refsを付ける', async () => {
+  // 履歴: 村瀬の解決済み課題 r1 + 以降の発見 d1
+  const reflections = [
+    { id: 'r1', people: ['村瀬 礼'], notes: { issue: '微風で走らない' }, wind: { speed: 2 }, practice: { startMs: 100 } },
+    { id: 'd1', people: ['村瀬 礼'], notes: { discovery: 'カニンガムを緩める' }, wind: { speed: 2 }, practice: { startMs: 150 } },
+  ];
+  const progress = { r1: { issueStage: 2 } };
+  // 対象(未解決): 本間の課題 x1。スクリーニングが p0 を関連付け、根拠付けが p0 を使用。
+  const items = [{ reflId: 'x1', field: 'issue', text: '微風で遅い' }];
+  const gg = stubGemini([
+    JSON.stringify([{ reflId: 'x1', field: 'issue', poolId: 'p0' }]),
+    JSON.stringify({ comment: '村瀬さんはカニンガムを緩めて解決しました。', usedPoolIds: ['p0'] }),
+  ]);
+  const out = await generatePeerComments({ items, reflections, progress, geminiGenerate: gg });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].reflId, 'x1');
+  assert.equal(out[0].field, 'issue');
+  assert.match(out[0].comment, /村瀬/);
+  assert.equal(out[0].url, 'peer:x1:issue:p0');
+  assert.equal(out[0].refs.length, 1);
+  assert.equal(out[0].refs[0].link, null);
+  assert.match(out[0].refs[0].title, /村瀬 礼/);
+});
+
+test('generatePeerComments: スクリーニングが空なら根拠付けを呼ばず[]', async () => {
+  const reflections = [
+    { id: 'r1', people: ['村瀬 礼'], notes: { issue: 'a' }, wind: { speed: 2 }, practice: { startMs: 100 } },
+  ];
+  const gg = stubGemini(['[]']);
+  const out = await generatePeerComments({
+    items: [{ reflId: 'x1', field: 'issue', text: 'b' }],
+    reflections, progress: { r1: { issueStage: 2 } }, geminiGenerate: gg,
+  });
+  assert.deepEqual(out, []);
+});
+
+test('generatePeerComments: 根拠付けが例外でも他アイテムを止めない', async () => {
+  const reflections = [
+    { id: 'r1', people: ['村瀬 礼'], notes: { issue: 'a' }, wind: { speed: 2 }, practice: { startMs: 100 } },
+  ];
+  const progress = { r1: { issueStage: 2 } };
+  const items = [
+    { reflId: 'x1', field: 'issue', text: 'b' },
+    { reflId: 'x2', field: 'issue', text: 'c' },
+  ];
+  let call = 0;
+  const gg = async () => {
+    call++;
+    if (call === 1) return JSON.stringify([
+      { reflId: 'x1', field: 'issue', poolId: 'p0' },
+      { reflId: 'x2', field: 'issue', poolId: 'p0' },
+    ]);
+    if (call === 2) throw new Error('根拠付け失敗'); // x1 は失敗
+    return JSON.stringify({ comment: 'x2の助言', usedPoolIds: ['p0'] }); // x2 は成功
+  };
+  const out = await generatePeerComments({ items, reflections, progress, geminiGenerate: gg });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].reflId, 'x2');
 });
