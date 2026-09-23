@@ -13,11 +13,19 @@ import { geminiGenerate } from './gemini.js';
 import { loadRoadmap } from './roadmapstore.js';
 import { stepperHtml } from './roadmap.js';
 import { SOURCES } from './references/todaiyacht.js';
-import { WIND_BANDS } from './windband.js';
+import { WIND_BANDS, classifyWindBand } from './windband.js';
+import { loadWindKnowledge } from './windknowledgestore.js';
 
 const $ = (id) => document.getElementById(id);
 const STAGES = [{ v: 0, label: '未着手' }, { v: 1, label: '取組中' }, { v: 2, label: '解決' }];
 const FIELD_LABEL = { goal: '目標', issue: '課題', discovery: '発見' };
+
+// 各 item に風速帯を付与する。text の語を優先し、無ければ反省の実測風速で判定。
+export function annotateItemsWithBand(items, reflections) {
+  const speedById = new Map();
+  for (const r of reflections) if (r?.id != null) speedById.set(r.id, r.wind?.speed ?? null);
+  return items.map((it) => ({ ...it, band: classifyWindBand(it.text, speedById.get(it.reflId)) }));
+}
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
@@ -493,14 +501,18 @@ export function createProgress({
         }
       }
 
+      const bandItems = annotateItemsWithBand(items, reflections);
+      const cached = loadWindKnowledge();
+      const digest = cached?.bandBullets || null;
+
       btn.disabled = true;
       status.textContent = '生成中…(参考文献とチームの解決事例を照合します)';
       try {
         // 参考文献系統(PDF)とピア学習系統(チーム履歴)を並走。片方の失敗はもう片方を止めない。
         const [refSug, peerSug] = await Promise.all([
-          generateAiComments({ items, sources: SOURCES, loadFileBase64 })
+          generateAiComments({ items: bandItems, sources: SOURCES, loadFileBase64, digest })
             .catch((e) => { console.error('参考文献コメント生成に失敗', e); return []; }),
-          generatePeerComments({ items: peerItems, reflections, progress, geminiGenerate })
+          generatePeerComments({ items: peerItems, reflections, progress, geminiGenerate, digest })
             .catch((e) => { console.error('ピアコメント生成に失敗', e); return []; }),
         ]);
         const suggestions = [...refSug, ...peerSug];
