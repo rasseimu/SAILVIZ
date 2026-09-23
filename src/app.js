@@ -798,19 +798,14 @@ const loginPassword = $('loginPassword');
 const loginError = $('loginError');
 
 function applyEditableState() {
-  const on = store.isUnlocked();
-  // ボタンで現在のモードを明示: 閲覧中=🔒/編集中=✓(緑=.editing)。
-  editModeBtn.textContent = on ? '✓ 編集中' : '🔒 編集モード';
-  editModeBtn.classList.toggle('editing', on);
-  editModeBtn.title = on
-    ? 'クリックで編集を終了（閲覧のみに戻す）'
-    : 'クリックして編集モードにすると、反省・進捗・ロードマップを保存できます';
-  document.body.classList.toggle('readonly', !on);
+  // 編集モードは廃止。閲覧ログインが唯一のゲート(サーバも書き込みを isViewer で許可)。
+  // 書き込み要素は常に有効化し、編集モードボタンは隠す。
+  // store.unlock/lock 等のコードとダイアログDOMは残置(可逆)。
+  editModeBtn.hidden = true;
+  document.body.classList.remove('readonly');
   document.querySelectorAll('.writes-json').forEach((el) => {
-    el.disabled = !on;
-    // 無効化の理由をツールチップで補足(Firefox 等では disabled 要素でも表示)。
-    if (on) el.removeAttribute('title');
-    else el.title = '編集モードにすると変更できます';
+    el.disabled = false;
+    el.removeAttribute('title');
   });
 }
 

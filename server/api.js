@@ -51,6 +51,14 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
       send(res, 401, { error: 'login required' });
       return true;
     };
+    // 書き込みを要求するヘルパ。編集モードは廃止し、閲覧ゲート有効時は閲覧ログイン
+    // (または編集トークン)、無効時は編集トークンを要求する。未認証なら 401。
+    const requireWrite = () => {
+      const ok = viewEnabled ? isViewer(req, viewSecret, token) : isAuthorized(req, token);
+      if (ok) return false;
+      send(res, 401, { error: 'unauthorized' });
+      return true;
+    };
 
     try {
       if (path === '/api/health') { send(res, 200, { ok: true }); return true; }
@@ -81,7 +89,7 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
       // AIコメント生成のプロキシ。キーはサーバ環境変数に隠す(クライアントに出さない)。
       // 課金が発生するため編集モード(認証)必須にし、無認証の乱用を防ぐ。
       if (path === '/api/ai-comment' && method === 'POST') {
-        if (!isAuthorized(req, token)) { send(res, 401, { error: 'unauthorized' }); return true; }
+        if (requireWrite()) return true;
         if (!geminiKey) { send(res, 503, { error: 'AI未設定(GEMINI_API_KEY 未設定)' }); return true; }
         const body = await readBody(req) || {};
         try {
@@ -126,7 +134,7 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
       }
 
       if (path === '/api/sensor-imports' && method === 'POST') {
-        if (!isAuthorized(req, token)) { send(res, 401, { error: 'unauthorized' }); return true; }
+        if (requireWrite()) return true;
         const body = await readBody(req) || {};
         const { person, csv } = body;
         if (typeof csv !== 'string' || typeof person !== 'string') {
@@ -149,7 +157,7 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
       }
 
       if (path === '/api/minutes-imports/commit' && method === 'POST') {
-        if (!isAuthorized(req, token)) { send(res, 401, { error: 'unauthorized' }); return true; }
+        if (requireWrite()) return true;
         const body = await readBody(req) || {};
         const practiceDate = Number(body.practiceDate);
         const rows = Array.isArray(body.rows) ? body.rows : [];
@@ -178,7 +186,7 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
 
       const commitMatch = path.match(/^\/api\/sensor-imports\/([^/]+)\/commit$/);
       if (commitMatch && method === 'POST') {
-        if (!isAuthorized(req, token)) { send(res, 401, { error: 'unauthorized' }); return true; }
+        if (requireWrite()) return true;
         const importId = decodeURIComponent(commitMatch[1]);
         if (!isValidImportId(importId)) { send(res, 400, { error: 'bad importId' }); return true; }
         const body = await readBody(req) || {};
@@ -280,12 +288,12 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
           return true;
         }
         if (method === 'PUT') {
-          if (!isAuthorized(req, token)) { send(res, 401, { error: 'unauthorized' }); return true; }
+          if (requireWrite()) return true;
           await writeProject(dataDir, name, await readBody(req));
           send(res, 200, { ok: true }); return true;
         }
         if (method === 'DELETE') {
-          if (!isAuthorized(req, token)) { send(res, 401, { error: 'unauthorized' }); return true; }
+          if (requireWrite()) return true;
           try { await deleteProject(dataDir, name); } catch { /* 既に無ければ黙認 */ }
           send(res, 200, { ok: true }); return true;
         }
@@ -300,7 +308,7 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
           send(res, 200, await readOverlay(dataDir, name)); return true;
         }
         if (method === 'PUT') {
-          if (!isAuthorized(req, token)) { send(res, 401, { error: 'unauthorized' }); return true; }
+          if (requireWrite()) return true;
           await writeOverlay(dataDir, name, await readBody(req));
           send(res, 200, { ok: true }); return true;
         }
