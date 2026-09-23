@@ -4,7 +4,7 @@
 // ピア学習ベースのコメント源。純ロジック(プール構築・プロンプト・検証)は API 呼び出しから
 // 分離してテスト可能にする。
 import { summarize } from './progressstore.js';
-import { classifyWindBand } from './windband.js';
+import { filterByBand, bandSectionFromDigest, classifyWindBand } from './windband.js';
 
 const FIELD_LABEL = { goal: '目標', issue: '課題', discovery: '発見' };
 
@@ -104,7 +104,7 @@ export function parsePeerScreen(rawText, pool) {
 
 // --- (2) 根拠付け(選ばれた解決事例を本文で渡し、実名引用のコメントを生成) ---
 
-export function buildPeerGroundPrompt(item, matches) {
+export function buildPeerGroundPrompt(item, matches, bandBullets = []) {
   const blocks = matches.map((m) => {
     const ev = (m.evidence || []).length
       ? (m.evidence || []).map((e) => `    - ${FIELD_LABEL[e.field] || e.field}: ${JSON.stringify(e.text)}`).join('\n')
@@ -112,6 +112,9 @@ export function buildPeerGroundPrompt(item, matches) {
     return `- poolId=${m.poolId} | ${m.member} | ${FIELD_LABEL[m.field]} | ${JSON.stringify(m.text)}\n`
       + `  その後の記録(解決の手がかり):\n${ev}`;
   }).join('\n');
+  const noteBlock = (bandBullets && bandBullets.length)
+    ? ['', '# 風速帯の技術ノート(該当すれば引用してよい。憶測はしない)', ...bandBullets.map((b) => `- ${b}`)].join('\n')
+    : '';
   const system = [
     'あなたは経験豊富なセーリングコーチです。以下のチーム内の解決事例だけを根拠に、対象の',
     '未解決の目標/課題へ具体的で実践的な助言を日本語3〜5文で書きます。誰(実名)が似た目標/課題を',
@@ -122,6 +125,7 @@ export function buildPeerGroundPrompt(item, matches) {
   const user = [
     '# 対象の未解決アイテム',
     `field=${item.field} text=${JSON.stringify(item.text)}`,
+    noteBlock,
     '',
     '# チーム内の解決事例(poolId | 部員 | 種別 | テキスト と その後の記録)',
     blocks,
@@ -157,13 +161,18 @@ export function parsePeerGroundObject(rawText) {
 // items:[{reflId, field, text}] は未解決の goal/issue。reflections/progress から履歴プールを作り、
 // スクリーニング→根拠付けの2段で実名引用コメントを生成する。戻り値は addComment 互換の候補。
 export async function generatePeerComments({
-  items, reflections, progress, geminiGenerate,
+  items, reflections, progress, geminiGenerate, digest = null,
   model = 'gemini-3.6-flash', maxMatchesPerItem = 3, maxEvidence = 5,
 }) {
   if (!items || items.length === 0) return [];
   const pool = buildHistoryPool(reflections, progress, { maxEvidence });
   if (pool.length === 0) return [];
   const byId = new Map(pool.map((p) => [p.poolId, p]));
+
+  // 各アイテムの帯(テキスト語優先→反省speed)。speed は reflId から引く。
+  const speedById = new Map();
+  for (const r of reflections) if (r?.id != null) speedById.set(r.id, r.wind?.speed ?? null);
+  const bandOfItem = new Map(items.map((it) => [`${it.reflId} ${it.field}`, classifyWindBand(it.text, speedById.get(it.reflId))]));
 
   // (1) スクリーニング: 各未解決アイテムに関連する解決事例(複数可)を選ぶ。
   const sc = buildPeerScreenPrompt(items, pool);
@@ -173,24 +182,29 @@ export async function generatePeerComments({
   const matches = parsePeerScreen(screenText, pool);
   if (matches.length === 0) return [];
 
-  // アイテム(reflId×field)ごとに事例をまとめる(最大 maxMatchesPerItem)。
+  // アイテム(reflId×field)ごとに事例をまとめる。
   const textOf = new Map(items.map((it) => [`${it.reflId} ${it.field}`, it.text]));
   const groups = new Map();
   for (const m of matches) {
     const key = `${m.reflId} ${m.field}`;
     const text = textOf.get(key);
     if (text == null) continue;
-    if (!groups.has(key)) groups.set(key, { reflId: m.reflId, field: m.field, text, ids: [] });
-    const g = groups.get(key);
-    if (!g.ids.includes(m.poolId) && g.ids.length < maxMatchesPerItem) g.ids.push(m.poolId);
+    if (!groups.has(key)) groups.set(key, { reflId: m.reflId, field: m.field, text, band: bandOfItem.get(key), ids: [] });
+    groups.get(key).ids.push(m.poolId);
   }
 
   // (2) 根拠付け: アイテムごとに、選ばれた事例をまとめて渡す。
   const out = [];
   for (const g of groups.values()) {
-    const matched = g.ids.map((id) => byId.get(id)).filter(Boolean);
+    // 対象帯の事例へ絞る(fallback付き)。プール事例は general を持たない。最大 maxMatchesPerItem。
+    const filtered = filterByBand(g.ids, g.band, { min: 1, getBand: (id) => byId.get(id)?.windBin || 'unknown' });
+    const ids = [];
+    for (const id of filtered) { if (!ids.includes(id) && ids.length < maxMatchesPerItem) ids.push(id); }
+    const matched = ids.map((id) => byId.get(id)).filter(Boolean);
     if (matched.length === 0) continue;
-    const gp = buildPeerGroundPrompt({ field: g.field, text: g.text }, matched);
+
+    const bandBullets = bandSectionFromDigest(digest, g.band);
+    const gp = buildPeerGroundPrompt({ field: g.field, text: g.text }, matched, bandBullets);
     let res;
     try {
       const text = await geminiGenerate({

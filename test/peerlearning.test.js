@@ -227,3 +227,56 @@ test('generatePeerComments: 根拠付けが例外でも他アイテムを止め�
   assert.equal(out.length, 1);
   assert.equal(out[0].reflId, 'x2');
 });
+
+test('buildPeerGroundPrompt: bandBullets があれば技術ノートを本文に含める', () => {
+  const matches = [{ poolId: 'p0', member: '村瀬 礼', field: 'issue', text: '微風で走らない', evidence: [] }];
+  const { user } = buildPeerGroundPrompt({ field: 'issue', text: '微風で遅い' }, matches, ['微風は緩める 〔部内実績〕']);
+  assert.match(user, /風速帯の技術ノート/);
+  assert.match(user, /微風は緩める/);
+});
+
+test('buildPeerGroundPrompt: bandBullets 空なら技術ノートを付けない(後方互換)', () => {
+  const { user } = buildPeerGroundPrompt({ field: 'issue', text: 'x' }, [], []);
+  assert.doesNotMatch(user, /風速帯の技術ノート/);
+});
+
+test('generatePeerComments: digest 注入(該当帯ノートが根拠付けに載る)', async () => {
+  const reflections = [
+    { id: 'r1', people: ['村瀬 礼'], notes: { issue: '微風で走らない' }, wind: { speed: 2 }, practice: { startMs: 100 } },
+    { id: 'd1', people: ['村瀬 礼'], notes: { discovery: 'カニンガムを緩める' }, wind: { speed: 2 }, practice: { startMs: 150 } },
+  ];
+  const progress = { r1: { issueStage: 2 } };
+  const items = [{ reflId: 'x1', field: 'issue', text: '微風で遅い' }];
+  let groundUser = '';
+  let call = 0;
+  const gg = async ({ parts }) => {
+    call++;
+    if (call === 1) return JSON.stringify([{ reflId: 'x1', field: 'issue', poolId: 'p0' }]);
+    groundUser = parts.map((p) => p.text || '').join('');
+    return JSON.stringify({ comment: '村瀬さんが緩めて解決。', usedPoolIds: ['p0'] });
+  };
+  const out = await generatePeerComments({
+    items, reflections, progress, geminiGenerate: gg,
+    digest: { bihuu: ['微風は緩める 〔部内実績〕'], chuu: [], kyou: [], baku: [] },
+  });
+  assert.equal(out.length, 1);
+  assert.match(groundUser, /風速帯の技術ノート/);
+  assert.match(groundUser, /微風は緩める/);
+});
+
+test('generatePeerComments: digest 不在でも従来通り(回帰)', async () => {
+  const reflections = [
+    { id: 'r1', people: ['村瀬 礼'], notes: { issue: '微風で走らない' }, wind: { speed: 2 }, practice: { startMs: 100 } },
+    { id: 'd1', people: ['村瀬 礼'], notes: { discovery: 'カニンガムを緩める' }, wind: { speed: 2 }, practice: { startMs: 150 } },
+  ];
+  const gg = stubGemini([
+    JSON.stringify([{ reflId: 'x1', field: 'issue', poolId: 'p0' }]),
+    JSON.stringify({ comment: '助言。', usedPoolIds: ['p0'] }),
+  ]);
+  const out = await generatePeerComments({
+    items: [{ reflId: 'x1', field: 'issue', text: '微風で遅い' }],
+    reflections, progress: { r1: { issueStage: 2 } }, geminiGenerate: gg, // digest なし
+  });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].comment, '助言。');
+});
