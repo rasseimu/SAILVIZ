@@ -98,3 +98,31 @@ test('parseKnowledgeResponse: コードフェンス付きでも解釈', () => {
   const raw = '```json\n{"bihuu":["a"]}\n```';
   assert.deepEqual(parseKnowledgeResponse(raw).bihuu, ['a']);
 });
+
+// --- Task 7 tests ---
+import { renderKnowledgeMd, generateWindKnowledge } from '../src/windknowledge.js';
+
+test('renderKnowledgeMd: 帯見出しと箇条書き、空帯はデータ不足', () => {
+  const md = renderKnowledgeMd({ bihuu: ['微風のコツ 〔部内実績〕'], chuu: [], kyou: [], baku: [] }, Date.UTC(2026, 8, 23));
+  assert.match(md, /# 風速帯別/);
+  assert.match(md, /## 微風/);
+  assert.match(md, /微風のコツ/);
+  assert.match(md, /## 中風・順風[\s\S]*（データ不足）/);
+});
+
+test('generateWindKnowledge: 入力→Gemini1回→md/bandBullets/statsを返す', async () => {
+  const reflections = [
+    { id: 'r1', people: ['村瀬 礼'], notes: { issue: '微風で走らない' }, wind: { speed: 2 }, practice: { startMs: 100 } },
+    { id: 'd1', people: ['村瀬 礼'], notes: { discovery: 'カニンガムを緩める' }, wind: { speed: 2 }, practice: { startMs: 150 } },
+  ];
+  const progress = { r1: { issueStage: 2 } };
+  let calls = 0;
+  const geminiGenerate = async () => { calls++; return JSON.stringify({ bihuu: ['微風は緩める 〔部内実績〕'], chuu: [], kyou: [], baku: [] }); };
+  const res = await generateWindKnowledge({ reflections, progress, sources: [], geminiGenerate, nowMs: 999 });
+  assert.equal(calls, 1);
+  assert.equal(res.builtAt, 999);
+  assert.deepEqual(res.bandBullets.bihuu, ['微風は緩める 〔部内実績〕']);
+  assert.match(res.md, /微風は緩める/);
+  assert.equal(res.stats.reflections, 2);
+  assert.equal(res.stats.perBand.bihuu, 1);
+});
