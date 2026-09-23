@@ -761,6 +761,15 @@ body.view-roadmap #transport { display: none; }
   .progress-section { min-height: 220px; }
 }
 
+/* 風速帯ノート表示モーダル */
+.kb-modal { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 60; display: flex; align-items: center; justify-content: center; }
+.kb-modal[hidden] { display: none; }
+.kb-modal-inner { background: #fff; border-radius: 8px; width: min(680px, 92vw); max-height: 82vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.25); }
+.kb-modal-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #eee; }
+.kb-modal-head strong { flex: 1; }
+.kb-modal-head a, .kb-modal-head button { flex: 0 0 auto; }
+.kb-modal-body { flex: 1; overflow: auto; padding: 14px; margin: 0; white-space: pre-wrap; word-break: break-word; font-family: monospace; font-size: 13px; line-height: 1.6; }
+
 /* 議事録インポートモーダル */
 #import-modal { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 60; display: flex; align-items: center; justify-content: center; }
 #import-modal.hidden { display: none; }

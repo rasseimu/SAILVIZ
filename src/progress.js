@@ -4,7 +4,7 @@
 import { memberList } from './members.js';
 import {
   loadProgress, saveProgress, setIssueStage, setGoalDone, setTextOverride,
-  addComment, removeComment, hasAiComment, summarize, setCardDeleted, WIND_BINS,
+  addComment, removeComment, hasAiComment, summarize, setCardDeleted,
 } from './progressstore.js';
 import { renderChart } from './chartview.js';
 import { generateAiComments } from './aicomment.js';
@@ -13,10 +13,20 @@ import { geminiGenerate } from './gemini.js';
 import { loadRoadmap } from './roadmapstore.js';
 import { stepperHtml } from './roadmap.js';
 import { SOURCES } from './references/todaiyacht.js';
+import { WIND_BANDS, classifyWindBand } from './windband.js';
+import { loadWindKnowledge, saveWindKnowledge } from './windknowledgestore.js';
+import { generateWindKnowledge } from './windknowledge.js';
 
 const $ = (id) => document.getElementById(id);
 const STAGES = [{ v: 0, label: '未着手' }, { v: 1, label: '取組中' }, { v: 2, label: '解決' }];
 const FIELD_LABEL = { goal: '目標', issue: '課題', discovery: '発見' };
+
+// 各 item に風速帯を付与する。text の語を優先し、無ければ反省の実測風速で判定。
+export function annotateItemsWithBand(items, reflections) {
+  const speedById = new Map();
+  for (const r of reflections) if (r?.id != null) speedById.set(r.id, r.wind?.speed ?? null);
+  return items.map((it) => ({ ...it, band: classifyWindBand(it.text, speedById.get(it.reflId)) }));
+}
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
@@ -210,7 +220,7 @@ export function createProgress({
       + `${commentSection('issue', it.reflId, it.comments)}</div>`)).join('') || '<p>(課題なし)</p>';
 
     // 風速ビンごとに発見を集約(全ビン + unknown)。
-    const binOrder = [...WIND_BINS, { key: 'unknown', label: '風速不明' }];
+    const binOrder = [...WIND_BANDS, { key: 'unknown', label: '風速不明' }];
     const discHtml = binOrder.map((bin) => {
       const items = buckets.flatMap(([name, b]) => (b.discoveriesByBin[bin.key] || []).map((d) =>
         `<li ${cardAttrs('discovery', d.reflId, 'disc-card')}>${cardDelBtn('discovery', d.reflId)}${editable('discovery', d.reflId, name, d.text)}${commentIcon('discovery', d.reflId)}`
@@ -492,14 +502,18 @@ export function createProgress({
         }
       }
 
+      const bandItems = annotateItemsWithBand(items, reflections);
+      const cached = loadWindKnowledge();
+      const digest = cached?.bandBullets || null;
+
       btn.disabled = true;
       status.textContent = '生成中…(参考文献とチームの解決事例を照合します)';
       try {
         // 参考文献系統(PDF)とピア学習系統(チーム履歴)を並走。片方の失敗はもう片方を止めない。
         const [refSug, peerSug] = await Promise.all([
-          generateAiComments({ items, sources: SOURCES, loadFileBase64 })
+          generateAiComments({ items: bandItems, sources: SOURCES, loadFileBase64, digest })
             .catch((e) => { console.error('参考文献コメント生成に失敗', e); return []; }),
-          generatePeerComments({ items: peerItems, reflections, progress, geminiGenerate })
+          generatePeerComments({ items: peerItems, reflections, progress, geminiGenerate, digest })
             .catch((e) => { console.error('ピアコメント生成に失敗', e); return []; }),
         ]);
         const suggestions = [...refSug, ...peerSug];
@@ -523,6 +537,49 @@ export function createProgress({
     });
   }
 
+  let kbWired = false;
+  function wireKnowledgeControls() {
+    if (kbWired) return;
+    const rebuildBtn = $('progress-kb-rebuild');
+    const viewBtn = $('progress-kb-view');
+    const status = $('progress-kb-status');
+    const modal = $('kb-modal');
+    const body = $('kb-modal-body');
+    const dl = $('kb-modal-download');
+    if (!rebuildBtn) return;
+    kbWired = true;
+
+    rebuildBtn.addEventListener('click', async () => {
+      rebuildBtn.disabled = true;
+      status.textContent = '風速帯ノートを分析中…';
+      try {
+        const res = await generateWindKnowledge({
+          reflections, progress, sources: SOURCES, geminiGenerate, nowMs: Date.now(),
+        });
+        saveWindKnowledge(res);
+        const p = res.stats.perBand;
+        status.textContent = `更新しました(微風${p.bihuu}・中風${p.chuu}・強風${p.kyou}・爆風${p.baku} 件)`;
+      } catch (e) {
+        console.error('風速帯ノートの再構築に失敗', e);
+        status.textContent = '再構築に失敗しました(通信を確認)';
+      } finally {
+        rebuildBtn.disabled = false;
+      }
+    });
+
+    let kbUrl = null;
+    viewBtn.addEventListener('click', () => {
+      const cached = loadWindKnowledge();
+      if (!cached) { status.textContent = 'まだノートがありません。先に再構築してください'; return; }
+      body.textContent = cached.md;
+      if (kbUrl) URL.revokeObjectURL(kbUrl);
+      kbUrl = URL.createObjectURL(new Blob([cached.md], { type: 'text/markdown' }));
+      dl.href = kbUrl;
+      modal.hidden = false;
+    });
+    $('kb-modal-close').addEventListener('click', () => { modal.hidden = true; });
+  }
+
   async function render() {
     // 1st pass: 軽量オーバーレイ(進捗・ロードマップ)を先に取得し、骨組みを即描画。
     // 保存済み全練習の読込(重い)を待たずにロードマップ枠が見えるようにする。
@@ -538,6 +595,7 @@ export function createProgress({
     entriesLoading = false;
     wireHideComments();
     wireAiControls();
+    wireKnowledgeControls();
     renderNav();
     renderBody();
   }

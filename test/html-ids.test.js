@@ -27,3 +27,10 @@ test('index.html に refl-date と import-date が存在する', () => {
   assert.ok(/id="refl-date"/.test(html), 'refl-date が無い');
   assert.ok(/id="import-date"/.test(html), 'import-date が無い');
 });
+
+test('index.html に風速帯ノートのUI要素が存在する', () => {
+  const html = readFileSync(join(__dir, '..', 'index.html'), 'utf8');
+  for (const id of ['progress-kb-rebuild', 'progress-kb-status', 'progress-kb-view', 'kb-modal', 'kb-modal-body', 'kb-modal-download', 'kb-modal-close']) {
+    assert.ok(new RegExp(`id="${id}"`).test(html), `${id} が無い`);
+  }
+});

@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  STORAGE_KEY, WIND_BINS, loadProgress, saveProgress,
-  setIssueStage, setGoalDone, setTextOverride, windBinKey, summarize,
+  STORAGE_KEY, loadProgress, saveProgress,
+  setIssueStage, setGoalDone, setTextOverride, summarize,
   addComment, hasAiComment, setCardDeleted,
 } from '../src/progressstore.js';
+import { WIND_BANDS } from '../src/windband.js';
 
 test('addComment: metaなしは{text,ts}のまま(後方互換)', () => {
   const o = addComment({}, 'r1', 'goal', 'やる', 111);
@@ -88,7 +89,7 @@ test('summarize は text オーバーレイがあれば反省テキストより�
   const b = s.byMember['本間 由真'];
   assert.equal(b.goals[0].text, '新目標');
   assert.equal(b.issues[0].text, '新課題');
-  assert.equal(b.discoveriesByBin[WIND_BINS[0].key][0].text, '新発見');
+  assert.equal(b.discoveriesByBin[WIND_BANDS[0].key][0].text, '新発見');
 });
 
 test('summarize は元反省に無い項目は text オーバーレイでも新規追加しない', () => {
@@ -126,7 +127,7 @@ test('summarize は削除フラグの項目をバケットから除外し trash 
   const b = s.byMember['本間 由真'];
   assert.equal(b.goals.length, 0);
   assert.equal(b.issues.length, 1); // issue は残る
-  assert.equal((b.discoveriesByBin[WIND_BINS[0].key] || []).length, 0);
+  assert.equal((b.discoveriesByBin[WIND_BANDS[0].key] || []).length, 0);
   // trash には削除した goal と discovery が入る(issue は入らない)
   const fields = s.trash.map((t) => t.field).sort();
   assert.deepEqual(fields, ['discovery', 'goal']);
@@ -156,13 +157,6 @@ test('summarize は削除項目の trash テキストも text オーバーレイ
   assert.equal(s.trash.find((t) => t.field === 'goal').text, '新目標');
 });
 
-test('windBinKey は境界とnullを正しく分類', () => {
-  assert.equal(windBinKey(2.9), WIND_BINS[0].key);
-  assert.equal(windBinKey(3), WIND_BINS[1].key);
-  assert.equal(windBinKey(6), WIND_BINS[2].key);
-  assert.equal(windBinKey(null), 'unknown');
-});
-
 test('summarize は部員別に目標/課題/発見(風速ビン)を束ねる', () => {
   const reflections = [
     refl('r1', '本間 由真', 1000, { goal: 'ジャイブ', issue: '起こし', discovery: '微風は無操作', speed: 2 }),
@@ -175,8 +169,8 @@ test('summarize は部員別に目標/課題/発見(風速ビン)を束ねる', 
   assert.equal(yuma.issues.length, 2);
   assert.equal(yuma.issues[0].stage, 2);
   assert.equal(yuma.goals[0].done, true);
-  assert.equal(yuma.discoveriesByBin[WIND_BINS[0].key][0].text, '微風は無操作'); // speed2 → <3
-  assert.equal(yuma.discoveriesByBin[WIND_BINS[2].key][0].text, 'ブロー対応');   // speed7 → >=6
+  assert.equal(yuma.discoveriesByBin[WIND_BANDS[0].key][0].text, '微風は無操作'); // speed2 → <3
+  assert.equal(yuma.discoveriesByBin[WIND_BANDS[2].key][0].text, 'ブロー対応');   // speed7 → kyou(6~10)
 });
 
 test('summarize.resolutionSeries は解決課題の累計を練習日昇順で出す', () => {

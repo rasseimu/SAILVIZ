@@ -242,11 +242,25 @@
       <label id="progress-hide-comments-label"><input type="checkbox" id="progress-hide-comments" />コメント非表示</label>
       <button type="button" id="progress-ai-generate" class="writes-json">🤖 AIコメント生成</button>
       <span id="progress-ai-status" class="progress-ai-status"></span>
+      <button type="button" id="progress-kb-rebuild" class="writes-json">🌬 風速帯ノートを再構築</button>
+      <button type="button" id="progress-kb-view">ノートを表示</button>
+      <span id="progress-kb-status" class="progress-ai-status"></span>
     </header>
     <nav id="progress-nav"></nav>
     <div id="progress-content"></div>
     <div id="progress-trash"></div>
   </section>
+
+  <div id="kb-modal" class="kb-modal" hidden>
+    <div class="kb-modal-inner">
+      <div class="kb-modal-head">
+        <strong>風速帯 相関ノート</strong>
+        <a id="kb-modal-download" download="wind-knowledge.md" href="#">.md をダウンロード</a>
+        <button type="button" id="kb-modal-close">閉じる</button>
+      </div>
+      <pre id="kb-modal-body" class="kb-modal-body"></pre>
+    </div>
+  </div>
 
   <section id="roadmap-screen">
     <header id="roadmap-bar">
