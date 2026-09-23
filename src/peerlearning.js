@@ -3,7 +3,8 @@
 // 助言コメントを Gemini で生成する。参考文献ベースの aicomment.js と対の、チーム内
 // ピア学習ベースのコメント源。純ロジック(プール構築・プロンプト・検証)は API 呼び出しから
 // 分離してテスト可能にする。
-import { summarize, windBinKey } from './progressstore.js';
+import { summarize } from './progressstore.js';
+import { classifyWindBand } from './windband.js';
 
 const FIELD_LABEL = { goal: '目標', issue: '課題', discovery: '発見' };
 
@@ -32,7 +33,7 @@ export function buildHistoryPool(reflections, progress, { maxEvidence = 5 } = {}
   for (const [member, b] of Object.entries(sum.byMember)) {
     // その部員の発見(全風速ビンを平坦化)と、目標/課題テキストの時系列(手がかり候補)。
     const discoveries = Object.values(b.discoveriesByBin).flat().map((d) =>
-      ({ dateMs: d.dateMs, field: 'discovery', text: d.text, windBin: windBinKey(d.speed) }));
+      ({ dateMs: d.dateMs, field: 'discovery', text: d.text, windBin: classifyWindBand(d.text, d.speed) }));
     const changes = [
       ...b.issues.map((it) => ({ dateMs: it.dateMs, field: 'issue', text: it.text })),
       ...b.goals.map((g) => ({ dateMs: g.dateMs, field: 'goal', text: g.text })),
@@ -44,7 +45,7 @@ export function buildHistoryPool(reflections, progress, { maxEvidence = 5 } = {}
         .map((g) => ({ reflId: g.reflId, field: 'goal', text: g.text, dateMs: g.dateMs })),
     ];
     for (const item of resolved) {
-      const wb = windBinKey(speedById.get(item.reflId));
+      const wb = classifyWindBand(item.text, speedById.get(item.reflId));
       // 手がかり = 解決日時"以降"の発見(主)+ 後続の課題/目標の変化。
       const cand = [
         ...discoveries.filter((d) => d.dateMs >= item.dateMs),

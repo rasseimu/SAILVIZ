@@ -4,7 +4,7 @@
 import { memberList } from './members.js';
 import {
   loadProgress, saveProgress, setIssueStage, setGoalDone, setTextOverride,
-  addComment, removeComment, hasAiComment, summarize, setCardDeleted, WIND_BINS,
+  addComment, removeComment, hasAiComment, summarize, setCardDeleted,
 } from './progressstore.js';
 import { renderChart } from './chartview.js';
 import { generateAiComments } from './aicomment.js';
@@ -13,6 +13,7 @@ import { geminiGenerate } from './gemini.js';
 import { loadRoadmap } from './roadmapstore.js';
 import { stepperHtml } from './roadmap.js';
 import { SOURCES } from './references/todaiyacht.js';
+import { WIND_BANDS } from './windband.js';
 
 const $ = (id) => document.getElementById(id);
 const STAGES = [{ v: 0, label: '未着手' }, { v: 1, label: '取組中' }, { v: 2, label: '解決' }];
@@ -210,7 +211,7 @@ export function createProgress({
       + `${commentSection('issue', it.reflId, it.comments)}</div>`)).join('') || '<p>(課題なし)</p>';
 
     // 風速ビンごとに発見を集約(全ビン + unknown)。
-    const binOrder = [...WIND_BINS, { key: 'unknown', label: '風速不明' }];
+    const binOrder = [...WIND_BANDS, { key: 'unknown', label: '風速不明' }];
     const discHtml = binOrder.map((bin) => {
       const items = buckets.flatMap(([name, b]) => (b.discoveriesByBin[bin.key] || []).map((d) =>
         `<li ${cardAttrs('discovery', d.reflId, 'disc-card')}>${cardDelBtn('discovery', d.reflId)}${editable('discovery', d.reflId, name, d.text)}${commentIcon('discovery', d.reflId)}`

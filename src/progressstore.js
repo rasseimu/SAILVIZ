@@ -1,21 +1,8 @@
 // 課題の3段階進捗(未着手0/取組中1/解決2)と目標達成フラグを localStorage に持つ軽量オーバーレイ。
 // キー = 反省id。反省(真実源)とは別ストアにし、進捗トグルで練習ファイルを書き戻さずに済ませる。
 // 集計(summarize)は反省配列 × オーバーレイ から画面用データを作る純関数。
+import { classifyWindBand } from './windband.js';
 export const STORAGE_KEY = 'sailviz.progress';
-
-// 風速ビン(昇順・境界は max 未満)。末尾は上限なし。unknown は speed 欠損。
-export const WIND_BINS = [
-  { key: 'lt3', label: '〜3 m/s', max: 3 },
-  { key: 'mid', label: '3〜6 m/s', max: 6 },
-  { key: 'ge6', label: '6 m/s〜', max: Infinity },
-];
-
-export function windBinKey(speed) {
-  if (speed == null || !Number.isFinite(Number(speed))) return 'unknown';
-  const s = Number(speed);
-  for (const b of WIND_BINS) if (s < b.max) return b.key;
-  return WIND_BINS[WIND_BINS.length - 1].key;
-}
 
 export function loadProgress(storage = globalThis.localStorage) {
   try {
@@ -109,7 +96,7 @@ function reflDateMs(r) {
   return r.practice?.startMs ?? r.createdAt ?? 0;
 }
 
-export function summarize(reflections, progress, { bins = WIND_BINS } = {}) {
+export function summarize(reflections, progress) {
   const byMember = {};
   const trash = []; // 削除フラグ済みカード(ゴミ箱表示用) {name, field, reflId, text, dateMs, speed?}
   const ensure = (name) => (byMember[name] ||= { goals: [], issues: [], discoveriesByBin: {} });
@@ -144,10 +131,11 @@ export function summarize(reflections, progress, { bins = WIND_BINS } = {}) {
     else if (notes.issue && del.issue) trash.push({ name, field: 'issue', reflId: r.id, text: ov.issue ?? notes.issue, dateMs });
     if (notes.discovery) {
       const speed = r.wind?.speed ?? null;
-      if (del.discovery) trash.push({ name, field: 'discovery', reflId: r.id, text: ov.discovery ?? notes.discovery, dateMs, speed });
+      const dtext = ov.discovery ?? notes.discovery;
+      if (del.discovery) trash.push({ name, field: 'discovery', reflId: r.id, text: dtext, dateMs, speed });
       else {
-        const bk = windBinKey(speed);
-        (bucket.discoveriesByBin[bk] ||= []).push({ reflId: r.id, text: ov.discovery ?? notes.discovery, dateMs, speed, comments: cm.discovery || [] });
+        const bk = classifyWindBand(dtext, speed);
+        (bucket.discoveriesByBin[bk] ||= []).push({ reflId: r.id, text: dtext, dateMs, speed, comments: cm.discovery || [] });
       }
     }
     // 課題追加を累計(ステージ無関係)。課題を持つ反省のみ対象。削除済みは数えない。
