@@ -14,7 +14,8 @@ import { loadRoadmap } from './roadmapstore.js';
 import { stepperHtml } from './roadmap.js';
 import { SOURCES } from './references/todaiyacht.js';
 import { WIND_BANDS, classifyWindBand } from './windband.js';
-import { loadWindKnowledge } from './windknowledgestore.js';
+import { loadWindKnowledge, saveWindKnowledge } from './windknowledgestore.js';
+import { generateWindKnowledge } from './windknowledge.js';
 
 const $ = (id) => document.getElementById(id);
 const STAGES = [{ v: 0, label: '未着手' }, { v: 1, label: '取組中' }, { v: 2, label: '解決' }];
@@ -536,6 +537,46 @@ export function createProgress({
     });
   }
 
+  let kbWired = false;
+  function wireKnowledgeControls() {
+    if (kbWired) return;
+    const rebuildBtn = $('progress-kb-rebuild');
+    const viewBtn = $('progress-kb-view');
+    const status = $('progress-kb-status');
+    const modal = $('kb-modal');
+    const body = $('kb-modal-body');
+    const dl = $('kb-modal-download');
+    if (!rebuildBtn) return;
+    kbWired = true;
+
+    rebuildBtn.addEventListener('click', async () => {
+      rebuildBtn.disabled = true;
+      status.textContent = '風速帯ノートを分析中…';
+      try {
+        const res = await generateWindKnowledge({
+          reflections, progress, sources: SOURCES, geminiGenerate, nowMs: Date.now(),
+        });
+        saveWindKnowledge(res);
+        const p = res.stats.perBand;
+        status.textContent = `更新しました(微風${p.bihuu}・中風${p.chuu}・強風${p.kyou}・爆風${p.baku} 件)`;
+      } catch (e) {
+        console.error('風速帯ノートの再構築に失敗', e);
+        status.textContent = '再構築に失敗しました(通信を確認)';
+      } finally {
+        rebuildBtn.disabled = false;
+      }
+    });
+
+    viewBtn.addEventListener('click', () => {
+      const cached = loadWindKnowledge();
+      if (!cached) { status.textContent = 'まだノートがありません。先に再構築してください'; return; }
+      body.textContent = cached.md;
+      dl.href = URL.createObjectURL(new Blob([cached.md], { type: 'text/markdown' }));
+      modal.hidden = false;
+    });
+    $('kb-modal-close').addEventListener('click', () => { modal.hidden = true; });
+  }
+
   async function render() {
     // 1st pass: 軽量オーバーレイ(進捗・ロードマップ)を先に取得し、骨組みを即描画。
     // 保存済み全練習の読込(重い)を待たずにロードマップ枠が見えるようにする。
@@ -551,6 +592,7 @@ export function createProgress({
     entriesLoading = false;
     wireHideComments();
     wireAiControls();
+    wireKnowledgeControls();
     renderNav();
     renderBody();
   }
