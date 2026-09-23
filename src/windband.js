@@ -25,3 +25,37 @@ export function classifyWindBand(text, speed) {
   for (const b of WIND_BANDS) if (n < b.max) return b.key;
   return WIND_BANDS[WIND_BANDS.length - 1].key;
 }
+
+const KEYS = WIND_BANDS.map((b) => b.key);
+
+export function adjacentBands(key) {
+  const i = KEYS.indexOf(key);
+  if (i === -1) return [];
+  const out = [];
+  if (i - 1 >= 0) out.push(KEYS[i - 1]);
+  if (i + 1 < KEYS.length) out.push(KEYS[i + 1]);
+  return out;
+}
+
+export function bandLabel(key) {
+  return WIND_BANDS.find((b) => b.key === key)?.label ?? key;
+}
+
+// 同帯優先→不足で隣接→なお不足で全帯。general は常に対象。元の順序を保つ。
+export function filterByBand(candidates, targetBand, { min = 2, getBand } = {}) {
+  const general = candidates.filter((c) => getBand(c) === 'general');
+  const banded = candidates.filter((c) => getBand(c) !== 'general');
+  let pick = banded.filter((c) => getBand(c) === targetBand);
+  if (pick.length < min) {
+    const adj = new Set(adjacentBands(targetBand));
+    pick = banded.filter((c) => getBand(c) === targetBand || adj.has(getBand(c)));
+  }
+  if (pick.length < min) pick = banded;
+  const keep = new Set([...general, ...pick]);
+  return candidates.filter((c) => keep.has(c));
+}
+
+export function bandSectionFromDigest(bandBullets, bandKey) {
+  const arr = bandBullets && bandBullets[bandKey];
+  return Array.isArray(arr) ? arr : [];
+}
