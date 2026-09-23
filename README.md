@@ -42,28 +42,72 @@ SAILVIZ_WRITE_TOKEN=test npm start
 - `DATA_DIR`（デフォルト `./data`）：プロジェクトデータ保存先
 - `SAILVIZ_WRITE_TOKEN`：書き込み認証用パスワード（未設定で書き込み禁止）
 
-### デプロイ
+### デプロイ（Fly.io）
+
+本番は [Fly.io](https://fly.io/) にデプロイします。設定は `fly.toml`（app `sailviz-sit`、東京リージョン `nrt`）に定義済み。Dockerfile からイメージがビルドされます。
+
+#### 1. Fly 実行環境の構築（初回のみ）
+
+`fly deploy` は Fly CLI（`flyctl`）とログイン済みアカウント、そして対象 app・ボリューム・Secret が揃っていないとエラーになります。初回は以下を順に実行します。
+
 ```bash
-docker build -t sailviz .
-docker run -it -p 8000:8000 \
-  -e NODE_ENV=production \
-  -e SAILVIZ_WRITE_TOKEN=<secret-password> \
-  -v /persistent/data:/data \
-  sailviz
+# (1) Fly CLI (flyctl) をインストール
+#   macOS (Homebrew)
+brew install flyctl
+#   macOS/Linux (スクリプト)
+#   curl -L https://fly.io/install.sh | sh
+#   Windows (PowerShell)
+#   pwsh -Command "iwr https://fly.io/install.sh -useb | iex"
+
+# (2) バージョン確認（コマンドが通ることの確認）
+fly version
+
+# (3) ログイン（ブラウザが開く。無ければ表示URLを開く）
+fly auth login
+
+# (4) app の用意
+#   このリポジトリの fly.toml には app = "sailviz-sit" が定義済み。
+#   自分のアカウントに同名 app が無い場合は作成する（既にあれば不要）。
+fly apps list                 # sailviz-sit があるか確認
+fly apps create sailviz-sit   # 無ければ作成（app 名は全 Fly で一意。使用済みなら fly.toml も変更）
+
+# (5) 練習JSON/オーバーレイ用の永続ボリューム（fly.toml の [mounts] source と一致させる）
+fly volumes create sailviz_data --region nrt --size 1 --app sailviz-sit
+
+# (6) 書き込み認証パスワードを Secret として登録（イメージには焼き込まない）
+fly secrets set SAILVIZ_WRITE_TOKEN=<secret-password> --app sailviz-sit
 ```
 
-- `NODE_ENV=production` を設定すると認証 Cookie に `Secure` 属性が付き、HTTPS 前提で安全になります
-- 永続ボリュームを `/data` にマウント
-- `SAILVIZ_WRITE_TOKEN` は秘密管理ツールで設定
-- 本番環境は HTTPS 前提（リバースプロキシ経由）
+#### 2. デプロイ
+
+環境が整ったらリポジトリ直下で：
+```bash
+fly deploy
+```
+デプロイ状況は https://fly.io/apps/sailviz-sit/monitoring で確認できます。公開URLは https://sailviz-sit.fly.dev/ 。
+
+初回にエラーが出る主な原因：
+- `flyctl` 未インストール／未ログイン（→ 手順1の(1)(3)）
+- app が存在しない、または app 名が他ユーザーと重複（→ (4)。重複時は `fly.toml` の `app` を変更）
+- ボリューム `sailviz_data` 未作成（`[mounts]` があるとマシン起動に必須。→ (5)）
+
+補足：
+- `NODE_ENV=production`・`PORT`・`DATA_DIR` は `fly.toml` の `[env]` で設定済み。認証 Cookie に `Secure` 属性が付き、HTTPS 前提で安全になります
+- HTTPS は `force_https = true` で強制。TLS は Fly が終端します
+- 永続データは `[mounts]` により `/data`（ボリューム `sailviz_data`）にマウント。1台構成で単一書き込み・last-write-wins
+- アクセスが無ければマシンを休止（`auto_stop_machines`）し、次アクセスで自動起動してコスト削減
+- `SAILVIZ_WRITE_TOKEN` は `fly secrets` で管理（未設定だと書き込み禁止）
 
 ### データ移行
-既存のプロジェクトフォルダを新インスタンスに移行：
+既存のプロジェクトフォルダを Fly のボリュームへ移行する場合は、`fly ssh console` でマシンに入り `/data` を取込先に指定します：
 ```bash
+# ローカルで取込先を ./data とする場合（開発環境）
 # 取込先データディレクトリは第2引数で指定（既定は ./data）
 npm run import -- <既存フォルダ> ./data
-# 永続ボリュームへ取り込む場合は第2引数にそのパスを渡す
-npm run import -- <既存フォルダ> /persistent/data
+
+# Fly 上のボリューム(/data)へ取り込む例：
+#   fly ssh console でマシンに入り、対象フォルダを転送してから
+npm run import -- <既存フォルダ> /data
 ```
 
 注：`import` コマンドは `DATA_DIR` 環境変数を見ず、取込先は第2引数で決まります。
