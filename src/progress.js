@@ -567,11 +567,14 @@ export function createProgress({
       }
     });
 
+    let kbUrl = null;
     viewBtn.addEventListener('click', () => {
       const cached = loadWindKnowledge();
       if (!cached) { status.textContent = 'まだノートがありません。先に再構築してください'; return; }
       body.textContent = cached.md;
-      dl.href = URL.createObjectURL(new Blob([cached.md], { type: 'text/markdown' }));
+      if (kbUrl) URL.revokeObjectURL(kbUrl);
+      kbUrl = URL.createObjectURL(new Blob([cached.md], { type: 'text/markdown' }));
+      dl.href = kbUrl;
       modal.hidden = false;
     });
     $('kb-modal-close').addEventListener('click', () => { modal.hidden = true; });
