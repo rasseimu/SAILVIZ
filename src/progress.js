@@ -8,6 +8,8 @@ import {
 } from './progressstore.js';
 import { renderChart } from './chartview.js';
 import { generateAiComments } from './aicomment.js';
+import { generatePeerComments } from './peerlearning.js';
+import { geminiGenerate } from './gemini.js';
 import { loadRoadmap } from './roadmapstore.js';
 import { stepperHtml } from './roadmap.js';
 import { SOURCES } from './references/todaiyacht.js';
@@ -478,9 +480,29 @@ export function createProgress({
       } else {
         items = allItems;
       }
-      btn.disabled = true; status.textContent = '生成中…(参考文献の照合には少し時間がかかります)';
+      // ピア学習の対象は未解決の goal/issue のみ。既存の対象集合(items)と同じカードに限定する。
+      const targetKeys = new Set(items.map((x) => `${x.reflId}:${x.field}`));
+      const peerItems = [];
+      for (const [, b] of buckets) {
+        for (const g of b.goals) {
+          if (!g.done && targetKeys.has(`${g.reflId}:goal`)) peerItems.push({ reflId: g.reflId, field: 'goal', text: g.text });
+        }
+        for (const it of b.issues) {
+          if (it.stage !== 2 && targetKeys.has(`${it.reflId}:issue`)) peerItems.push({ reflId: it.reflId, field: 'issue', text: it.text });
+        }
+      }
+
+      btn.disabled = true;
+      status.textContent = '生成中…(参考文献とチームの解決事例を照合します)';
       try {
-        const suggestions = await generateAiComments({ items, sources: SOURCES, loadFileBase64 });
+        // 参考文献系統(PDF)とピア学習系統(チーム履歴)を並走。片方の失敗はもう片方を止めない。
+        const [refSug, peerSug] = await Promise.all([
+          generateAiComments({ items, sources: SOURCES, loadFileBase64 })
+            .catch((e) => { console.error('参考文献コメント生成に失敗', e); return []; }),
+          generatePeerComments({ items: peerItems, reflections, progress, geminiGenerate })
+            .catch((e) => { console.error('ピアコメント生成に失敗', e); return []; }),
+        ]);
+        const suggestions = [...refSug, ...peerSug];
         let added = 0;
         const now = Date.now();
         for (const s of suggestions) {

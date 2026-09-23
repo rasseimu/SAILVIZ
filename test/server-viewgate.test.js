@@ -70,3 +70,34 @@ test('edit-mode write token also grants viewing', async () => {
   });
   assert.equal(projects.status, 200);
 });
+
+// 書き込みは閲覧ログインで許可する(編集モード廃止)。未ログインは拒否。
+test('write is blocked without login', async () => {
+  const r = await fetch(`${base}/api/overlays/progress`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ r1: { issueStage: 2 } }),
+  });
+  assert.equal(r.status, 401);
+});
+
+test('login cookie grants write access', async () => {
+  const login = await fetch(`${base}/api/login`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ user: VIEW_USER, password: VIEW_PASSWORD }),
+  });
+  const cookie = (login.headers.get('set-cookie') || '').split(';')[0];
+  const put = await fetch(`${base}/api/overlays/progress`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({ r1: { issueStage: 2 } }),
+  });
+  assert.equal(put.status, 200);
+});
+
+test('edit-mode write token still grants write access', async () => {
+  const put = await fetch(`${base}/api/overlays/roadmap`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+    body: JSON.stringify({}),
+  });
+  assert.equal(put.status, 200);
+});
