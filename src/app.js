@@ -914,12 +914,27 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAccou
 const viewLoginDialog = $('viewLoginDialog');
 const viewLoginForm = $('viewLoginForm');
 const viewLoginUser = $('viewLoginUser');
+const viewLoginUserList = $('viewLoginUserList');
 const viewLoginPassword = $('viewLoginPassword');
 const viewLoginError = $('viewLoginError');
 const contactDialog = $('contactDialog');
+// セッションから候補ユーザー名を取得し datalist に反映(選択＋入力絞り込み用)。
+// 失敗時は候補なし(手入力は従来どおり可能)。DOM API で組み立て、値は自動エスケープ。
+async function populateUserOptions() {
+  try {
+    const s = await store.session();
+    const users = Array.isArray(s.users) ? s.users : [];
+    viewLoginUserList.replaceChildren(...users.map((u) => {
+      const o = document.createElement('option');
+      o.value = u;
+      return o;
+    }));
+  } catch { /* 候補取得失敗は無視 */ }
+}
 function openViewLogin() {
   viewLoginError.hidden = true;
   viewLoginForm.reset();
+  populateUserOptions();
   viewLoginDialog.showModal();
   viewLoginUser.focus();
 }

@@ -168,7 +168,8 @@
   <dialog id="viewLoginDialog" class="lp-dialog">
     <form method="dialog" id="viewLoginForm">
       <h3>ログイン</h3>
-      <label>ユーザー名<input id="viewLoginUser" type="text" autocomplete="username" required /></label>
+      <label>ユーザー名<input id="viewLoginUser" type="text" autocomplete="username" list="viewLoginUserList" required /></label>
+      <datalist id="viewLoginUserList"></datalist>
       <label>パスワード<input id="viewLoginPassword" type="password" autocomplete="current-password" required /></label>
       <p id="viewLoginError" class="error" hidden>ユーザー名またはパスワードが違います</p>
       <menu>
