@@ -3,6 +3,7 @@
 // 数値やコツを引用した詳しいコメントを生成。純ロジック(プロンプト生成・レスポンス検証)は
 // API 呼び出しから分離してテスト可能にする。
 import { geminiGenerate, filePart } from './gemini.js';
+import { filterByBand, detectBandWord, bandSectionFromDigest } from './windband.js';
 
 const FIELDS = new Set(['goal', 'issue', 'discovery']);
 
@@ -54,8 +55,12 @@ export function parseScreen(rawText, sources) {
 // --- 根拠付け(該当PDFを inline 直送。1反省=複数PDFをまとめて渡し詳しいコメント) ---
 
 // item: {field, text}、sources: [{id, title}](添付資料の順に対応)。
-export function buildGroundPrompt(item, sources) {
+// bandBullets: string[] — 風速帯ノート(非空なら技術ノートブロックを追加)。
+export function buildGroundPrompt(item, sources, bandBullets = []) {
   const srcLines = sources.map((s) => `- id=${s.id} | ${s.title}`).join('\n');
+  const noteBlock = (bandBullets && bandBullets.length)
+    ? ['', '# 風速帯の技術ノート(該当すれば引用してよい。憶測はしない)', ...bandBullets.map((b) => `- ${b}`)].join('\n')
+    : '';
   const system = [
     'あなたは経験豊富なセーリングコーチです。添付した参考文献(PDF・テキスト)の内容だけを根拠に、',
     '対象の反省へ具体的で実践的な助言コメントを日本語で書きます。資料内の要点・数値・コツを',
@@ -65,6 +70,7 @@ export function buildGroundPrompt(item, sources) {
   const user = [
     '# 対象の反省',
     `field=${item.field} text=${JSON.stringify(item.text)}`,
+    noteBlock,
     '',
     '# 添付資料のソース(id | タイトル) — 添付した順に対応',
     srcLines,
@@ -90,14 +96,17 @@ export function parseGroundObject(rawText) {
   return { comment, usedSourceIds };
 }
 
-// items: [{reflId, field, text}]、sources: SOURCES、loadFileBase64: (path)=>Promise<base64>。
+// items: [{reflId, field, text, band?}]、sources: SOURCES、loadFileBase64: (path)=>Promise<base64>。
+// digest: bandBullets オブジェクト({bihuu:[...], chuu:[...], ...})。省略時は帯ノート注入なし。
 // 戻り値: [{reflId, field, comment, url, refs:[{link,title}]}]。関連なし/失敗は含めない。
 export async function generateAiComments({
-  items, sources, loadFileBase64,
+  items, sources, loadFileBase64, digest = null,
   model = 'gemini-3.6-flash', fetchImpl = globalThis.fetch, maxSourcesPerItem = 3,
 }) {
   if (!items || items.length === 0) return [];
   const byId = new Map(sources.map((s) => [s.id, s]));
+  // ソースの帯タグ(タイトル+要約の語。語なしは general)。
+  const bandOf = new Map(sources.map((s) => [s.id, detectBandWord(`${s.title || ''} ${s.summary || ''}`) || 'general']));
 
   // (1) スクリーニング: 反省ごとに関連ソース(複数可)を選ぶ
   const sc = buildScreenPrompt(items, sources);
@@ -108,29 +117,35 @@ export async function generateAiComments({
   const matches = parseScreen(screenText, sources);
   if (matches.length === 0) return [];
 
-  // 反省(reflId×field)ごとに関連ソースをまとめる(最大 maxSourcesPerItem)
+  // 反省(reflId×field)ごとに関連ソースをまとめる
   const textOf = new Map(items.map((it) => [`${it.reflId} ${it.field}`, it.text]));
-  const groups = new Map(); // key -> { reflId, field, text, ids: [] }
+  const bandOfItem = new Map(items.map((it) => [`${it.reflId} ${it.field}`, it.band || 'unknown']));
+  const groups = new Map(); // key -> { reflId, field, text, band, ids: [] }
   for (const m of matches) {
     const key = `${m.reflId} ${m.field}`;
     const text = textOf.get(key);
     if (text == null) continue;
-    if (!groups.has(key)) groups.set(key, { reflId: m.reflId, field: m.field, text, ids: [] });
-    const g = groups.get(key);
-    if (!g.ids.includes(m.sourceId) && g.ids.length < maxSourcesPerItem) g.ids.push(m.sourceId);
+    if (!groups.has(key)) groups.set(key, { reflId: m.reflId, field: m.field, text, band: bandOfItem.get(key), ids: [] });
+    groups.get(key).ids.push(m.sourceId);
   }
 
   // (2) 根拠付け: 反省ごとに、関連資料群をまとめて inline 直送
   const out = [];
   for (const g of groups.values()) {
+    // 対象帯へソースを絞る(fallback付き)。general は常に対象。最大 maxSourcesPerItem。
+    const filtered = filterByBand(g.ids, g.band, { min: 1, getBand: (id) => bandOf.get(id) || 'general' });
+    const ids = [];
+    for (const id of filtered) { if (!ids.includes(id) && ids.length < maxSourcesPerItem) ids.push(id); }
+
     const loaded = []; // { source, base64 }
-    for (const id of g.ids) {
+    for (const id of ids) {
       const source = byId.get(id);
       if (!source) continue;
       try { loaded.push({ source, base64: await loadFileBase64(source.file) }); } catch { /* skip */ }
     }
     if (loaded.length === 0) continue;
-    const gp = buildGroundPrompt(g, loaded.map((x) => ({ id: x.source.id, title: x.source.title })));
+    const bandBullets = bandSectionFromDigest(digest, g.band);
+    const gp = buildGroundPrompt(g, loaded.map((x) => ({ id: x.source.id, title: x.source.title })), bandBullets);
     let res;
     try {
       const text = await geminiGenerate({

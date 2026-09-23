@@ -4,6 +4,7 @@ import {
   buildScreenPrompt, parseScreen, buildGroundPrompt, parseGroundObject,
   generateAiComments,
 } from '../src/aicomment.js';
+import { filterByBand } from '../src/windband.js'; // 参照確認用(未使用でも可)
 
 const sources = [
   { id: 'ch19', title: 'スタート', summary: 'スタート戦術', link: 'https://x/19.html', file: 'p/19.pdf', mime: 'application/pdf' },
@@ -146,4 +147,64 @@ test('generateAiComments: 全PDF読込失敗の反省はスキップ(全体は�
     sources, loadFileBase64: async () => { throw new Error('PDFなし'); }, fetchImpl,
   });
   assert.deepEqual(out, []);
+});
+
+test('buildGroundPrompt: bandBullets があれば技術ノートを本文に含める', () => {
+  const { user } = buildGroundPrompt(
+    { field: 'issue', text: '微風で遅い' },
+    [{ id: 'ch11', title: '微風のランニング' }],
+    ['微風はカニンガムを緩める 〔部内実績〕'],
+  );
+  assert.match(user, /風速帯の技術ノート/);
+  assert.match(user, /カニンガムを緩める/);
+});
+
+test('buildGroundPrompt: bandBullets 空なら技術ノートを付けない(後方互換)', () => {
+  const { user } = buildGroundPrompt({ field: 'issue', text: 'x' }, [{ id: 'ch1', title: 'a' }], []);
+  assert.doesNotMatch(user, /風速帯の技術ノート/);
+});
+
+test('generateAiComments: 対象帯のソースへ絞り、帯ノートを注入する', async () => {
+  const sources = [
+    { id: 'ch11', title: '微風のランニング', summary: '微風', file: 'p/11.pdf', mime: 'application/pdf' },
+    { id: 'ch21', title: '強風のクローズ', summary: '強風', file: 'p/21.pdf', mime: 'application/pdf' },
+  ];
+  // 対象は微風(bihuu)。スクリーニングが両ソースを拾っても、帯フィルタで ch11 側に寄せる。
+  let groundUser = '';
+  const responses = [
+    JSON.stringify([{ reflId: 'r1', field: 'issue', sourceId: 'ch11' }, { reflId: 'r1', field: 'issue', sourceId: 'ch21' }]),
+    JSON.stringify({ comment: '微風の助言。', usedSourceIds: ['ch11'] }),
+  ];
+  let i = 0;
+  const fetchStub = async (_url, opts) => {
+    const body = JSON.parse(opts.body);
+    if (i === 1) groundUser = body.parts.map((p) => p.text || '').join('');
+    const text = responses[i++];
+    return { ok: true, json: async () => ({ text }) };
+  };
+  const out = await generateAiComments({
+    items: [{ reflId: 'r1', field: 'issue', text: '微風で遅い', band: 'bihuu' }],
+    sources, loadFileBase64: async () => 'BASE64',
+    digest: { bihuu: ['微風はカニンガムを緩める 〔部内実績〕'], chuu: [], kyou: [], baku: [] },
+    fetchImpl: fetchStub,
+  });
+  assert.equal(out.length, 1);
+  assert.match(groundUser, /風速帯の技術ノート/);
+  assert.match(groundUser, /カニンガムを緩める/);
+});
+
+test('generateAiComments: digest/band 不在でも従来通り動く(回帰)', async () => {
+  const sources = [{ id: 'ch11', title: '微風のランニング', summary: '微風', file: 'p/11.pdf', mime: 'application/pdf' }];
+  const responses = [
+    JSON.stringify([{ reflId: 'r1', field: 'issue', sourceId: 'ch11' }]),
+    JSON.stringify({ comment: '助言。', usedSourceIds: ['ch11'] }),
+  ];
+  let i = 0;
+  const fetchStub = async () => ({ ok: true, json: async () => ({ text: responses[i++] }) });
+  const out = await generateAiComments({
+    items: [{ reflId: 'r1', field: 'issue', text: 'x' }], // band なし
+    sources, loadFileBase64: async () => 'B', fetchImpl: fetchStub, // digest なし
+  });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].comment, '助言。');
 });
