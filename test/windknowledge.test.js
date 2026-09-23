@@ -49,3 +49,52 @@ test('buildKnowledgeInput: 参考文献をタイトル/要約の語で帯タグ�
   assert.ok(refsByBand.kyou.some((r) => r.title === '強風のクローズのコツ'));
   assert.ok(refsByBand.general.some((r) => r.title === 'ラダーの働き'));
 });
+
+// --- Task 6 tests ---
+import { buildKnowledgePrompt, parseKnowledgeResponse } from '../src/windknowledge.js';
+
+test('buildKnowledgePrompt: 帯ラベル・両入力・8点上限指示・出力形式を含む', () => {
+  const input = {
+    teamByBand: {
+      bihuu: { resolved: [{ field: 'issue', text: '微風で走らない', evidence: [{ field: 'discovery', text: 'カニンガムを緩める' }] }], notes: [] },
+      chuu: { resolved: [], notes: [] }, kyou: { resolved: [], notes: [] }, baku: { resolved: [], notes: [] },
+    },
+    refsByBand: { general: [{ title: 'ラダーの働き', summary: '舵' }], bihuu: [{ title: '微風のランニング', summary: '微風' }], chuu: [], kyou: [], baku: [] },
+  };
+  const { system, user } = buildKnowledgePrompt(input);
+  assert.match(system, /コーチ/);
+  assert.match(system, /憶測/);           // 憶測禁止
+  assert.match(user, /微風/);
+  assert.match(user, /カニンガムを緩める/); // チーム証拠
+  assert.match(user, /微風のランニング/);   // 参考文献
+  assert.match(user, /最大8/);             // 8点上限
+  assert.match(user, /bihuu/);             // 帯キーでのJSON出力形式
+});
+
+test('parseKnowledgeResponse: 帯別配列を取り出し8点で切る', () => {
+  const nine = Array.from({ length: 9 }, (_, i) => `点${i}`);
+  const raw = JSON.stringify({ bihuu: nine, chuu: ['a'], kyou: [], baku: ['x'] });
+  const out = parseKnowledgeResponse(raw);
+  assert.equal(out.bihuu.length, 8);   // 9→8
+  assert.deepEqual(out.chuu, ['a']);
+  assert.deepEqual(out.kyou, []);
+  assert.deepEqual(out.baku, ['x']);
+});
+
+test('parseKnowledgeResponse: 欠損帯は空、非文字列は除去', () => {
+  const raw = JSON.stringify({ bihuu: ['ok', 42, null, 'ok2'] }); // chuu/kyou/baku 欠損
+  const out = parseKnowledgeResponse(raw);
+  assert.deepEqual(out.bihuu, ['ok', 'ok2']);
+  assert.deepEqual(out.chuu, []);
+  assert.deepEqual(out.kyou, []);
+  assert.deepEqual(out.baku, []);
+});
+
+test('parseKnowledgeResponse: 非JSONは例外', () => {
+  assert.throws(() => parseKnowledgeResponse('ぜんぜんJSONじゃない'));
+});
+
+test('parseKnowledgeResponse: コードフェンス付きでも解釈', () => {
+  const raw = '```json\n{"bihuu":["a"]}\n```';
+  assert.deepEqual(parseKnowledgeResponse(raw).bihuu, ['a']);
+});
