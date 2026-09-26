@@ -18,9 +18,12 @@
 
 ## 現状(2026-09-26 時点)
 
-- `CLAUDE.md`、`.claude/agents/`、`docs/development/` はいずれも未作成。
 - 構成: バニラ ESM(`src/`、ビルドなし)+ 依存ゼロ Node サーバー(`server/index.js`)。
-- テスト: `npm test`(= `node --test`)で 584 件すべて pass。
+- Task 0〜7: **実装済み**(成果物はすべてコミット済み。作業ツリーは clean)。
+  - `CLAUDE.md`(#39)・4 agent(#40〜#43)・workflow 文書(#44)・`test/agents-config.test.js`(Refs #38)。
+  - テスト: `npm test`(= `node --test`)で 600 件すべて pass(着手前の 584 件 + 設定検証 16 件)。
+  - ダミー資格情報での起動、`http://localhost:8000/` の HTTP 200、`/api/session` が閲覧ゲート有効・未ログイン状態を返すことを確認済み。
+- **実行時確認待ち:** 各 agent が実際に起動し、定義どおりのツールで動作すること(特に web-verifier の Chrome ツール個別列挙)は Task 8 で確認する。
 - 認証の実装上の現状(README ではなくコードを正とする):
   - 書込は `SAILVIZ_WRITE_TOKEN` 未設定なら禁止。
   - 閲覧ゲートは `SAILVIZ_VIEW_USER` / `SAILVIZ_VIEW_PASSWORD` が未設定でも、`server/index.js` 内の既定資格情報で**有効**になる(README の「閲覧は誰でも可」は現状と不一致。既定資格情報の廃止は #35 の対象)。
@@ -37,7 +40,7 @@
 - 認証情報を画面・ログ・スクリーンショット・ドキュメントへ残さない。ローカル起動時は書込・閲覧の資格情報をすべてダミー値で上書きする。
 - レビュー → 修正のループは最大2回。2回修正しても P0/P1 が残る場合はメイン agent へ判断を返す。
 - **worktree は使わない。** フローは逐次実行で、engineer は現在の feature ブランチの作業ツリーで直接作業する(理由は「設計判断」参照)。
-- コミットは子 Issue ごとに1つ(#39〜#44 はそれぞれ別コミット)。Task 7 の設定検証テストは Epic 単位で1コミット(`Refs #38`)。Conventional Commits + 日本語要約(既存履歴に倣う)。
+- コミットは原則、子 Issue 単位(#39〜#44 の初回実装はそれぞれ別コミット)。後続の修正で複数 Issue の成果物をまとめて直す場合は、1コミットに `Refs` を列挙してよい。Task 7 の設定検証テストは Epic 単位(`Refs #38`)。Conventional Commits + 日本語要約(既存履歴に倣う)。
 - Chrome 前提(Task 0 または Task 8 のゲート)を満たせない場合は Task 8 を停止し、#45 と Epic #38 を「未完了・前提条件待ち」として報告する。Chrome 確認を未実施のまま完了扱いにしない。
 
 ## 設計判断
@@ -149,78 +152,81 @@ Task 5・Task 7 で web-verifier のツールを確定するため、最初に�
   - `read_network_requests` — 認証ヘッダ等の資格情報が出力に残るおそれがあるため。
   - `shortcuts_list` / `shortcuts_execute` — 拡張のショートカットによる任意操作のため。
   - `tabs_close` / `switch_browser` / `list_connected_browsers` / `select_browser` — 利用者のタブ・別ブラウザを操作しうるため、検証に不要。
-- web-verifier の `tools` 指定方式: **ツール名の個別列挙**(`mcp__claude-in-chrome__<ツール名>`)。サーバー単位の `mcp__claude-in-chrome__*` は除外ツールまで許可してしまうため使わない。実機での動作確認は Task 8-0 のゲート(`/agents` で認識確認)と 8-2 の実行で行い、失敗した場合はこの節を更新する。
+- web-verifier の `tools` 指定方式: **ツール名の個別列挙**(`mcp__claude-in-chrome__<ツール名>`)。サーバー単位の `mcp__claude-in-chrome__*` は除外ツールまで許可してしまうため使わない。実機での動作確認は Task 8-2 で web-verifier を実際に呼び出して行い、失敗した場合はこの節を更新する。
 
 ### Task 1: #39 CLAUDE.md(共通ルール)
 
-- [ ] プロジェクト概要: GPS・反省・動画・AI コメントの関係、`src/`(フロント)と `server/`(API・静的配信)の構成、`DATA_DIR` への JSON 保存、動画はローカル選択でサーバーに置かないこと。
-- [ ] 認証の現状は README ではなく `server/index.js` の実装を正として書く(閲覧ゲートは既定で有効)。既定資格情報の値は書かない。
-- [ ] 開発コマンド: 全テスト `npm test`、対象テスト `node --test test/xxx.test.js`、上記「ローカル起動」のコマンド(bash と PowerShell)。
-- [ ] 実装ルール: 後方互換性の維持、GPS 推定値を実測値として表示しない、既存のユーザー変更を上書きしない、無関係なリファクタリングをしない、新ロジックに単体テストを追加する、個人情報をテストデータやログへ残さない。
-- [ ] Git・subagent 運用ルール: `git reset --hard`・force push 禁止、未コミット変更を破棄しない、指示なしの commit・push・デプロイ禁止、読み取り専用 agent の明記、worktree を使わない、web-verifier は UI 変更時のみ、ループ上限2回。
-- [ ] subagent を使う/使わない条件を要約し、例外(明示的なフロー検証時・利用者の指定時は全工程を実行)も記載する。詳細は `docs/development/subagent-workflow.md` へリンクする。
-- [ ] 記載したコマンドを実際に実行して動作を確認する。
+- [x] プロジェクト概要: GPS・反省・動画・AI コメントの関係、`src/`(フロント)と `server/`(API・静的配信)の構成、`DATA_DIR` への JSON 保存、動画はローカル選択でサーバーに置かないこと。
+- [x] 認証の現状は README ではなく `server/index.js` の実装を正として書く(閲覧ゲートは既定で有効)。既定資格情報の値は書かない。
+- [x] 開発コマンド: 全テスト `npm test`、対象テスト `node --test test/xxx.test.js`、上記「ローカル起動」のコマンド(bash と PowerShell)。
+- [x] 実装ルール: 後方互換性の維持、GPS 推定値を実測値として表示しない、既存のユーザー変更を上書きしない、無関係なリファクタリングをしない、新ロジックに単体テストを追加する、個人情報をテストデータやログへ残さない。
+- [x] Git・subagent 運用ルール: `git reset --hard`・force push 禁止、未コミット変更を破棄しない、指示なしの commit・push・デプロイ禁止、読み取り専用 agent の明記、worktree を使わない、web-verifier は UI 変更時のみ、ループ上限2回。
+- [x] subagent を使う/使わない条件を要約し、例外(明示的なフロー検証時・利用者の指定時は全工程を実行)も記載する。詳細は `docs/development/subagent-workflow.md` へリンクする。
+- [x] 記載したコマンドを実際に実行して動作を確認する。
 
 ### Task 2: #40 implementation-planner
 
-- [ ] `tools: Read, Grep, Glob`(読み取り専用)。
-- [ ] 出力7項目を固定: 要求の理解 / 現状調査 / 実装方針 / 変更予定ファイル / テスト計画 / ブラウザ確認項目 / リスク・未確定事項。
-- [ ] 不明な仕様は推測で確定せず「未確定事項」へ出す。既存実装との重複確認と UI 変更有無の判定を必須とする。
-- [ ] 出力はメイン agent の承認(工程3)を前提とし、承認前に実装へ進む指示を含めない。
+- [x] `tools: Read, Grep, Glob`(読み取り専用)。
+- [x] 出力7項目を固定: 要求の理解 / 現状調査 / 実装方針 / 変更予定ファイル / テスト計画 / ブラウザ確認項目 / リスク・未確定事項。
+- [x] 不明な仕様は推測で確定せず「未確定事項」へ出す。既存実装との重複確認と UI 変更有無の判定を必須とする。
+- [x] 出力はメイン agent の承認(工程3)を前提とし、承認前に実装へ進む指示を含めない。
 
 ### Task 3: #41 implementation-engineer
 
-- [ ] `tools: Read, Grep, Glob, Edit, Write, Bash`。`isolation` は付けない(D1)。
-- [ ] 入力は元 Issue と承認済み計画。
-- [ ] 出力: 実装内容 / 変更ファイル / 実行したテストと結果 / 未確認事項 / 重点レビュー箇所。UI 変更時は web-verifier 向けに 操作手順と期待結果・画面幅・必要なテストデータ を追加する。
-- [ ] 禁止事項を明記: 無関係なリファクタ、テストを通すためのハードコード、理由のない既存テスト削除、未コミット変更の破棄、`reset --hard`・force push、指示なしの commit・push・デプロイ、本番データ変更、認証情報の埋め込み。
+- [x] `tools: Read, Grep, Glob, Edit, Write, Bash`。`isolation` は付けない(D1)。
+- [x] 入力は元 Issue と承認済み計画。
+- [x] 出力: 実装内容 / 変更ファイル / 実行したテストと結果 / 未確認事項 / 重点レビュー箇所。UI 変更時は web-verifier 向けに 操作手順と期待結果・画面幅・必要なテストデータ を追加する。
+- [x] 禁止事項を明記: 無関係なリファクタ、テストを通すためのハードコード、理由のない既存テスト削除、未コミット変更の破棄、`reset --hard`・force push、指示なしの commit・push・デプロイ、本番データ変更、認証情報の埋め込み。
 
 ### Task 4: #42 code-reviewer
 
-- [ ] `tools: Read, Grep, Glob`(Bash なし、D2)。差分とテスト結果はメイン agent から受け取る。
-- [ ] 重要度 P0〜P3 の定義と確認観点(受け入れ条件との照合、境界値・空データ・GPS 欠損、旧プロジェクト読込、反省・進捗データの互換性、認証回避・個人情報ログ、秘密情報の埋め込み、テストの十分性)。
-- [ ] 各指摘に 重要度 / 要約 / ファイルと行 / 発生条件 / 利用者への影響 / 修正方針 を含める。問題なしの場合も確認範囲と未確認事項を報告。
+- [x] `tools: Read, Grep, Glob`(Bash なし、D2)。差分とテスト結果はメイン agent から受け取る。
+- [x] 重要度 P0〜P3 の定義と確認観点(受け入れ条件との照合、境界値・空データ・GPS 欠損、旧プロジェクト読込、反省・進捗データの互換性、認証回避・個人情報ログ、秘密情報の埋め込み、テストの十分性)。
+- [x] 各指摘に 重要度 / 要約 / ファイルと行 / 発生条件 / 利用者への影響 / 修正方針 を含める。問題なしの場合も確認範囲と未確認事項を報告。
 
 ### Task 5: #43 web-verifier
 
-- [ ] tools は Read と Claude in Chrome の MCP ツールのみ(Edit・Write・Bash なし)。MCP ツールは Task 0 の確認結果に記録したサーバー名・ツール名・指定方式で指定する。
-- [ ] 手順ごとに 期待結果 / 実際の結果 / PASS・FAIL を報告。デスクトップ幅とモバイル幅、コンソールエラーを確認。
-- [ ] 制約: localhost のみ(明示時を除く)、削除・送信など不可逆操作をしない、パスワードや個人情報を画像・ログに残さない。
-- [ ] スクリーンショットはリポジトリ内へ保存しない(保存する場合はリポジトリ外のパスに限定する)。
+- [x] tools は Read と Claude in Chrome の MCP ツールのみ(Edit・Write・Bash なし)。MCP ツールは Task 0 の確認結果に記録したサーバー名・ツール名・指定方式で指定する。
+- [x] 手順ごとに 期待結果 / 実際の結果 / PASS・FAIL を報告。デスクトップ幅とモバイル幅、コンソールエラーを確認。
+- [x] 制約: localhost のみ(明示時を除く)、削除・送信など不可逆操作をしない、パスワードや個人情報を画像・ログに残さない。
+- [x] スクリーンショットはリポジトリ内へ保存しない(保存する場合はリポジトリ外のパスに限定する)。
 
 ### Task 6: #44 docs/development/subagent-workflow.md
 
-- [ ] 標準フロー8工程(上記「標準フロー」)。
-- [ ] 引き継ぎ情報3種(上記「引き継ぎ情報」)と、組み立て責任がメイン agent にあること(D4)。
-- [ ] 重要度の統一定義(P0〜P3)、ループ上限。
-- [ ] 読み取り専用 agent の実行前後に `git status --porcelain` / `git diff` を比較する手順(D3)。
-- [ ] subagent を使わない条件と、その例外: 「明示的な subagent フロー検証、または利用者が subagent 実行を指定した場合は、小規模変更でも全工程を実行する」。
-- [ ] web-verifier を使う条件。
-- [ ] worktree を使わない方針と、将来使う場合に必要な整備(D1)。
-- [ ] 新しい agent を追加・変更したらセッション再起動が必要な場合があること。
-- [ ] `CLAUDE.md` からリンクする。
+- [x] 標準フロー8工程(上記「標準フロー」)。
+- [x] 引き継ぎ情報3種(上記「引き継ぎ情報」)と、組み立て責任がメイン agent にあること(D4)。
+- [x] 重要度の統一定義(P0〜P3)、ループ上限。
+- [x] 読み取り専用 agent の実行前後に `git status --porcelain` / `git diff` を比較する手順(D3)。
+- [x] subagent を使わない条件と、その例外: 「明示的な subagent フロー検証、または利用者が subagent 実行を指定した場合は、小規模変更でも全工程を実行する」。
+- [x] web-verifier を使う条件。
+- [x] worktree を使わない方針と、将来使う場合に必要な整備(D1)。
+- [x] agent の追加・編集は通常自動検出され、認識されない場合に限り再起動すること。
+- [x] `CLAUDE.md` からリンクする。
 
 ### Task 7: 設定の静的検査(`test/agents-config.test.js`)
 
-- [ ] 4 agent の定義ファイルが存在し、frontmatter に `name`・`description`・`tools` を持つ。
-- [ ] `tools` を許可リストと完全一致で検査する:
+- [x] 4 agent の定義ファイルが存在し、frontmatter に `name`・`description`・`tools` を持つ。
+- [x] `tools` を許可リストと完全一致で検査する:
   - planner: `Read, Grep, Glob`
   - engineer: `Read, Grep, Glob, Edit, Write, Bash`
   - reviewer: `Read, Grep, Glob`
   - web-verifier: `Read` + Task 0 で確定した Claude in Chrome の MCP ツール指定のみ(Edit・Write・Bash・NotebookEdit を含まない)
-- [ ] 読み取り専用 agent に `hooks`・`isolation` がない。engineer に `isolation` がない。
-- [ ] 実行時の読み取り専用性は D3 の差分比較で担保し、テストの限界を workflow 文書に記す。
+- [x] 読み取り専用 agent に `hooks`・`isolation` がない。engineer に `isolation` がない。
+- [x] 実行時の読み取り専用性は D3 の差分比較で担保し、テストの限界を workflow 文書に記す。
 
 ### Task 8: #45 E2E 検証
 
 #### 8-0. 新規セッションのゲート(Task 1〜7 完了後)
 
-- [ ] 子 Issue 単位のコミット(#39〜#44 を各1コミット)と、Task 7 のコミットをすべて完了する。
-- [ ] 現在の Claude Code セッションを終了し、通常どおり `claude`(または VS Code 版)で新規セッションを開始する。再起動の目的は新規 `.claude/agents/` の定義を認識させること(セッション開始時に存在しなかった agent は検出されない場合があるため)で、Chrome を有効化するためではない。
-- [ ] `/agents` で4 agent が認識されていることを確認する。
-- [ ] 新規セッションで Chrome ツールが使えることを確認する(ツール名は Task 0 で確定済みのため再調査しない)。見えない場合に限り、`/chrome` または `claude --chrome` をフォールバックとして使う。
+- [x] 子 Issue 単位のコミット(#39〜#44)と、Task 7 のコミットをすべて完了する。
+- [ ] 現在の Claude Code セッションを終了し、通常どおり `claude`(または VS Code 版)で新規セッションを開始する。今回は Task 1 の時点でセッション開始時に `.claude/agents/` ディレクトリが存在しなかったため、一度だけ再起動する(Chrome を有効化するためではない。通常の agent 追加・編集では再起動不要)。
+- [ ] agent の認識は `/agents` では確認しない(現行の `/agents` は一覧ではなく agent ファイルの編集を案内するコマンドのため)。代わりに実際の呼び出しで確認する:
+  - 新規セッションで最初に `implementation-planner` を明示的に呼び出し、起動することを確認する(8-2 の工程2を兼ねる)。
+  - `implementation-engineer`・`code-reviewer`・`web-verifier` は、8-2 での実際の呼び出し成功をもって確認とする。
+  - どれか1つでも起動できなければゲート FAIL とする。
+- [ ] Chrome ツールは web-verifier の呼び出し時に使えることを確認する(ツール名は Task 0 で確定済みのため再調査しない)。見えない場合に限り、`/chrome` または `claude --chrome` をフォールバックとして使う。
 - [ ] 以降の 8-1〜8-3 は、この新規セッションで実施する。
-- [ ] ゲートを満たせない場合は Task 8 を停止し、#45 と Epic #38 を「未完了・前提条件待ち」として報告する。
+- [ ] ゲート FAIL の場合は Task 8 を停止し、#45 と Epic #38 を「未完了・前提条件待ち」として報告する。
 
 #### 8-1. サンプル Issue の作成
 
