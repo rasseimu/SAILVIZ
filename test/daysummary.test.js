@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ok, fail, daySummarySourceKey, gpsQuality, boatStats, boatLabel, computeComparison, computeDaySummary,
+  syncDaySummaryLabels,
 } from '../src/daysummary.js';
 import { circDiffDeg, estimateWindAxisSeries } from '../src/windaxis.js';
 import { isDaySummaryShape } from '../src/daysummaryschema.js';
@@ -307,4 +308,20 @@ test('computeDaySummary の結果は、どの分岐でも isDaySummaryShape を�
     const s = computeDaySummary(tracks, { now: 0 });
     assert.equal(isDaySummaryShape(s), true, JSON.stringify(s).slice(0, 300));
   }
+});
+
+test('syncDaySummaryLabels: 艇名・色だけ現在のトラックに合わせ、数値は変えない', () => {
+  const a = toTrack(path(beatSegments(5, { speed: 3 })), 'a.csv', '#1c72b8');
+  const b = toTrack(path(beatSegments(5, { speed: 2.5 }), { lon0: 139.481 }), 'b.csv', '#e67e22');
+  const s = computeDaySummary([a, b], { now: 0 });
+  assert.equal(syncDaySummaryLabels(s, [a, b]), s); // 変化が無ければ同じオブジェクト
+  const t = syncDaySummaryLabels(s, [{ ...a, name: 'A艇', color: '#000000' }, b]);
+  assert.notEqual(t, s);
+  assert.equal(t.boats[0].name, 'A艇');
+  assert.equal(t.boats[0].color, '#000000');
+  assert.equal(t.boats[0].distanceM, s.boats[0].distanceM);
+  assert.equal(t.comparison.bestUpwind.value.name, 'A艇');
+  assert.equal(t.sourceKey, s.sourceKey);
+  assert.equal(s.boats[0].name, 'a.csv'); // 元のサマリは書き換えない
+  assert.equal(isDaySummaryShape(t), true);
 });

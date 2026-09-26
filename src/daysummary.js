@@ -278,3 +278,30 @@ export function computeDaySummary(tracks, { marks = [], now = Date.now() } = {})
     comparison: list.length >= 2 ? computeComparison(list, windSeriesByTrack) : null,
   };
 }
+
+// 艇名・色を現在のトラックに合わせる(数値と sourceKey は変えない)。
+// sourceKey が一致する=同じ並びのトラックである前提で、index で対応づける。
+// 変わるものが無ければ同じオブジェクトを返す(呼び出し側が === で未保存になったかを判定する)。
+export function syncDaySummaryLabels(ds, tracks) {
+  let changed = false;
+  const relabel = (x) => {
+    const t = tracks[x.index];
+    if (!t) return x;
+    const label = boatLabel(t);
+    if (x.name === label.name && x.color === label.color) return x;
+    changed = true;
+    return { ...x, ...label };
+  };
+  const relabelBest = (e) => {
+    if (!e?.ok) return e;
+    const v = relabel(e.value);
+    return v === e.value ? e : { ...e, value: v };
+  };
+  const boats = ds.boats.map(relabel);
+  const comparison = ds.comparison && {
+    ...ds.comparison,
+    bestUpwind: relabelBest(ds.comparison.bestUpwind),
+    bestDownwind: relabelBest(ds.comparison.bestDownwind),
+  };
+  return changed ? { ...ds, boats, comparison } : ds;
+}
