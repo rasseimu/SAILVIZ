@@ -4,10 +4,12 @@
 // 算出不能を 0 で埋めない(表示側 daysummaryview.js が reason を文言に変える)。
 import { haversineMeters } from './gps.js';
 import { speedAt } from './interpolate.js';
+import { boatMinuteVmg } from './vmgminute.js';
 
 const MOVING_MIN_MPS = 1.5;      // 走行中とみなす速度。computeCog の既定 minSpeedMps と同じ
 const MAX_SPEED_WINDOW = 5;      // 最高速度の移動平均窓(1秒グリッドの点数=秒)
 const GAP_MS = 10_000;           // これを超える記録の空白を欠損とみなす
+const BUCKET_MS = 30_000;        // VMG比較のバケット幅。vmgminute の既定と同じ
 
 export const ok = (value) => ({ ok: true, value });
 export const fail = (reason) => ({ ok: false, reason });
@@ -112,4 +114,66 @@ export function boatStats(points) {
   if (max == null) max = Math.max(...moving); // 5秒に満たない短いトラック
 
   return { distanceM, durationMs, avgSpeedMps: ok(avg), maxSpeedMps: ok(max) };
+}
+
+// サマリに入れる艇名・色。形チェック(isDaySummaryShape)が文字列を要求するので必ず文字列にする。
+export function boatLabel(track) {
+  return { name: String(track.name ?? track.id ?? ''), color: String(track.color ?? '#888') };
+}
+
+function boatRef(tracks, index, vmgMps) {
+  return { index, ...boatLabel(tracks[index]), vmgMps };
+}
+
+// 艇間比較。30秒バケットごとに各艇の(走種, 平均VMG)を取り、
+// - 比較可能時間: 2艇以上がVMGを持つバケット数 × 30秒
+// - VMG最高艇: 同じ走種の艇が2艇以上いたバケットだけで艇ごとに平均し、最大の艇
+//   (他艇がいない時間を含めると不公平になるため)
+export function computeComparison(tracks, windSeriesByTrack) {
+  const byBucket = new Map(); // bucketIndex -> [{ index, pointOfSail, vmg }]
+  let anyWind = false;
+  tracks.forEach((track, index) => {
+    const ws = windSeriesByTrack.get(track) || [];
+    if (!ws.length) return;
+    anyWind = true;
+    let mv;
+    try { mv = boatMinuteVmg(track, ws, { bucketMs: BUCKET_MS }); } catch { return; }
+    for (const [bi, rec] of mv) {
+      let list = byBucket.get(bi);
+      if (!list) { list = []; byBucket.set(bi, list); }
+      list.push({ index, pointOfSail: rec.pointOfSail, vmg: rec.vmg });
+    }
+  });
+  if (!anyWind) {
+    const w = fail('wind-unavailable');
+    return { comparableMs: w, bestUpwind: w, bestDownwind: w };
+  }
+
+  let comparable = 0;
+  const acc = { upwind: new Map(), downwind: new Map() }; // index -> { sum, n }
+  for (const list of byBucket.values()) {
+    if (list.length >= 2) comparable++;
+    for (const pos of ['upwind', 'downwind']) {
+      const same = list.filter((r) => r.pointOfSail === pos);
+      if (same.length < 2) continue;
+      for (const r of same) {
+        const a = acc[pos].get(r.index) ?? { sum: 0, n: 0 };
+        a.sum += r.vmg; a.n++;
+        acc[pos].set(r.index, a);
+      }
+    }
+  }
+  const best = (pos) => {
+    let top = null;
+    for (const [index, a] of acc[pos]) {
+      const v = a.sum / a.n;
+      if (!top || v > top.vmg) top = { index, vmg: v };
+    }
+    return top ? ok(boatRef(tracks, top.index, top.vmg)) : fail('no-overlap');
+  };
+  return {
+    comparableMs: comparable ? ok(comparable * BUCKET_MS) : fail('no-overlap'),
+    bestUpwind: best('upwind'),
+    bestDownwind: best('downwind'),
+  };
 }

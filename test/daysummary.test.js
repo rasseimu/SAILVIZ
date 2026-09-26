@@ -2,9 +2,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ok, fail, daySummarySourceKey, gpsQuality, boatStats,
+  ok, fail, daySummarySourceKey, gpsQuality, boatStats, boatLabel, computeComparison,
 } from '../src/daysummary.js';
-import { circDiffDeg } from '../src/windaxis.js';
+import { circDiffDeg, estimateWindAxisSeries } from '../src/windaxis.js';
 
 const T0 = Date.UTC(2026, 7, 23, 4, 0, 0); // 2026-08-23 13:00 JST
 
@@ -154,4 +154,47 @@ test('boatStats: 1点だけなら速度は gps-poor、ずっと停船なら not-
   const still = boatStats(path([{ deg: 0, sec: 60, speed: 0 }]));
   assert.deepEqual(still.avgSpeedMps, fail('not-moving'));
   assert.deepEqual(still.maxSpeedMps, fail('not-moving'));
+});
+
+function windMap(tracks) {
+  return new Map(tracks.map((t) => [t, estimateWindAxisSeries(t, {})]));
+}
+
+test('computeComparison: 並走した2艇のうち速い方がクローズVMG最高艇', () => {
+  const a = toTrack(path(beatSegments(5, { speed: 3 })), 'a.csv', '#1c72b8');
+  const b = toTrack(path(beatSegments(5, { speed: 2.5 }), { lon0: 139.481 }), 'b.csv', '#e67e22');
+  const c = computeComparison([a, b], windMap([a, b]));
+  assert.ok(c.comparableMs.ok && c.comparableMs.value > 0);
+  assert.equal(c.comparableMs.value % 30_000, 0);
+  assert.ok(c.bestUpwind.ok);
+  assert.equal(c.bestUpwind.value.index, 0);
+  assert.equal(c.bestUpwind.value.name, 'a.csv');
+  assert.equal(c.bestUpwind.value.color, '#1c72b8');
+  assert.ok(c.bestUpwind.value.vmgMps > 1.5);
+  // 風下を走っていないので、ランニングは比較できない
+  assert.deepEqual(c.bestDownwind, fail('no-overlap'));
+});
+
+test('computeComparison: 時間帯が重ならなければ no-overlap', () => {
+  const a = toTrack(path(beatSegments(5)), 'a.csv');
+  const b = toTrack(path(beatSegments(5), { t0: T0 + 86_400_000 }), 'b.csv');
+  const c = computeComparison([a, b], windMap([a, b]));
+  assert.deepEqual(c.comparableMs, fail('no-overlap'));
+  assert.deepEqual(c.bestUpwind, fail('no-overlap'));
+  assert.deepEqual(c.bestDownwind, fail('no-overlap'));
+});
+
+test('computeComparison: どの艇にも風軸系列がなければ wind-unavailable', () => {
+  const a = toTrack(path([{ deg: 0, sec: 300, speed: 3 }]), 'a.csv');
+  const b = toTrack(path([{ deg: 0, sec: 300, speed: 3 }], { lon0: 139.481 }), 'b.csv');
+  const c = computeComparison([a, b], new Map([[a, []], [b, []]]));
+  assert.deepEqual(c.comparableMs, fail('wind-unavailable'));
+  assert.deepEqual(c.bestUpwind, fail('wind-unavailable'));
+  assert.deepEqual(c.bestDownwind, fail('wind-unavailable'));
+});
+
+test('boatLabel: 名前が無ければ id、色が無ければ #888。常に文字列', () => {
+  assert.deepEqual(boatLabel({ id: 'x.csv', name: 'A艇', color: '#123456' }), { name: 'A艇', color: '#123456' });
+  assert.deepEqual(boatLabel({ id: 'x.csv' }), { name: 'x.csv', color: '#888' });
+  assert.deepEqual(boatLabel({ id: 7 }), { name: '7', color: '#888' });
 });
