@@ -1,7 +1,7 @@
 # 今日の練習サマリ（GPS読込後の自動表示）設計
 
 - 日付: 2026-09-26
-- ステータス: **設計中（ドラフト）** — ブレインストーミング途中の記録。セクション1・2はユーザー確認待ち、セクション3は未着手。
+- ステータス: **設計中（ドラフト）** — セクション1・2はユーザー承認済み、セクション3はユーザー確認待ち。
 - 要件原文: `docs/2026-09-26-practice-summary-feature-prompt.md`
 
 ## 理解の要約
@@ -45,7 +45,7 @@
 
 **C. サーバー保存時に計算**（不採用）: 保存前に表示できず「読込直後に表示」を満たせない。
 
-## セクション1: `daySummary` のデータ構造と算出定義（ユーザー確認待ち）
+## セクション1: `daySummary` のデータ構造と算出定義（承認済み）
 
 ### 算出不能の表し方
 
@@ -117,12 +117,12 @@ daySummary = {
 サマリは GPS 読込時点のスナップショット。後でマークや風軸補正を変えても自動更新しない。
 代わりにモーダルに「再計算」ボタンを1つ付ける。
 
-### 確認待ちの論点
+### 合意済みの論点
 
-- 平均速度を「走っていた時間のみ」で出すこと。
-- VMG 最高艇を「同じ時間帯だけ」で比べること。
+- 平均速度は「走っていた時間のみ」で出す。
+- VMG 最高艇は「同じ時間帯だけ」で比べる。
 
-## セクション2: UI（ユーザー確認待ち）
+## セクション2: UI（承認済み）
 
 ### 表示形式: モーダル
 
@@ -184,7 +184,81 @@ daySummary = {
 - 計算そのものが例外を出した場合は、モーダルを出さずステータスバーに「サマリの計算に失敗しました」と表示する（GPS 読込自体は成功扱い）。
 - 新規練習（`resetState`）では `state.daySummary` も消す。
 
-## 未着手（次回以降）
+## セクション3: モジュール分割・エラー処理・テスト方針（ユーザー確認待ち）
 
-- セクション3: エラー処理・テスト方針（`computeDaySummary` の単体テスト、serialize/サイドカーの契約テスト）
+### モジュール分割
+
+| ファイル | 役割 | 依存 |
+|---|---|---|
+| `src/daysummary.js`（新規） | `computeDaySummary(tracks, { marks, now })` と `daySummarySourceKey(tracks)`。純関数、DOM 非依存 | `windaxis.js`、`windaxisoverride.js`、`vmgminute.js`、`gps.js`、`interpolate.js` |
+| `src/daysummaryview.js`（新規） | `renderDaySummaryHtml(daySummary, { canRecompute, unsaved })` が HTML 文字列を返す純関数と、kt・時刻・方位の整形、`reason` → 文言の対応表 | なし（`escapeHtml` 相当を内包） |
+| `src/windaxis.js`（変更） | `estimateWindAxisSeries` 内のマニューバ検出を `detectManeuvers(track, { marks, opts })` として切り出して公開。`estimateWindAxisSeries` はそれを呼ぶだけにし、出力は変えない | ― |
+| `src/project.js`（変更） | `serializeProject` / `deserializeProject` に `daySummary` を追加（無ければ `null`） | ― |
+| `src/summary.js`（変更） | `practiceSummary` が `project.daySummary` をそのまま `daySummary` として返す（サイドカーに載る） | ― |
+| `src/app.js`（変更） | モーダルの開閉、`loadFiles` / `loadPractice` / `resetState` への配線、トップバーとホームカードのボタン、3つの導線 | 上記 |
+| `index.html` / `styles.css`（変更） | モーダルの骨組み（`#ds-modal`）、トップバーの「📊 サマリ」ボタン、スタイル | ― |
+
+`now` は `computedAt` に入れる時刻で、テストで固定できるよう引数で受ける（既定は `Date.now()`）。
+
+### エラー処理
+
+- **算出不能は例外ではなく値で表す。** 各項目は `{ ok:false, reason }` を返し、`computeDaySummary` 自体は投げない。
+- **艇ごとの風軸推定が例外を出したとき**は、既存の `recomputeWindAxis` と同じく空系列として扱う。その艇の推定値は `wind-unavailable` / `tacks-insufficient` になり、他の艇の結果は残る。
+- **点が2点未満の艇**は距離・速度を算出できないが、`addTrack` が有効点0の艇を弾くため、1点だけのケースに限られる。
+  その場合、距離は 0m、速度とタック・ジャイブは `gps-poor` にする（距離は実際に 0 なので理由ではなく数値でよい）。
+- **想定外の例外**（バグ）は `app.js` 側で try/catch し、ステータスバーに「サマリの計算に失敗しました」と出す。GPS 読込は成功扱いにする。
+- **読み込んだ `daySummary` の形が壊れている**（`version` 不一致や必須フィールド欠落）場合は `deserializeProject` で `null` に落とし、
+  次の `loadPractice` で黙って再計算する。サイドカー側で壊れていたらホームカードのボタンを出さない。
+- **HTML 注入**: 艇名（CSV のファイル名由来）は `renderDaySummaryHtml` 内で必ずエスケープする。
+
+### テスト方針（TDD、`node --test`）
+
+新規 `test/daysummary.test.js`（計算）:
+
+- 合成トラック（一定方位の直線、既知の距離・時間）で、距離・記録時間・平均速度・最高速度が期待値になる。
+- 停船区間（速度 < 1.5 m/s）を含めても平均速度が走行区間の値のまま変わらない。
+- 1点だけのスパイクがあっても、5秒移動平均で最高速度が引っ張られない。
+- ジグザグ（既知の回数のタック）を持つ合成トラックで、タック回数と推定風軸（二等分線方向）が期待範囲に入る。
+- タックが1回以下なら `windAxis` と `tacks` が `{ ok:false, reason:'tacks-insufficient' }` になり、数値 0 が入らない。
+- GPS品質: 記録間隔・欠損率・精度の境界値ごとに good / caution / poor が切り替わり、練習全体は最悪の艇に合わせる。
+- 1艇なら `comparison === null`。
+- 2艇で時間帯が重ならない場合、`comparison.bestUpwind` などが `no-overlap` になる。
+- 2艇が同じ時間帯に並走し、片方が速い合成データで、速い方がクローズ VMG 最高艇になる。
+- `daySummarySourceKey`: 点数や開始・終了が変わるとキーが変わり、同じ入力なら同じキーになる。
+
+新規 `test/daysummaryview.test.js`（表示）:
+
+- 推定値の見出しに「推定」が含まれる（推定風軸・タック（推定）・ジャイブ（推定））。
+- `ok:false` の項目では理由の文言が出て、その位置に数値が出ない。
+- `comparison === null` のとき艇間比較セクションと「艇ごとに比較する」ボタンが出ない。
+- 艇名に `<script>` を含めてもエスケープされる。
+- `unsaved: true` のときだけ保存案内が出る。`canRecompute: false` のとき「再計算」ボタンが出ない。
+
+既存テストへの追加:
+
+- `test/windaxis.test.js`: `detectManeuvers` を切り出した後も `estimateWindAxisSeries` の既存テストがそのまま通る（出力不変の確認）。
+- `test/project.test.js`: `daySummary` が serialize → deserialize で往復し、欠落・壊れた形なら `null` になる。
+- `test/summary.test.js`: `practiceSummary` が `daySummary` をそのまま返し、無ければ `null`。
+- `test/server-storage.test.js`: `writeProject` 後のサイドカーに `daySummary` が載る（「保存後に同じサマリを再表示」の担保）。
+- `test/html-ids.test.js`: 追加した id が重複しない（既存のテストがそのまま守る）。
+
+実データでの確認（手動、受け入れ条件の「3秒以内」）:
+
+- `demo-data/sailviz-20260823-1321.sailviz.json` の3艇で `computeDaySummary` の所要時間を計測し、結果を実装計画の検証ステップに残す。
+- ブラウザで `sample-data/Location0807.csv` などを1本だけ読んだ場合と、複数同時に読んだ場合で、自動表示・導線・2回目以降に出ないことを確かめる。
+
+### 受け入れ条件との対応
+
+| 受け入れ条件 | 担保するもの |
+|---|---|
+| GPSが1艇でもサマリを表示できる | daysummary.test（1艇）、手動確認 |
+| GPS読込完了後、3秒以内に表示される | 同期計算＋実データ計測（実測約30ms） |
+| 2艇以上の場合のみ艇間比較を表示する | daysummary.test（`comparison === null`）、daysummaryview.test |
+| 推定値には「推定」と表示される | daysummaryview.test |
+| 算出不能時に `0` ではなく理由を表示する | `Est` 型＋daysummary.test＋daysummaryview.test |
+| 保存後に同じサマリを再表示できる | project.test、summary.test、server-storage.test、表示が `daySummary` だけに依存する設計 |
+| サマリ計算ロジックに単体テストがある | daysummary.test |
+
+## 次のステップ
+
 - 仕様書の確定 → ユーザーレビュー → writing-plans で実装計画
