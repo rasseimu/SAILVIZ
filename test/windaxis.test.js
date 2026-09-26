@@ -5,7 +5,7 @@ import {
   segmentLegs, classifyManeuver, estimateWindFromManeuver, learnPolarAngles,
   assignLegKinds, fillLegEstimates, rejectMarkRoundings, rejectMinorTurns,
   foldAnchorsToHemisphere, rejectAnchorOutliers, smoothWindSeries,
-  preferCloseHauledAnchors, estimateWindAxisSeries, windDirAt,
+  preferCloseHauledAnchors, estimateWindAxisSeries, windDirAt, detectManeuvers,
 } from '../src/windaxis.js';
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -348,6 +348,24 @@ test('estimateWindAxisSeries: ビートから風向≈0°(北)を復元', () => 
   // ノイズ低減のためレグ充填は出力しない（アンカーのみ）。leg由来点が無いこと。
   const legPoint = series.find((p) => p.source === 'leg');
   assert.ok(!legPoint, `leg estimates should be dropped; sources=${JSON.stringify([...new Set(series.map(p=>p.source))])}`);
+});
+
+test('detectManeuvers: 2タックのビートから tack を2つ返す', () => {
+  const points = beatWithTacks(1_787_000_000_000);
+  const ms = detectManeuvers({ points }, {
+    marks: [],
+    opts: { minLegSec: 5, settleSec: 4, windowMs: 1000, minSpeedMps: 1.5 },
+  });
+  assert.deepEqual(ms.map((m) => m.type), ['tack', 'tack']);
+});
+
+test('detectManeuvers: マーク近傍のマニューバは除外する', () => {
+  const points = beatWithTacks(1_787_000_000_000);
+  const opts = { minLegSec: 5, settleSec: 4, windowMs: 1000, minSpeedMps: 1.5 };
+  const all = detectManeuvers({ points }, { marks: [], opts });
+  const mark = { lat: all[0].lat, lon: all[0].lon };
+  const kept = detectManeuvers({ points }, { marks: [mark], opts });
+  assert.equal(kept.length, all.length - 1);
 });
 
 test('windDirAt: 2点間を円周補間する(北またぎ)', () => {
