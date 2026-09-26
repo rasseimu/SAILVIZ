@@ -14,7 +14,7 @@
 
 ## 決定事項（ブレインストーミングでの合意）
 
-1. **サマリの保存方式**: 計算結果を保存する。練習JSONと要約サイドカーの両方に持たせ、
+1. **サマリの保存方式**: 計算結果を保存する。練習JSONに持たせ、一覧（`/api/summaries`）にも載せる。
    サマリの存在を「表示済み」の印として使う。アルゴリズムが後で変わっても当時の数値が残る。
 2. **「艇ごとに比較する」の遷移先**: 軌跡画面を開き、既存の 🏆VMG ネオントグルを自動で ON にする
    （占有率表も出る）。新しい画面は作らない。1艇のときはボタンを出さない。
@@ -31,15 +31,17 @@
 
 ## アプローチ（採用: A）
 
-**A. 練習JSONに `daySummary` を持たせ、サイドカーにも写す（採用）**
+**A. 練習JSONに `daySummary` を持たせ、一覧APIにも載せる（採用）**
 
 - 計算は純関数 `src/daysummary.js` の `computeDaySummary(tracks, { marks })` に集約する。
 - 結果に指紋 `sourceKey`（各トラックの id・点数・開始・終了）を含める。
 - GPS読込後、`state.daySummary` が無いか `sourceKey` が現トラックと不一致なら、再計算してモーダルを自動表示する。
   一致すれば何も出さない。
-- `serializeProject` / `deserializeProject` に `daySummary` を追加する。サーバー側 `practiceSummary` がそれをサイドカーに写す。
-  ホームカードに「📊 サマリ」ボタンを付け、本体（最大約11MB）を読まずにモーダルを開けるようにする。
-- サーバー側の変更は、サイドカーに1フィールドを写すことだけ。
+- `serializeProject` / `deserializeProject` に `daySummary` を追加する。`practiceSummary` が `daySummary` を返すので、
+  `/api/summaries` の各行に載る。ホームカードに「📊 サマリ」ボタンを付け、クライアントが本体（最大約11MB）を読まずにモーダルを開けるようにする。
+- サーバー側のコード変更はない（`practiceSummary` は `src/summary.js` にありサーバーと共有）。
+- 注: 要約サイドカー（`2026-09-17-summary-sidecar`）は計画のみで未実装。現状 `/api/summaries` は毎回本体から `practiceSummary` を計算している。
+  サイドカーが後で実装されても `practiceSummary` の結果をそのまま保存するので、追加対応は不要（計画作成時に判明し修正）。
 
 **B. サマリ専用ファイルとAPIを新設**（不採用）: 保存の同期・削除時の後始末・APIテストが増えるだけで、A より良くなる点がない。
 
@@ -63,6 +65,7 @@
 | `gps-poor` | GPS精度が不足しています |
 | `no-overlap` | 比較可能な区間がありません |
 | `wind-unavailable` | 推定風軸がないため算出できません |
+| `not-moving` | 走行中のデータがありません |
 
 ### 保存形
 
@@ -77,7 +80,8 @@ daySummary = {
              quality: { level: 'good'|'caution'|'poor', note: '欠損12%・記録間隔2秒' },
              windAxis:  Est<{ deg }>,             // 推定風軸
              windRange: Est<{ minDeg, maxDeg }> }, // 推定風軸の変動幅
-  boats: [{ index, name, color, distanceM, durationMs, avgSpeedMps, maxSpeedMps,
+  boats: [{ index, name, color, distanceM, durationMs,
+            avgSpeedMps: Est<number>, maxSpeedMps: Est<number>,
             tacks: Est<number>, gybes: Est<number>, quality }],
   comparison: null /* 1艇のとき */ | { comparableMs: Est<number>,
              bestUpwind: Est<{ index, name, color, vmgMps }>,
@@ -97,13 +101,14 @@ daySummary = {
   - 注意: それ以外
   - 練習全体は最も悪い艇に合わせる。
   - 「除外点の割合」は、保存済みJSONに除外前の点数が残っていないため指標から外す。
-- **推定風軸**: 全艇の風軸系列（既存の `applyWindAxisOverrides`、手動補正込み）をまとめた円周中央値。
-  検出タックが全艇合計2回未満なら `tacks-insufficient`、品質「不足」なら `gps-poor`。
+- **推定風軸**: 品質が「不足」でない艇の風軸系列（既存の `applyWindAxisOverrides`、手動補正込み）をまとめた円周中央値。
+  そういう艇が1艇もなければ `gps-poor`。それらの艇の検出タック合計が2回未満なら `tacks-insufficient`。
+  （1艇の不調で全体の風軸が消えないよう、計画作成時に「全艇」から具体化した）
 - **推定風軸の変動幅**: 各推定点の中央値からの偏差の 10〜90 パーセンタイル（例「左8°〜右14°」）。
   推定点が3点未満、または推定点の時間幅が10分未満なら `tacks-insufficient`。
 - **走行距離**: 隣り合う点どうしの距離の合計。
 - **平均速度**: 1.5 m/s（≈3kt）以上で走っていたサンプルだけの平均（`computeCog` と同じ閾値）。
-  岸待ち・停船を含めると実態より大幅に低く出るため。
+  岸待ち・停船を含めると実態より大幅に低く出るため。走行中のサンプルが無ければ `not-moving`。
 - **最高速度**: 5秒移動平均の最大値（GPSの一瞬の跳ねを拾わないため）。
 - **タック・ジャイブ回数（推定）**: `estimateWindAxisSeries` 内の検出処理を
   `detectManeuvers(track, { marks })` として切り出して公開し、同じ結果を数える
@@ -142,7 +147,7 @@ daySummary = {
 ├─ 艇ごと ───────────────────────────────────────┤
 │ 艇   距離    記録時間  平均    最高    タック(推定) ジャイブ(推定) │
 │ ● A  18.2km  2:21     6.1kt  9.8kt   24          11           │
-│ ● B  17.5km  2:19     5.9kt  9.2kt   タック数が不足しています   │
+│ ● B  17.5km  2:19     5.9kt  9.2kt   GPS精度が不足しています    │
 ├─ 艇間比較（2艇以上のときだけ） ───────────────────┤
 │ 比較可能だった時間: 1時間42分                            │
 │ クローズVMG最高: ● A（平均 3.4kt）                       │
@@ -177,7 +182,7 @@ daySummary = {
 | GPS読込（`loadFiles` の完了時、GPSが1本以上追加されたとき） | 全トラックで `sourceKey` を作り、`state.daySummary` が無いか不一致なら再計算して**自動表示**。一致なら何もしない |
 | 保存済み練習を開く（`loadPractice`） | 自動表示しない。`daySummary` が無い（機能追加前に保存した）か不一致なら、黙って再計算して `state` に持つだけ（次の保存で永続化） |
 | 軌跡画面のトップバーに「📊 サマリ」ボタンを追加 | いつでも開ける。GPSが無いときは無効 |
-| ホームカードに「📊 サマリ」ボタンを追加 | サイドカーに `daySummary` がある練習だけに出す。押すと本体を読まずにモーダルを開く。カード本体のクリック（練習を開く）とは伝播を分ける（既存の削除ボタンと同じ扱い） |
+| ホームカードに「📊 サマリ」ボタンを追加 | 一覧（`/api/summaries`）の行に `daySummary` がある練習だけに出す。押すと本体を読まずにモーダルを開く。カード本体のクリック（練習を開く）とは伝播を分ける（既存の削除ボタンと同じ扱い） |
 | モーダルの「再計算」ボタン | 現在のトラック・マーク・風軸補正で再計算して描画し直す。ホームから開いたとき（練習未読込）は出さない |
 
 - 計算は同期で行い（実測 30ms 程度）、描画まで含めて GPS 読込完了から3秒以内を満たす。
@@ -194,7 +199,7 @@ daySummary = {
 | `src/daysummaryview.js`（新規） | `renderDaySummaryHtml(daySummary, { canRecompute, unsaved })` が HTML 文字列を返す純関数と、kt・時刻・方位の整形、`reason` → 文言の対応表 | なし（`escapeHtml` 相当を内包） |
 | `src/windaxis.js`（変更） | `estimateWindAxisSeries` 内のマニューバ検出を `detectManeuvers(track, { marks, opts })` として切り出して公開。`estimateWindAxisSeries` はそれを呼ぶだけにし、出力は変えない | ― |
 | `src/project.js`（変更） | `serializeProject` / `deserializeProject` に `daySummary` を追加（無ければ `null`） | ― |
-| `src/summary.js`（変更） | `practiceSummary` が `project.daySummary` をそのまま `daySummary` として返す（サイドカーに載る） | ― |
+| `src/summary.js`（変更） | `practiceSummary` が `project.daySummary` をそのまま `daySummary` として返す（`/api/summaries` に載る） | ― |
 | `src/app.js`（変更） | モーダルの開閉、`loadFiles` / `loadPractice` / `resetState` への配線、トップバーとホームカードのボタン、3つの導線 | 上記 |
 | `index.html` / `styles.css`（変更） | モーダルの骨組み（`#ds-modal`）、トップバーの「📊 サマリ」ボタン、スタイル | ― |
 
@@ -208,7 +213,7 @@ daySummary = {
   その場合、距離は 0m、速度とタック・ジャイブは `gps-poor` にする（距離は実際に 0 なので理由ではなく数値でよい）。
 - **想定外の例外**（バグ）は `app.js` 側で try/catch し、ステータスバーに「サマリの計算に失敗しました」と出す。GPS 読込は成功扱いにする。
 - **読み込んだ `daySummary` の形が壊れている**（`version` 不一致や必須フィールド欠落）場合は `deserializeProject` で `null` に落とし、
-  次の `loadPractice` で黙って再計算する。サイドカー側で壊れていたらホームカードのボタンを出さない。
+  次の `loadPractice` で黙って再計算する。一覧の行で壊れていたら（`practiceSummary` が `null` にする）ホームカードのボタンを出さない。
 - **HTML 注入**: 艇名（CSV のファイル名由来）は `renderDaySummaryHtml` 内で必ずエスケープする。
 
 ### テスト方針（TDD、`node --test`）
@@ -239,7 +244,7 @@ daySummary = {
 - `test/windaxis.test.js`: `detectManeuvers` を切り出した後も `estimateWindAxisSeries` の既存テストがそのまま通る（出力不変の確認）。
 - `test/project.test.js`: `daySummary` が serialize → deserialize で往復し、欠落・壊れた形なら `null` になる。
 - `test/summary.test.js`: `practiceSummary` が `daySummary` をそのまま返し、無ければ `null`。
-- `test/server-storage.test.js`: `writeProject` 後のサイドカーに `daySummary` が載る（「保存後に同じサマリを再表示」の担保）。
+- `test/server-api.test.js`: 保存した練習の `/api/summaries` の行に `daySummary` が載る（「保存後に同じサマリを再表示」の担保）。
 - `test/html-ids.test.js`: 追加した id が重複しない（既存のテストがそのまま守る）。
 
 実データでの確認（手動、受け入れ条件の「3秒以内」）:
@@ -256,9 +261,9 @@ daySummary = {
 | 2艇以上の場合のみ艇間比較を表示する | daysummary.test（`comparison === null`）、daysummaryview.test |
 | 推定値には「推定」と表示される | daysummaryview.test |
 | 算出不能時に `0` ではなく理由を表示する | `Est` 型＋daysummary.test＋daysummaryview.test |
-| 保存後に同じサマリを再表示できる | project.test、summary.test、server-storage.test、表示が `daySummary` だけに依存する設計 |
+| 保存後に同じサマリを再表示できる | project.test、summary.test、server-api.test、表示が `daySummary` だけに依存する設計 |
 | サマリ計算ロジックに単体テストがある | daysummary.test |
 
 ## 次のステップ
 
-- writing-plans で実装計画を作成する
+- 実装計画: `docs/superpowers/plans/2026-09-26-day-summary.md`
