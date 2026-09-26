@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { serializeProject, deserializeProject, PROJECT_VERSION } from '../src/project.js';
+import { daySummarySourceKey } from '../src/daysummary.js';
 
 function sampleState() {
   return {
@@ -197,4 +199,27 @@ test('excludedIntervals: 項目のないトラック(旧データ)には書き�
   const st = sampleState();
   st.tracks[0].excludedIntervals = [];
   assert.deepEqual(serializeProject(st, { savedAt: 's' }).tracks[0].excludedIntervals, []);
+});
+
+const DS = JSON.parse(readFileSync(new URL('./fixtures/day-summary-v1.json', import.meta.url), 'utf8'));
+
+test('daySummary が serialize→deserialize で往復する', () => {
+  const out = deserializeProject(serializeProject({ ...sampleState(), daySummary: DS }));
+  assert.deepEqual(out.daySummary, DS);
+});
+
+test('daySummary が無い・壊れている場合は null', () => {
+  assert.equal(deserializeProject(serializeProject(sampleState())).daySummary, null);
+  const obj = serializeProject(sampleState());
+  assert.equal(deserializeProject({ ...obj, daySummary: { version: 99 } }).daySummary, null);
+  assert.equal(deserializeProject({ ...obj, daySummary: 'x' }).daySummary, null);
+  const noTacks = structuredClone(DS);
+  delete noTacks.boats[0].tacks;
+  assert.equal(deserializeProject({ ...obj, daySummary: noTacks }).daySummary, null);
+});
+
+test('保存JSONを読み直しても sourceKey は変わらない(開き直しで stale 扱いにならない)', () => {
+  const state = sampleState();
+  const reloaded = deserializeProject(JSON.parse(JSON.stringify(serializeProject(state))));
+  assert.equal(daySummarySourceKey(reloaded.tracks), daySummarySourceKey(state.tracks));
 });

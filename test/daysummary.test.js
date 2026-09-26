@@ -5,6 +5,7 @@ import {
   ok, fail, daySummarySourceKey, gpsQuality, boatStats, boatLabel, computeComparison, computeDaySummary,
 } from '../src/daysummary.js';
 import { circDiffDeg, estimateWindAxisSeries } from '../src/windaxis.js';
+import { isDaySummaryShape } from '../src/daysummaryschema.js';
 
 const T0 = Date.UTC(2026, 7, 23, 4, 0, 0); // 2026-08-23 13:00 JST
 
@@ -289,4 +290,21 @@ test('computeDaySummary: 実行時間は実データ相当(3艇×約1.3万点)�
   computeDaySummary(tracks, { now: 0 });
   const ms = performance.now() - t0;
   assert.ok(ms < 1000, `computeDaySummary took ${ms.toFixed(0)}ms`);
+});
+
+test('computeDaySummary の結果は、どの分岐でも isDaySummaryShape を通る', () => {
+  const cases = [
+    [toTrack(path(beatSegments(5)), 'a.csv')],                                    // 1艇・推定風軸あり
+    [toTrack(path([{ deg: 0, sec: 300, speed: 3 }]), 'a.csv')],                   // タック無し
+    [toTrack(path(beatSegments(5), { dtMs: 10_000 }), 'a.csv')],                  // GPS不足
+    [toTrack(path([{ deg: 0, sec: 60, speed: 0 }]), 'a.csv')],                    // 停船のみ
+    [toTrack(path(beatSegments(5)), 'a.csv'),
+      toTrack(path(beatSegments(5), { lon0: 139.481 }), 'b.csv')],                 // 2艇・比較あり
+    [toTrack(path(beatSegments(5)), 'a.csv'),
+      toTrack(path(beatSegments(5), { t0: T0 + 86_400_000 }), 'b.csv')],           // 2艇・重なり無し
+  ];
+  for (const tracks of cases) {
+    const s = computeDaySummary(tracks, { now: 0 });
+    assert.equal(isDaySummaryShape(s), true, JSON.stringify(s).slice(0, 300));
+  }
 });
