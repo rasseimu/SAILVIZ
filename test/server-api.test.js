@@ -2,6 +2,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -70,6 +71,18 @@ test('summaries returns lightweight rows', async () => {
   const rows = await (await fetch(`${base}/api/summaries`)).json();
   assert.equal(Array.isArray(rows), true);
   assert.equal(rows[0]?.reflectionCount !== undefined, true);
+});
+
+test('summaries rows include daySummary saved with the project', async () => {
+  const name = 'sailviz-20260102-0900.sailviz.json';
+  const bearer = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+  const ds = JSON.parse(readFileSync(new URL('./fixtures/day-summary-v1.json', import.meta.url), 'utf8'));
+  const put = await fetch(`${base}/api/projects/${name}`, {
+    method: 'PUT', headers: bearer, body: JSON.stringify({ version: 1, tracks: [], daySummary: ds }),
+  });
+  assert.equal(put.status, 200);
+  const rows = await (await fetch(`${base}/api/summaries`)).json();
+  assert.deepEqual(rows.find((r) => r.name === name)?.daySummary, ds);
 });
 
 test('overlay put/get', async () => {

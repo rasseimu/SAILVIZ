@@ -1,6 +1,7 @@
 // 練習(保存JSON)から、ホームのカード表示用の軽量サマリを作る純関数。
 // 大きな points 配列には触れず、件数と代表値だけ拾う(localStorage にキャッシュ可能)。
 import { projectLabel } from './projectfs.js';
+import { isDaySummaryShape } from './daysummaryschema.js';
 
 // 風 {dir,speed} を短い1行に。無ければ null。
 function windText(w) {
@@ -51,5 +52,7 @@ export function practiceSummary(project, { name } = {}) {
     videoCount: Array.isArray(p.videos) ? p.videos.length : 0,
     eventCount: Array.isArray(p.events) ? p.events.length : 0,
     wind: windText(firstWind),
+    // 今日の練習サマリ。ホームカードから本体を読まずにモーダルを開くために一覧へ載せる。
+    daySummary: isDaySummaryShape(p.daySummary) ? p.daySummary : null,
   };
 }

@@ -1,5 +1,7 @@
 // state ⇄ 保存オブジェクトの直列化。DOM/ブラウザ API 非依存。
 // 除外: state.transform(投影関数を含む) と video.url(一時 blob URL)。
+import { isDaySummaryShape } from './daysummaryschema.js';
+
 export const PROJECT_VERSION = 1;
 
 export function serializeProject(state, { savedAt } = {}) {
@@ -24,6 +26,8 @@ export function serializeProject(state, { savedAt } = {}) {
     practiceDate: typeof state.practiceDate === 'number' ? state.practiceDate : null,
     // 背景地図(初回CSV取込時に1枚合成した地理院タイル)。dataURL/被覆bounds/ズームのみ保存。
     basemap: serializeBasemap(state.basemap),
+    // 今日の練習サマリ(GPS読込時点のスナップショット)。形が壊れていれば保存しない。
+    daySummary: isDaySummaryShape(state.daySummary) ? state.daySummary : null,
   };
 }
 
@@ -64,6 +68,7 @@ export function deserializeProject(obj) {
     reflections: arr(obj.reflections),
     practiceDate: typeof obj.practiceDate === 'number' ? obj.practiceDate : null,
     basemap: deserializeBasemap(obj.basemap),
+    daySummary: isDaySummaryShape(obj.daySummary) ? obj.daySummary : null,
   };
 }
 
