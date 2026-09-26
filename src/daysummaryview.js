@@ -61,10 +61,17 @@ function swatch(color) {
   return `<span class="ds-swatch" style="background:${safeColor(color)}"></span>`;
 }
 
+// 開始〜終了。JSTで日付をまたぐときだけ終了側にも日付を付ける。
+function formatWhen(startMs, endMs, durationMs) {
+  const startDay = jstDate.format(new Date(startMs));
+  const endDay = jstDate.format(new Date(endMs));
+  const end = `${endDay === startDay ? '' : `${endDay} `}${jstClock.format(new Date(endMs))}`;
+  return `${startDay} ${jstClock.format(new Date(startMs))}〜${end}（${formatDuration(durationMs)}）`;
+}
+
 function overallHtml(o, boats) {
   const when = o.startMs != null && o.endMs != null
-    ? `${jstDate.format(new Date(o.startMs))} ${jstClock.format(new Date(o.startMs))}`
-      + `〜${jstClock.format(new Date(o.endMs))}（${formatDuration(o.durationMs)}）`
+    ? formatWhen(o.startMs, o.endMs, o.durationMs)
     : '時刻不明';
   const q = o.quality || { level: 'poor', note: '', boatIndex: null };
   // どの艇の品質かは boatIndex で持つ(艇名を後で変えても追従する)。

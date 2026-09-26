@@ -81,6 +81,22 @@ test('練習全体: JSTの開始〜終了・練習時間・艇数・品質・推
   assert.ok(html.includes('左8°〜右14°'));
 });
 
+test('練習全体: JSTで日付をまたぐときは終了側にも日付を出す', () => {
+  const ds = fixture();
+  ds.overall.startMs = Date.parse('2026-08-07T13:55:00+09:00');
+  ds.overall.endMs = Date.parse('2026-08-08T13:35:00+09:00');
+  ds.overall.durationMs = ds.overall.endMs - ds.overall.startMs;
+  assert.ok(renderDaySummaryHtml(ds).includes('2026-08-07 13:55〜2026-08-08 13:35（23時間40分）'));
+});
+
+test('練習全体: UTCでは日付が変わってもJSTで同日なら終了側の日付は省く', () => {
+  const ds = fixture();
+  ds.overall.startMs = Date.parse('2026-08-07T08:30:00+09:00'); // UTC 8/6 23:30
+  ds.overall.endMs = Date.parse('2026-08-07T09:30:00+09:00'); // UTC 8/7 00:30
+  ds.overall.durationMs = ds.overall.endMs - ds.overall.startMs;
+  assert.ok(renderDaySummaryHtml(ds).includes('2026-08-07 08:30〜09:30（1時間0分）'));
+});
+
 test('2艇で quality.boatIndex があれば、その艇の現在の名前を品質の根拠の前に付ける', () => {
   const ds = twoBoats();
   ds.overall.quality = { level: 'poor', note: '欠損0%・記録間隔10秒', boatIndex: 1 };
