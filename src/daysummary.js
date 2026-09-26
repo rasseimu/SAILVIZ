@@ -4,12 +4,18 @@
 // 算出不能を 0 で埋めない(表示側 daysummaryview.js が reason を文言に変える)。
 import { haversineMeters } from './gps.js';
 import { speedAt } from './interpolate.js';
+import { circDiffDeg, circMedianDeg, detectManeuvers } from './windaxis.js';
+import { applyWindAxisOverrides } from './windaxisoverride.js';
 import { boatMinuteVmg } from './vmgminute.js';
+import { DAY_SUMMARY_VERSION } from './daysummaryschema.js';
 
 const MOVING_MIN_MPS = 1.5;      // 走行中とみなす速度。computeCog の既定 minSpeedMps と同じ
 const MAX_SPEED_WINDOW = 5;      // 最高速度の移動平均窓(1秒グリッドの点数=秒)
 const GAP_MS = 10_000;           // これを超える記録の空白を欠損とみなす
 const BUCKET_MS = 30_000;        // VMG比較のバケット幅。vmgminute の既定と同じ
+const RANGE_MIN_POINTS = 3;             // 変動幅を出すのに必要な推定点の数
+const RANGE_MIN_SPAN_MS = 10 * 60_000;  // 変動幅を出すのに必要な推定点の時間幅
+const QUALITY_RANK = { good: 0, caution: 1, poor: 2 };
 
 export const ok = (value) => ({ ok: true, value });
 export const fail = (reason) => ({ ok: false, reason });
@@ -175,5 +181,100 @@ export function computeComparison(tracks, windSeriesByTrack) {
     comparableMs: comparable ? ok(comparable * BUCKET_MS) : fail('no-overlap'),
     bestUpwind: best('upwind'),
     bestDownwind: best('downwind'),
+  };
+}
+
+function countManeuvers(track, marks) {
+  let ms;
+  try { ms = detectManeuvers(track, { marks }); } catch { ms = []; }
+  return {
+    tacks: ms.filter((m) => m.type === 'tack').length,
+    gybes: ms.filter((m) => m.type === 'gybe').length,
+  };
+}
+
+function windSeriesOf(track, marks) {
+  try {
+    return applyWindAxisOverrides(track, { marks, overrides: track.windAxisOverrides });
+  } catch {
+    return []; // 推定失敗は空系列(app.js の recomputeWindAxis と同じ扱い)
+  }
+}
+
+// 推定風軸: 品質が不足でない艇の風軸系列をまとめた円周中央値。
+function windAxisEst(usableBoatCount, usableTacks, pooled) {
+  if (usableBoatCount === 0) return fail('gps-poor');
+  if (usableTacks < 2 || pooled.length === 0) return fail('tacks-insufficient');
+  return ok({ deg: Math.round(circMedianDeg(pooled.map((p) => p.windFromDeg))) % 360 });
+}
+
+// 変動幅: 推定点の中央値からの偏差の10〜90パーセンタイル(負=左/反時計回り)。
+function windRangeEst(axis, pooled) {
+  if (!axis.ok) return axis;
+  const ts = pooled.map((p) => p.tMs);
+  if (pooled.length < RANGE_MIN_POINTS || Math.max(...ts) - Math.min(...ts) < RANGE_MIN_SPAN_MS) {
+    return fail('tacks-insufficient');
+  }
+  const devs = pooled.map((p) => circDiffDeg(p.windFromDeg, axis.value.deg)).sort((a, b) => a - b);
+  const pct = (q) => devs[Math.round(q * (devs.length - 1))];
+  return ok({ minDeg: Math.round(pct(0.1)), maxDeg: Math.round(pct(0.9)) });
+}
+
+// 今日の練習サマリ。tracks は state.tracks(可視/非可視を問わず全艇)。
+export function computeDaySummary(tracks, { marks = [], now = Date.now() } = {}) {
+  const list = tracks || [];
+  const windSeriesByTrack = new Map();
+  let usableBoatCount = 0, usableTacks = 0;
+  const pooled = [];
+
+  const boats = list.map((track, index) => {
+    const pts = Array.isArray(track.points) ? track.points : [];
+    const quality = gpsQuality(pts);
+    const stats = boatStats(pts);
+    const series = windSeriesOf(track, marks);
+    windSeriesByTrack.set(track, series);
+    const poor = quality.level === 'poor' || pts.length < 2;
+    const m = poor ? null : countManeuvers(track, marks);
+    if (!poor) {
+      usableBoatCount++;
+      usableTacks += m.tacks;
+      pooled.push(...series);
+    }
+    return {
+      index,
+      ...boatLabel(track),
+      ...stats,
+      tacks: m ? ok(m.tacks) : fail('gps-poor'),
+      gybes: m ? ok(m.gybes) : fail('gps-poor'),
+      quality,
+    };
+  });
+
+  const starts = list.map((t) => t.tRange?.start).filter(Number.isFinite);
+  const ends = list.map((t) => t.tRange?.end).filter(Number.isFinite);
+  const startMs = starts.length ? Math.min(...starts) : null;
+  const endMs = ends.length ? Math.max(...ends) : null;
+
+  const worst = boats.reduce(
+    (w, b) => (!w || QUALITY_RANK[b.quality.level] > QUALITY_RANK[w.quality.level] ? b : w), null);
+  const quality = worst
+    ? { level: worst.quality.level, note: worst.quality.note, boatIndex: boats.length > 1 ? worst.index : null }
+    : { level: 'poor', note: 'GPSデータがありません', boatIndex: null };
+
+  const windAxis = windAxisEst(usableBoatCount, usableTacks, pooled);
+  return {
+    version: DAY_SUMMARY_VERSION,
+    sourceKey: daySummarySourceKey(list),
+    computedAt: now,
+    overall: {
+      startMs, endMs,
+      durationMs: startMs != null && endMs != null ? endMs - startMs : null,
+      boatCount: list.length,
+      quality,
+      windAxis,
+      windRange: windRangeEst(windAxis, pooled),
+    },
+    boats,
+    comparison: list.length >= 2 ? computeComparison(list, windSeriesByTrack) : null,
   };
 }

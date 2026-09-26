@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ok, fail, daySummarySourceKey, gpsQuality, boatStats, boatLabel, computeComparison,
+  ok, fail, daySummarySourceKey, gpsQuality, boatStats, boatLabel, computeComparison, computeDaySummary,
 } from '../src/daysummary.js';
 import { circDiffDeg, estimateWindAxisSeries } from '../src/windaxis.js';
 
@@ -197,4 +197,96 @@ test('boatLabel: 名前が無ければ id、色が無ければ #888。常に文�
   assert.deepEqual(boatLabel({ id: 'x.csv', name: 'A艇', color: '#123456' }), { name: 'A艇', color: '#123456' });
   assert.deepEqual(boatLabel({ id: 'x.csv' }), { name: 'x.csv', color: '#888' });
   assert.deepEqual(boatLabel({ id: 7 }), { name: '7', color: '#888' });
+});
+
+test('computeDaySummary: 1艇・4タックのビート', () => {
+  const a = toTrack(path(beatSegments(5)), 'a.csv');
+  const s = computeDaySummary([a], { marks: [], now: 123 });
+  assert.equal(s.version, 1);
+  assert.equal(s.computedAt, 123);
+  assert.equal(s.sourceKey, daySummarySourceKey([a]));
+  assert.equal(s.overall.boatCount, 1);
+  assert.equal(s.overall.startMs, a.tRange.start);
+  assert.equal(s.overall.endMs, a.tRange.end);
+  assert.equal(s.overall.durationMs, a.tRange.end - a.tRange.start);
+  assert.equal(s.overall.quality.level, 'good');
+  assert.equal(s.overall.quality.boatIndex, null);
+  assert.deepEqual(s.boats[0].tacks, ok(4));
+  assert.deepEqual(s.boats[0].gybes, ok(0));
+  assert.equal(s.boats[0].name, 'a.csv');
+  assert.equal(s.boats[0].index, 0);
+  assert.ok(s.overall.windAxis.ok);
+  assert.ok(Math.abs(circDiffDeg(s.overall.windAxis.value.deg, 0)) <= 5,
+    `deg=${s.overall.windAxis.value.deg}`);
+  // 推定点の時間幅が約5分(<10分)なので変動幅は出さない
+  assert.deepEqual(s.overall.windRange, fail('tacks-insufficient'));
+  // 1艇なら艇間比較はない
+  assert.equal(s.comparison, null);
+});
+
+test('computeDaySummary: 10分以上のビートなら変動幅を出す', () => {
+  const a = toTrack(path(beatSegments(13)), 'a.csv');
+  const s = computeDaySummary([a], { now: 0 });
+  assert.ok(s.overall.windRange.ok);
+  assert.ok(Math.abs(s.overall.windRange.value.minDeg) <= 3);
+  assert.ok(Math.abs(s.overall.windRange.value.maxDeg) <= 3);
+  assert.ok(s.overall.windRange.value.minDeg <= s.overall.windRange.value.maxDeg);
+});
+
+test('computeDaySummary: タックが無ければ推定風軸は 0 ではなく理由', () => {
+  const a = toTrack(path([{ deg: 0, sec: 300, speed: 3 }]), 'a.csv');
+  const s = computeDaySummary([a], { now: 0 });
+  assert.deepEqual(s.boats[0].tacks, ok(0));
+  assert.deepEqual(s.overall.windAxis, fail('tacks-insufficient'));
+  assert.deepEqual(s.overall.windRange, fail('tacks-insufficient'));
+});
+
+test('computeDaySummary: ジャイブだけならタック0・推定風軸は理由表示', () => {
+  const segs = [
+    { deg: 135, sec: 90, speed: 3 }, { deg: 135, toDeg: 225, sec: 8, speed: 3 },
+    { deg: 225, sec: 90, speed: 3 }, { deg: 225, toDeg: 135, sec: 8, speed: 3 },
+    { deg: 135, sec: 90, speed: 3 },
+  ];
+  const s = computeDaySummary([toTrack(path(segs), 'a.csv')], { now: 0 });
+  assert.deepEqual(s.boats[0].tacks, ok(0));
+  assert.deepEqual(s.boats[0].gybes, ok(2));
+  assert.deepEqual(s.overall.windAxis, fail('tacks-insufficient'));
+});
+
+test('computeDaySummary: GPS品質が不足ならタック数と推定風軸は gps-poor', () => {
+  const a = toTrack(path(beatSegments(5), { dtMs: 10_000 }), 'a.csv');
+  const s = computeDaySummary([a], { now: 0 });
+  assert.equal(s.overall.quality.level, 'poor');
+  assert.deepEqual(s.boats[0].tacks, fail('gps-poor'));
+  assert.deepEqual(s.boats[0].gybes, fail('gps-poor'));
+  assert.deepEqual(s.overall.windAxis, fail('gps-poor'));
+});
+
+test('computeDaySummary: 一部の艇が不足でも、他の艇から推定風軸を出す', () => {
+  const good = toTrack(path(beatSegments(5)), 'good.csv');
+  const poor = toTrack(path(beatSegments(5), { dtMs: 10_000, lon0: 139.481 }), 'poor.csv');
+  const s = computeDaySummary([good, poor], { now: 0 });
+  assert.equal(s.overall.quality.level, 'poor');
+  assert.equal(s.overall.quality.boatIndex, 1);
+  assert.ok(!s.overall.quality.note.includes('poor.csv')); // 艇名は note に埋め込まない
+  assert.ok(s.overall.windAxis.ok);
+  assert.ok(Math.abs(circDiffDeg(s.overall.windAxis.value.deg, 0)) <= 5);
+});
+
+test('computeDaySummary: 2艇なら艇間比較を持つ', () => {
+  const a = toTrack(path(beatSegments(5, { speed: 3 })), 'a.csv');
+  const b = toTrack(path(beatSegments(5, { speed: 2.5 }), { lon0: 139.481 }), 'b.csv');
+  const s = computeDaySummary([a, b], { now: 0 });
+  assert.equal(s.overall.boatCount, 2);
+  assert.notEqual(s.comparison, null);
+  assert.equal(s.comparison.bestUpwind.value.index, 0);
+});
+
+test('computeDaySummary: 実行時間は実データ相当(3艇×約1.3万点)でも1秒未満', () => {
+  const tracks = [0, 1, 2].map((i) => toTrack(
+    path(beatSegments(140, { legSec: 90 }), { lon0: 139.48 + i * 0.001 }), `b${i}.csv`));
+  const t0 = performance.now();
+  computeDaySummary(tracks, { now: 0 });
+  const ms = performance.now() - t0;
+  assert.ok(ms < 1000, `computeDaySummary took ${ms.toFixed(0)}ms`);
 });
