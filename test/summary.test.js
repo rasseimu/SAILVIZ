@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { practiceSummary } from '../src/summary.js';
 
 test('practiceSummary: 件数・風・ラベルを拾う(大きな points には触れない)', () => {
@@ -96,4 +97,12 @@ test('practiceSummary: practiceDate 無しはデータ時刻に従来どおり�
   const project = { tracks: [{ tRange: { start: Date.UTC(2026, 7, 23, 2, 0) } }] };
   const s = practiceSummary(project, {});
   assert.equal(s.label, '2026-08-23 11:00');
+});
+
+test('practiceSummary: daySummary をそのまま返し、無い・壊れていれば null', () => {
+  const ds = JSON.parse(readFileSync(new URL('./fixtures/day-summary-v1.json', import.meta.url), 'utf8'));
+  assert.deepEqual(practiceSummary({ daySummary: ds }).daySummary, ds);
+  assert.equal(practiceSummary({}).daySummary, null);
+  assert.equal(practiceSummary({ daySummary: { ...ds, version: 2 } }).daySummary, null);
+  assert.equal(practiceSummary({ daySummary: { ...ds, boats: [{}] } }).daySummary, null);
 });
