@@ -103,7 +103,8 @@ engineer は自分が知りうる項目(テスト結果、操作手順、期待�
 
 - planner の「ブラウザ確認項目」で UI 変更ありと判定された場合(`index.html`・`minutes.html`・`styles.css`・DOM を操作する `src/` のコードを変更する場合)。
 - UI 変更がない場合は使わない(planner は「UI 変更なし: web-verifier 不要」と出す)。
-- 前提: Claude Code を `claude --chrome` で起動し、`/chrome` で接続済みであること。接続できない場合はブラウザ確認を「未実施」として報告し、完了扱いにしない。
+- 前提: 現在の Claude Code セッションで Claude in Chrome のツールが使えること。Chrome 連携が既定で有効なら通常の `claude` 起動で使え、VS Code 版は拡張機能が入っていれば追加フラグ不要。別シェルの `claude mcp list` に表示されないことは未接続の根拠にしない。
+- Chrome ツールが見えない場合に限り、`/chrome` で接続状態を確認・再設定するか、Chrome 連携が未有効の CLI セッションでは `claude --chrome` で有効化する。それでも接続できない場合はブラウザ確認を「未実施」として報告し、完了扱いにしない。
 - 許可ツールと除外理由は `docs/superpowers/plans/2026-09-26-subagent-workflow.md` の「Task 0 の確認結果」を参照。
 
 ## worktree を使わない
