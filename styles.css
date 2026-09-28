@@ -343,6 +343,22 @@ main { flex: 1; display: flex; min-height: 0; }
 #vmg-legend .vl-boat { display: flex; align-items: center; gap: 6px; }
 #vmg-legend .vl-boat .legend-swatch { width: 14px; height: 6px; border-radius: 2px; flex: 0 0 auto; }
 #vmg-legend .vl-name { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 比較の信頼度バッジ・比較区間・理由一覧・各艇の風軸(Issue #30) */
+#vmg-legend { max-width: 300px; max-height: calc(100% - 60px); overflow: auto; }
+#vmg-legend .vl-conf { display: inline-block; margin: 2px 0 4px; padding: 2px 8px; border-radius: 10px;
+  font-size: 11.5px; line-height: 1.4; border: 1px solid transparent; }
+#vmg-legend .vl-conf-high { background: #e6f4ea; color: var(--gd-ok); border-color: #a8dab5; }
+#vmg-legend .vl-conf-medium { background: var(--gd-blue-soft); color: var(--gd-blue-hover); border-color: #c6dafc; }
+#vmg-legend .vl-conf-low { background: #fef7e0; color: #8a5a00; border-color: #f6d88a; }
+#vmg-legend .vl-conf-unavailable { background: var(--gd-hover); color: var(--gd-text2); border-color: var(--gd-border-strong); }
+#vmg-legend .vl-compare { font-size: 11px; color: var(--gd-text); margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+#vmg-legend .vl-reasons { font-size: 11px; color: var(--gd-text2); margin-bottom: 6px; }
+#vmg-legend .vl-reasons summary { cursor: pointer; color: var(--gd-blue); }
+#vmg-legend .vl-reasons ul { margin: 4px 0 0; padding-left: 16px; line-height: 1.4; }
+#vmg-legend .vl-sub { display: block; font-size: 10px; color: var(--gd-text2); }
+#vmg-legend .vl-table td.vl-na { color: var(--gd-text2); }
+#vmg-legend .vl-table td.vl-wind { font-size: 11px; white-space: nowrap; }
+#vmg-legend .vl-note { font-size: 10px; color: var(--gd-text2); margin-top: 4px; }
 #drop-zone { position: absolute; inset: 0; display: flex; align-items: center;
   justify-content: center; font-size: 20px; color: #4a6076; pointer-events: none; }
 #drop-zone.hidden { display: none; }
