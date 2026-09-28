@@ -1,7 +1,7 @@
 // CSV(Sensor Logger 形式) を既存パーサで Track に変換するユーティリティ。依存追加なし。
 import { parseCsv } from '../src/csv.js';
 import { detectType } from '../src/detect.js';
-import { parseGpsPoints, rejectOutliers } from '../src/gps.js';
+import { parseGpsPoints, filterPointsWithExclusions } from '../src/gps.js';
 
 const PALETTE = ['#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6'];
 const JST_OFFSET_MS = 9 * 3600 * 1000;
@@ -34,14 +34,16 @@ export function parseSensorCsv(csvText) {
   if (detectType(header) !== 'gps') throw new Error('not a gps csv');
   const raw = parseGpsPoints(header, rows);
   if (!raw.length) throw new Error('no gps points');
-  const { points } = rejectOutliers(raw);
+  // 外れ値で点を除いた時間帯は excludedIntervals に残す(分析で比較区間から差し引く)。精度フィルタは従来どおりかけない。
+  const { points, excludedIntervals } = filterPointsWithExclusions(raw);
   if (!points.length) throw new Error('no gps points');
   const bounds = computeBounds(points);
-  return { points, bounds, practiceDate: jstMidnightMs(points[0].t) };
+  return { points, bounds, practiceDate: jstMidnightMs(points[0].t), excludedIntervals };
 }
 
-export function buildTrack({ id, name, points, bounds, colorIndex = 0, source }) {
-  return {
+// excludedIntervals は配列を渡したときだけトラックに載せる(未指定なら項目なし=旧データと同じ扱い)。
+export function buildTrack({ id, name, points, bounds, colorIndex = 0, source, excludedIntervals }) {
+  const track = {
     id, name,
     color: PALETTE[colorIndex % PALETTE.length],
     visible: true,
@@ -49,4 +51,6 @@ export function buildTrack({ id, name, points, bounds, colorIndex = 0, source })
     bounds,
     source,
   };
+  if (Array.isArray(excludedIntervals)) track.excludedIntervals = excludedIntervals;
+  return track;
 }

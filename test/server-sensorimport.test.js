@@ -94,6 +94,34 @@ test('commit: 既存プロジェクトの tracks/sensorLogs に反映', async ()
   assert.match(proj.sensorLogs[0].filename, /^4649_\d{8}-\d{4}\.csv$/);
 });
 
+test('commit: 速度の外れ値で除いた点の区間が excludedIntervals(speed)として保存される', async () => {
+  const name = 'sailviz-20260908-0906-m2.sailviz.json';
+  await fetch(`${base}/api/projects/${name}`, {
+    method: 'PUT', headers: bearer,
+    body: JSON.stringify({ version: 1, practiceDate: t0 }),
+  });
+  // 合成座標。10秒目だけ約1.1km 北へ跳ぶ(前後から 25 m/s 超)ので読込時に除かれる
+  const csv = [
+    'time,latitude,longitude,speed',
+    `${t0 * NS},35.300,139.480,3.1`,
+    `${(t0 + 10000) * NS},35.310,139.480,3.2`,
+    `${(t0 + 20000) * NS},35.3002,139.480,3.0`,
+  ].join('\n');
+  const pv = await (await fetch(`${base}/api/sensor-imports`, {
+    method: 'POST', headers: bearer,
+    body: JSON.stringify({ person: '山田 太郎', filename: 'Location.csv', csv }),
+  })).json();
+  const r = await fetch(`${base}/api/sensor-imports/${pv.importId}/commit`, {
+    method: 'POST', headers: bearer,
+    body: JSON.stringify({ name, boatNumber: '4650' }),
+  });
+  assert.equal(r.status, 200);
+  const proj = await (await fetch(`${base}/api/projects/${name}`)).json();
+  assert.equal(proj.tracks.length, 1);
+  assert.equal(proj.tracks[0].points.length, 2);
+  assert.deepEqual(proj.tracks[0].excludedIntervals, [{ lo: t0, hi: t0 + 20000, code: 'speed' }]);
+});
+
 test('commit: 未認証は 401 / name 欠如は 400 / 不明 importId は 404', async () => {
   const noauth = await fetch(`${base}/api/sensor-imports/imp_x/commit`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',

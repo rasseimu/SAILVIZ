@@ -13,6 +13,8 @@ export function serializeProject(state, { savedAt } = {}) {
       id: t.id, name: t.name, color: t.color, visible: t.visible,
       points: t.points, bounds: t.bounds, tRange: t.tRange,
       windAxisOverrides: Array.isArray(t.windAxisOverrides) ? t.windAxisOverrides : [],
+      // 読込時に点を除いた時間帯。項目のないトラック(旧データ)には書き出さない(分析側で旧データと区別するため)。
+      ...(Array.isArray(t.excludedIntervals) ? { excludedIntervals: serializeExcludedIntervals(t.excludedIntervals) } : {}),
     })),
     events: state.events.map((e) => ({ ...e })),
     marks: state.marks.map((m) => ({ ...m })),
@@ -25,6 +27,13 @@ export function serializeProject(state, { savedAt } = {}) {
     // 背景地図(初回CSV取込時に1枚合成した地理院タイル)。dataURL/被覆bounds/ズームのみ保存。
     basemap: serializeBasemap(state.basemap),
   };
+}
+
+// lo < hi の数値で code が文字列の要素だけを {lo, hi, code} で残す。
+function serializeExcludedIntervals(list) {
+  return list
+    .filter((e) => e && Number.isFinite(e.lo) && Number.isFinite(e.hi) && e.lo < e.hi && typeof e.code === 'string')
+    .map((e) => ({ lo: e.lo, hi: e.hi, code: e.code }));
 }
 
 // 実行時フィールド(img 等)は落とし、保存対象の image/bounds/z/seaColor のみ残す。

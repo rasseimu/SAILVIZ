@@ -1,6 +1,6 @@
 import { parseCsv } from './csv.js';
 import { detectType } from './detect.js';
-import { parseGpsPoints, rejectOutliers } from './gps.js';
+import { prepareTrackPoints } from './gps.js';
 import { parseTags } from './tags.js';
 import { computeBounds, fitTransform, unproject, project } from './projection.js';
 import { pan, zoomAt, screenToWorld, worldToScreen } from './viewport.js';
@@ -15,7 +15,8 @@ import { createTimeline } from './timeline.js';
 import { createWindStrip } from './windstripview.js';
 import { windDirAt } from './windaxis.js';
 import { applyWindAxisOverrides, pushOverride } from './windaxisoverride.js';
-import { minuteWinners } from './vmgminute.js';
+import { minuteWinnersDetailed } from './vmgminute.js';
+import { assessComparison, formatConfidenceLabel, windAxisReasonRows } from './analysisconfidence.js';
 import { nextRotation, rotatedFitBox } from './videoview.js';
 import { memberList, filterMembers } from './members.js';
 import { parseMinutes, matchMember, parseMinutesDate } from './minutes.js';
@@ -119,40 +120,117 @@ function recomputeWindAxis() {
   recomputeVmgWinners();
 }
 
-// 1分ごとVMG勝者(ネオンハイライト用)。vmgOn時のみ算出。風軸再計算後に呼ぶ。
+// 30秒ごとVMG勝者(ネオンハイライト用)。vmgOn時のみ算出。風軸再計算後に呼ぶ。
+// 艇間比較は assessComparison の比較区間(同じ走種・時刻の重なり・風軸・精度・最低比較時間・異常速度除外)
+// の中だけで行う。比較区間がなければ勝者なし(データ不足を勝敗として見せない)。
 let vmgOn = false; // VMG勝者ネオン表示。表示のみ・保存しない(windUpと同じ扱い)。
 let vmgWinners = []; // [{boatId,color,lo,hi,pointOfSail,vmg}]（絶対epoch ms）
+let vmgAssessment = null; // assessComparison の結果(信頼度・理由・比較区間)。計算失敗時 null
+let vmgParticipation = null; // Map<track, {upwind, downwind}>(勝者が決まった断片への参加時間 ms)
 function recomputeVmgWinners() {
-  if (!vmgOn) { vmgWinners = []; renderVmgLegend(); return; }
+  if (!vmgOn) {
+    vmgWinners = []; vmgAssessment = null; vmgParticipation = null;
+    renderVmgLegend();
+    return;
+  }
   const visible = state.tracks.filter((t) => t.visible);
   try {
-    vmgWinners = minuteWinners(visible, windSeriesByTrack, {});
+    vmgAssessment = assessComparison(visible, windSeriesByTrack, {});
+    const d = minuteWinnersDetailed(visible, windSeriesByTrack, {
+      comparable: vmgAssessment.segments,
+      validIntervalsByTrack: vmgAssessment.validIntervalsByTrack,
+    });
+    vmgWinners = vmgAssessment.level === 'unavailable' ? [] : d.winners;
+    vmgParticipation = d.participation;
   } catch {
-    vmgWinners = [];
+    vmgWinners = []; vmgAssessment = null; vmgParticipation = null;
   }
   renderVmgLegend();
 }
 
-// VMGネオンの凡例＋占有率表(#stage 右下オーバーレイ)。VMG ON かつ勝者ありで表示。
-// 縦=各色の艇、横=クローズ/ランニングのネオン占有率(全期間集計)。勝者再計算時のみ更新。
+// 時間[ms]を「4分30秒」「45秒」の形で表す(比較区間の長さの表示用)。
+function formatDurationJa(ms) {
+  const sec = Math.floor(Math.max(0, ms || 0) / 1000);
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m ? `${m}分${String(s).padStart(2, '0')}秒` : `${s}秒`;
+}
+
+const WIND_SOURCE_LABEL = { estimated: 'GPS推定', manual: '手動設定', mixed: 'GPS推定+手動設定' };
+const LEVEL_SHORT = { high: '高', medium: '中', low: '低', unavailable: '推定不可' };
+
+// VMGネオンの凡例(#stage 右下オーバーレイ)。VMG ON なら勝者0件でも表示し、
+// 比較の信頼度・比較区間の長さ・理由・各艇の風軸(出所と信頼度)と参加時間中の勝率を示す。
+// 比較不能(unavailable)のときは勝率を出さない。勝者再計算時のみ更新。
 function renderVmgLegend() {
   const el = $('vmg-legend');
   if (!el) return;
-  if (!vmgOn || !vmgWinners.length) { el.className = 'hidden'; el.innerHTML = ''; return; }
+  if (!vmgOn) { el.className = 'hidden'; el.innerHTML = ''; return; }
   const visible = state.tracks.filter((t) => t.visible);
-  const { rows, upwindTotalMs, downwindTotalMs } = summarizeNeonShare(vmgWinners, visible);
-  const pct = (v, total) => (total ? `${Math.round(v * 100)}%` : '—');
-  const body = rows.map((r) => {
-    const sw = `<span class="legend-swatch" style="background:${escapeHtml(r.track.color || '#888')}"></span>`;
-    const name = escapeHtml(r.track.name || r.track.id || '');
-    return `<tr><td class="vl-boat">${sw}<span class="vl-name">${name}</span></td>`
-      + `<td>${pct(r.upwind, upwindTotalMs)}</td><td>${pct(r.downwind, downwindTotalMs)}</td></tr>`;
+  const a = vmgAssessment;
+  const level = a?.level ?? 'unavailable';
+  const available = level !== 'unavailable';
+  const label = a ? formatConfidenceLabel(a) : '比較不能：分析できませんでした';
+
+  let html = '<div class="vl-title">🏆 VMGネオン</div>'
+    + `<div class="vl-conf vl-conf-${escapeHtml(level)}">${escapeHtml(label)}</div>`;
+  if (a) {
+    // 合計は時刻の和集合。別の艇の組が同時刻に別の走種で比較されると、走種別の和は合計を上回る。
+    html += '<div class="vl-compare" title="別の艇の組で同じ時刻に両走種を比較する場合、走種別の和は合計を上回ります">'
+      + `比較区間 合計 ${escapeHtml(formatDurationJa(a.comparableMs))}（時刻の重複を除く）`
+      + `（クローズ ${escapeHtml(formatDurationJa(a.byPointOfSail.upwind))}`
+      + `／ランニング ${escapeHtml(formatDurationJa(a.byPointOfSail.downwind))}）</div>`;
+  }
+  if (a && a.reasons.length) {
+    const items = a.reasons.map((r) => `<li>${escapeHtml(r.message)}</li>`).join('');
+    html += `<details class="vl-reasons"><summary>判定の理由（${a.reasons.length}件）</summary><ul>${items}</ul></details>`;
+  }
+  if (a) {
+    // 比較全体の理由には参加艇の風軸理由しか入らないため、比較に参加していない艇も含め全艇分を別に示す
+    const items = windAxisReasonRows(visible, a.perTrack).map((r) => {
+      const sub = r.reasons.map((m) => `<li>${escapeHtml(m)}</li>`).join('');
+      return `<li>${escapeHtml(r.track.name || r.track.id || '')}：${escapeHtml(r.head)}`
+        + `${r.participating ? '' : '（比較に不参加）'}${sub ? `<ul>${sub}</ul>` : ''}</li>`;
+    }).join('');
+    if (items) html += `<details class="vl-reasons vl-wind-reasons"><summary>各艇の風軸の判定理由</summary><ul>${items}</ul></details>`;
+  }
+  html += available
+    ? '<div class="vl-desc">30秒ごとに、同じ走種で比較できる艇のうち VMG（推定風軸方向の前進成分）が最も良い艇を発光。'
+      + '表の割合は、各艇が比較に参加した時間のうち最良だった割合（参加時間中の勝率）。風軸は GPS からの推定値（または手動設定）で、実測値ではありません。</div>'
+    : '<div class="vl-desc">比較できる区間がないため、勝率とネオンは表示しません。風軸は GPS からの推定値（または手動設定）で、実測値ではありません。</div>';
+
+  const share = available ? summarizeNeonShare(vmgWinners, visible, vmgParticipation || new Map()) : null;
+  const rateCell = (rate, partMs) => (rate == null
+    ? '<td class="vl-na">—</td>'
+    : `<td>${Math.round(rate * 100)}%<span class="vl-sub">${escapeHtml(formatDurationJa(partMs))}</span></td>`);
+  const body = visible.map((t, i) => {
+    const sw = `<span class="legend-swatch" style="background:${escapeHtml(t.color || '#888')}"></span>`;
+    const name = escapeHtml(t.name || t.id || '');
+    const w = a?.perTrack?.get(t)?.windAxis;
+    const src = w?.source ? WIND_SOURCE_LABEL[w.source] : 'なし';
+    const windTitle = w ? formatConfidenceLabel(w, { unavailableLabel: '風軸推定不可' }) : '';
+    const windCell = `<td class="vl-wind" title="${escapeHtml(windTitle)}">${escapeHtml(src)}`
+      + `<span class="vl-sub">信頼度 ${escapeHtml(LEVEL_SHORT[w?.level ?? 'unavailable'])}</span></td>`;
+    let cells = '';
+    if (share) {
+      const r = share.rows[i];
+      if (r.upwind == null && r.downwind == null) {
+        // 比較区間はあるが、区間内の有効な VMG サンプルが足りず勝敗の判定に参加できなかった艇は出し分ける
+        const hasSegments = (a?.perTrack?.get(t)?.comparableMs ?? 0) > 0;
+        cells = `<td class="vl-na" colspan="2">${hasSegments ? '—（比較できるサンプル不足）' : '—（比較区間なし）'}</td>`;
+      } else {
+        cells = rateCell(r.upwind, r.upwindParticipationMs) + rateCell(r.downwind, r.downwindParticipationMs);
+      }
+    }
+    return `<tr><td class="vl-boat">${sw}<span class="vl-name">${name}</span></td>${cells}${windCell}</tr>`;
   }).join('');
+  const head = share
+    ? '<tr><th>艇</th><th>クローズ<br>勝率</th><th>ランニング<br>勝率</th><th>風軸</th></tr>'
+    : '<tr><th>艇</th><th>風軸</th></tr>';
+  html += `<table class="vl-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+  if (share) html += '<div class="vl-note">勝率の下の時間は参加時間。— は比較に参加していない走種。</div>';
+
   el.className = '';
-  el.innerHTML = '<div class="vl-title">🏆 VMGネオン</div>'
-    + '<div class="vl-desc">1分ごとに風上/風下で最もVMG（風軸方向の前進成分）が良い艇を発光。下表は各走種のネオン占有率。</div>'
-    + '<table class="vl-table"><thead><tr><th>艇</th><th>クローズ</th><th>ランニング</th></tr></thead>'
-    + `<tbody>${body}</tbody></table>`;
+  el.innerHTML = html;
 }
 
 // elapsedモードでの軸オフセット(基準トラック開始)。軸時刻⇄絶対時刻の変換に使う。
@@ -664,15 +742,15 @@ function loadVideoDuration(v) {
 }
 
 function addTrack(name, header, rows) {
-  let points = parseGpsPoints(header, rows);
-  if (state.accuracyFilter) points = points.filter((p) => p.accuracy == null || p.accuracy <= 50);
-  const { points: clean, removed } = rejectOutliers(points);
+  // 精度フィルタ・外れ値除去で点を除いた時間帯は excludedIntervals に残し、分析で比較区間から差し引く。
+  const { points: clean, removed, excludedIntervals } = prepareTrackPoints(header, rows, { accuracyFilter: state.accuracyFilter });
   if (clean.length === 0) { statusEl.textContent = `${name}: 有効点なし`; return; }
   state.tracks.push({
     id: name, name, color: PALETTE[state.tracks.length % PALETTE.length],
     visible: true, points: clean,
     bounds: computeBounds([{ visible: true, points: clean }]),
     tRange: { start: clean[0].t, end: clean[clean.length - 1].t },
+    excludedIntervals,
   });
   statusEl.textContent = `${name}: ${clean.length}点 (外れ値${removed}点除外)`;
 }
@@ -763,7 +841,7 @@ function startRenameTrack(i, spanEl) {
   const commit = (save) => {
     if (done) return; done = true;
     if (save) { const v = input.value.trim(); if (v) tr.name = v; }
-    draw(); renderSidebar();
+    draw(); renderSidebar(); renderVmgLegend(); // 凡例の艇名を更新(勝者の再計算は不要)
   };
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') commit(true);
@@ -1012,7 +1090,7 @@ $('windup-toggle').addEventListener('change', (e) => {
   draw(); // ON時は applyWindUpRotation が風向を表示。OFF時はmapRotが現在角のまま維持される。
 });
 
-// VMG勝者ネオン トグル: ONで1分ごと最良VMG艇を発光表示。OFFで消灯。表示のみ・保存しない。
+// VMG勝者ネオン トグル: ONで30秒ごと(比較区間内)の最良VMG艇を発光表示。OFFで消灯。表示のみ・保存しない。
 $('vmg-minute-toggle').addEventListener('change', (e) => {
   vmgOn = e.target.checked;
   recomputeVmgWinners();
@@ -1240,7 +1318,7 @@ function openColorMenu(i, anchorEl) {
 colorMenu.querySelectorAll('.color-swatch').forEach((b) =>
   b.addEventListener('click', () => {
     const tr = state.tracks[colorTargetIdx];
-    if (tr) { tr.color = b.dataset.c; draw(); renderSidebar(); }
+    if (tr) { tr.color = b.dataset.c; draw(); renderSidebar(); renderVmgLegend(); } // 凡例の色を更新
     hideColorMenu();
   }));
 window.addEventListener('pointerdown', (e) => {

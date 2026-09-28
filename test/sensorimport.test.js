@@ -42,3 +42,25 @@ test('buildTrack: 既存 Track 形状', () => {
   assert.ok(tr.bounds && typeof tr.bounds.minLat === 'number');
   assert.deepEqual(tr.source, { importId: 'imp_x' });
 });
+
+test('parseSensorCsv: 速度で除外した点の区間を excludedIntervals に返し、buildTrack が載せる', () => {
+  // 合成座標。10秒目だけ約1.1km 北へ跳ぶ(前後から 25 m/s 超)
+  const csv = [
+    'time,latitude,longitude,speed,bearing,horizontalAccuracy',
+    `${t0 * NS},35.300,139.480,3.1,90,10`,
+    `${(t0 + 10000) * NS},35.310,139.480,3.2,92,10`,
+    `${(t0 + 20000) * NS},35.3002,139.480,3.0,88,12`,
+  ].join('\n');
+  const r = parseSensorCsv(csv);
+  assert.equal(r.points.length, 2);
+  assert.deepEqual(r.excludedIntervals, [{ lo: t0, hi: t0 + 20000, code: 'speed' }]);
+  const tr = buildTrack({ id: 'imp_x', name: '4649', points: r.points, bounds: r.bounds, excludedIntervals: r.excludedIntervals });
+  assert.deepEqual(tr.excludedIntervals, r.excludedIntervals);
+});
+
+test('parseSensorCsv: 除外なしなら excludedIntervals は空。buildTrack は未指定なら項目を作らない', () => {
+  const r = parseSensorCsv(CSV);
+  assert.deepEqual(r.excludedIntervals, []);
+  const tr = buildTrack({ id: 'imp_x', name: '4649', points: r.points, bounds: r.bounds });
+  assert.ok(!('excludedIntervals' in tr));
+});
