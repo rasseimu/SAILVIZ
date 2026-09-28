@@ -230,7 +230,7 @@ Task 5・Task 7 で web-verifier のツールを確定するため、最初に�
 
 #### 8-1. サンプル Issue の作成
 
-- [ ] #45 とは別に、検証用のサンプル Issue を作成する(作成は利用者の承認後)。
+- [x] #45 とは別に、検証用のサンプル Issue を作成する(作成は利用者の承認後)。→ **#46** `[a11y] 閲覧ログインのエラー表示をスクリーンリーダーに読み上げさせる`(2026-09-26 作成)
 - [ ] 対象: `index.html` の `#viewLoginError`(閲覧ログインのエラー表示。`src/app.js` の閲覧ログイン処理で表示が切り替わる)。
 - [ ] 変更内容: エラー表示にスクリーンリーダー向けのライブリージョン属性(`aria-live`)を追加する。属性値・`role` の要否は planner の計画で決め、工程3で承認する。
 - [ ] テスト: `index.html` を読む静的テスト(`test/html-ids.test.js` の作法)で、`#viewLoginError` に属性があることを検証する。
@@ -248,9 +248,23 @@ Task 5・Task 7 で web-verifier のツールを確定するため、最初に�
 - [ ] 読み取り専用 agent の実行前後で差分比較を行う(D3)。
 - [ ] #45 の確認項目(planner / engineer / reviewer / web-verifier)を記録する。
 
+##### 8-2 の実行結果(2026-09-28 時点・停止)
+
+- 工程1〜6: 完了。4 agent すべての起動を確認。planner・reviewer・web-verifier の実行前後の差分比較(D3)はすべて変化なし。reviewer は P0/P1 なし(P2 1件・P3 3件)で修正ループは不要。
+- 工程7: web-verifier は起動したが Claude in Chrome のツールが提供されず、1280px・390px とも全手順「未実施」(2回実行、いずれも推測による PASS なし)。この実行環境では `/chrome` が利用できず、`claude --chrome` は使わない方針のため、Chrome 前提を満たせない。
+- 判定: Global Constraints に従い Task 8 を停止する。#45・Epic #38 は「未完了・前提条件待ち」。
+- #46 の実装成果物(`index.html` の属性追加と `test/html-a11y.test.js`)はコミットせず、`git stash` に退避した。
+
 #### 8-3. 振り返り
 
 - [ ] 引き継ぎ情報の欠落や改善点を `docs/development/subagent-workflow.md` へ反映する。
+
+##### 振り返り項目(#46 での実行時に判明)
+
+- **engineer → reviewer の引き継ぎ不足(工程5):** メイン agent が reviewer へ `git diff`(既存ファイルの差分のみ)・テスト結果・未確認事項・重点レビュー箇所を渡したが、`git status --porcelain` の出力と、未追跡の新規ファイル(`test/html-a11y.test.js`)の全文を含め忘れた。新規ファイルはパスを示して Read での確認を依頼しただけだった。手順書の「engineer → reviewer」の定め(新規ファイルは porcelain で確認し内容を添える)を満たしていない。
+  - 影響: なしと判断。reviewer は確認範囲に当該ファイル全文を挙げ、指摘も同ファイルの行を直接参照していた。
+  - 対応: 利用者の判断(対応案1)により reviewer は再実行しない。
+  - 改善案: 手順書の reviewer 呼び出し前チェックに「porcelain 出力を添えたか」「未追跡の新規ファイルの全文を添えたか」を確認項目として加える。
 
 ## Review Focus
 
