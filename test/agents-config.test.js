@@ -19,8 +19,8 @@ const EXPECTED_TOOLS = {
   'code-reviewer': ['Read', 'Grep', 'Glob'],
   'web-verifier': [
     'Read',
-    CHROME('tabs_context'),
-    CHROME('tabs_create'),
+    CHROME('tabs_context_mcp'),
+    CHROME('tabs_create_mcp'),
     CHROME('navigate'),
     CHROME('computer'),
     CHROME('read_page'),
