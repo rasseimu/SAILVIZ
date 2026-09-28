@@ -203,6 +203,21 @@ export function detectHeightAdjustWindowsByTrack(tracks, windSeriesByTrack, opts
   return detectHeightAdjustCore(perBoat, opts);
 }
 
+// 上記のサンプル直接指定版。boats=[{samples, windSeries}]。samples は computeCog 形式({t, cog}、t 昇順)。
+// 分析の信頼度判定(analysisconfidence)が、有効区間内だけの COG サンプルで検出するために使う。
+// 艇は配列の位置で区別する(同名 id のトラックでも取り違えない)。風軸が空の艇は対象外。
+export function detectHeightAdjustWindowsFromSamples(boats, opts = {}) {
+  const perBoat = (Array.isArray(boats) ? boats : []).map((b, i) => {
+    const ws = Array.isArray(b?.windSeries) ? b.windSeries : [];
+    return {
+      id: i,
+      samples: ws.length && Array.isArray(b?.samples) ? b.samples : [],
+      windAt: (tt) => windFromAt(ws, tt),
+    };
+  });
+  return detectHeightAdjustCore(perBoat, opts);
+}
+
 // mid が除外区間 [lo,hi) のいずれかに入るか。
 function inExcluded(mid, exclude) {
   return exclude.some((e) => e.lo <= mid && mid < e.hi);
@@ -289,7 +304,11 @@ export function rankVmg(perBoatLegVmg, { from, to, highlights = [], exclude = []
 // VMGネオン勝者(minuteWinners の出力)を、走種(クローズ=upwind/ランニング=downwind)別に
 // 各艇のネオン占有率へ集約する。占有率 = その艇の勝者時間 / その走種の勝者総時間(列合計=1)。
 // rows は tracks の順で全艇を含む(勝者ゼロの艇も0%)。tracks に無いトラックの勝者は無視。
-export function summarizeNeonShare(winners, tracks) {
+// participation(minuteWinnersDetailed().participation: Map<track, {upwind, downwind}>)を渡すと、
+// 分母を艇ごと・走種ごとの参加時間に切り替える(参加時間中の勝率。列合計は1にならない)。
+// このとき各行に upwindParticipationMs / downwindParticipationMs を加え、参加時間0の走種は null。
+// 途中参加の艇を、記録のない時間まで負け扱いにしないため。未指定なら従来どおり。
+export function summarizeNeonShare(winners, tracks, participation) {
   const ms = new Map(); // track -> { upwind, downwind }
   for (const t of tracks) ms.set(t, { upwind: 0, downwind: 0 });
   let upwindTotalMs = 0, downwindTotalMs = 0;
@@ -300,8 +319,23 @@ export function summarizeNeonShare(winners, tracks) {
     if (w.pointOfSail === 'upwind') { rec.upwind += dur; upwindTotalMs += dur; }
     else if (w.pointOfSail === 'downwind') { rec.downwind += dur; downwindTotalMs += dur; }
   }
+  const usePart = participation != null && typeof participation.get === 'function';
   const rows = tracks.map((t) => {
     const r = ms.get(t);
+    if (usePart) {
+      const p = participation.get(t) || {};
+      const up = Number.isFinite(p.upwind) && p.upwind > 0 ? p.upwind : 0;
+      const down = Number.isFinite(p.downwind) && p.downwind > 0 ? p.downwind : 0;
+      return {
+        track: t,
+        // minuteWinnersDetailed では、勝者の各断片は勝者自身の参加時間にも同じ長さで加算され、
+        // 同じ艇・同じ走種の断片は時間が重ならない(比較区間は走種ごとに重ならない)ため、勝者時間 ≤ 参加時間。
+        upwind: up ? r.upwind / up : null,
+        downwind: down ? r.downwind / down : null,
+        upwindParticipationMs: up,
+        downwindParticipationMs: down,
+      };
+    }
     return {
       track: t,
       upwind: upwindTotalMs ? r.upwind / upwindTotalMs : 0,
