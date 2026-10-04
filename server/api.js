@@ -1,11 +1,10 @@
 // server/api.js
 // http (req,res) を受け /api/* を処理。処理したら true を返す。
+// 保存先に依らないバリデータだけ storage.js から直接使う。IO はリポジトリ層経由。
 import {
-  listProjects, readProject, writeProject, deleteProject,
-  readOverlay, writeOverlay, OVERLAY_NAMES, isValidProjectName,
-  saveUpload, findReflectionByDate, readUpload, renameUpload, isValidImportId, isValidUploadFile,
-  findProjectByPracticeDate,
+  OVERLAY_NAMES, isValidProjectName, isValidImportId, isValidUploadFile,
 } from './storage.js';
+import { createFileRepo } from './repos/fileRepo.js';
 import { uniqueProjectName } from '../src/projectfs.js';
 import {
   validateCommitRows, mergeRowsByMember, reflectionsFromRows, emptyProject,
@@ -33,7 +32,9 @@ async function readBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword }) {
+export function createApi({ dataDir, repo, token, geminiKey, viewUser, viewPassword }) {
+  // 保存の窓口。明示 repo が無ければ dataDir からファイル実装を組み立てる(既存挙動のまま)。
+  const store = repo || createFileRepo(dataDir);
   // 閲覧ゲート: user/password が両方設定されている時のみ有効。
   // 有効時はランダム秘密を発行し、ログイン成功で Cookie に載せる(パスワードは載せない)。
   const viewEnabled = Boolean(viewUser && viewPassword);
@@ -144,8 +145,8 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
         try { parsed = parseSensorCsv(csv); }
         catch (e) { send(res, 422, { error: String(e.message || e) }); return true; }
         const importId = `imp_${jstStamp(parsed.practiceDate).replace(/-/g, '_')}_${randomBytes(4).toString('hex')}`;
-        await saveUpload(dataDir, importId, 'raw.csv', csv);
-        const matched = await findReflectionByDate(dataDir, person, parsed.practiceDate);
+        await store.saveUpload(importId, 'raw.csv', csv);
+        const matched = await store.findReflectionByDate(person, parsed.practiceDate);
         send(res, 200, {
           importId,
           practiceDate: parsed.practiceDate,
@@ -165,21 +166,21 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
         if (bad) { send(res, 400, { error: bad }); return true; }
 
         const reflections = reflectionsFromRows({ rows: mergeRowsByMember(rows), now: Date.now() });
-        const found = await findProjectByPracticeDate(dataDir, practiceDate);
+        const found = await store.findProjectByPracticeDate(practiceDate);
         let name, created = false, proj;
         if (found) {
           name = found.name;
-          proj = await readProject(dataDir, name);
+          proj = await store.readProject(name);
           if (!Array.isArray(proj.reflections)) proj.reflections = [];
         } else {
-          const existing = (await listProjects(dataDir)).map((p) => p.name);
+          const existing = (await store.listProjects()).map((p) => p.name);
           name = uniqueProjectName(practiceDate, existing);
           proj = emptyProject(practiceDate, new Date().toISOString());
           created = true;
         }
         proj.reflections.push(...reflections);
         if (typeof proj.practiceDate !== 'number') proj.practiceDate = practiceDate;
-        await writeProject(dataDir, name, proj);
+        await store.writeProject(name, proj);
         send(res, 200, { name, added: reflections.length, created });
         return true;
       }
@@ -196,15 +197,15 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
           send(res, 400, { error: 'name と boatNumber が必要' }); return true;
         }
         let csv;
-        try { csv = await readUpload(dataDir, importId, 'raw.csv'); }
+        try { csv = await store.readUpload(importId, 'raw.csv'); }
         catch { send(res, 404, { error: 'import not found' }); return true; }
         let proj;
-        try { proj = await readProject(dataDir, name); }
+        try { proj = await store.readProject(name); }
         catch { send(res, 404, { error: 'project not found' }); return true; }
 
         const parsed = parseSensorCsv(csv);
         const finalName = `${boatNumber.trim()}_${jstStamp(parsed.points[0].t)}.csv`;
-        await renameUpload(dataDir, importId, 'raw.csv', finalName);
+        await store.renameUpload(importId, 'raw.csv', finalName);
 
         const uploadedAt = Date.now();
         const tracks = Array.isArray(proj.tracks) ? proj.tracks : [];
@@ -222,7 +223,7 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
         logs.push({ id: importId, filename: finalName, size: Buffer.byteLength(csv, 'utf8'), uploadedAt });
         proj.sensorLogs = logs;
 
-        await writeProject(dataDir, name, proj);
+        await store.writeProject(name, proj);
         send(res, 200, { name });
         return true;
       }
@@ -236,7 +237,7 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
           send(res, 400, { error: 'bad path' }); return true;
         }
         try {
-          const text = await readUpload(dataDir, importId, file);
+          const text = await store.readUpload(importId, file);
           res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store' });
           res.end(text);
         } catch { send(res, 404, { error: 'not found' }); }
@@ -263,15 +264,15 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
 
       if (path === '/api/projects' && method === 'GET') {
         if (requireViewer()) return true;
-        send(res, 200, await listProjects(dataDir)); return true;
+        send(res, 200, await store.listProjects()); return true;
       }
 
       if (path === '/api/summaries' && method === 'GET') {
         if (requireViewer()) return true;
-        const list = await listProjects(dataDir);
+        const list = await store.listProjects();
         const rows = [];
         for (const { name } of list) {
-          try { rows.push({ name, ...practiceSummary(await readProject(dataDir, name), { name }) }); }
+          try { rows.push({ name, ...practiceSummary(await store.readProject(name), { name }) }); }
           catch { /* 壊れたファイルは飛ばす */ }
         }
         send(res, 200, rows); return true;
@@ -283,18 +284,18 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
         if (!isValidProjectName(name)) { send(res, 400, { error: 'bad name' }); return true; }
         if (method === 'GET') {
           if (requireViewer()) return true;
-          try { send(res, 200, await readProject(dataDir, name)); }
+          try { send(res, 200, await store.readProject(name)); }
           catch { send(res, 404, { error: 'not found' }); }
           return true;
         }
         if (method === 'PUT') {
           if (requireWrite()) return true;
-          await writeProject(dataDir, name, await readBody(req));
+          await store.writeProject(name, await readBody(req));
           send(res, 200, { ok: true }); return true;
         }
         if (method === 'DELETE') {
           if (requireWrite()) return true;
-          try { await deleteProject(dataDir, name); } catch { /* 既に無ければ黙認 */ }
+          try { await store.deleteProject(name); } catch { /* 既に無ければ黙認 */ }
           send(res, 200, { ok: true }); return true;
         }
       }
@@ -305,11 +306,11 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
         if (!OVERLAY_NAMES.includes(name)) { send(res, 400, { error: 'bad overlay' }); return true; }
         if (method === 'GET') {
           if (requireViewer()) return true;
-          send(res, 200, await readOverlay(dataDir, name)); return true;
+          send(res, 200, await store.readOverlay(name)); return true;
         }
         if (method === 'PUT') {
           if (requireWrite()) return true;
-          await writeOverlay(dataDir, name, await readBody(req));
+          await store.writeOverlay(name, await readBody(req));
           send(res, 200, { ok: true }); return true;
         }
       }
