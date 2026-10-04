@@ -3,3 +3,6 @@ node_modules/
 .worktrees/
 data/
 demo-data/backups/
+
+# SDD scratch workspace (subagent-driven-development)
+.superpowers/
