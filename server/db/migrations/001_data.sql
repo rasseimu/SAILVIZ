@@ -94,7 +94,8 @@ CREATE TABLE reflection_comments (
   field TEXT,
   text TEXT,
   ts INTEGER,
-  author_user_id TEXT
+  author_user_id TEXT,
+  extra TEXT                     -- コメントの未マップキー(ai/url/link/title/refs 等)を保持(§5.1「捨てない」)
 );
 
 CREATE TABLE roadmaps (
