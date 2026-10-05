@@ -51,10 +51,17 @@ export function deserializeProject(obj) {
     mode: obj.mode === 'elapsed' ? 'elapsed' : 'absolute',
     accuracyFilter: obj.accuracyFilter !== false,
     crop,
-    tracks: arr(obj.tracks).map((t) => ({
-      ...t,
-      windAxisOverrides: arr(t && t.windAxisOverrides),
-    })),
+    tracks: arr(obj.tracks).map((t) => {
+      const pts = arr(t && t.points);
+      const tRange = (t && t.tRange) ? t.tRange
+        : pts.length > 0 ? { start: pts[0].t, end: pts[pts.length - 1].t }
+        : undefined;
+      return {
+        ...t,
+        tRange,
+        windAxisOverrides: arr(t && t.windAxisOverrides),
+      };
+    }),
     events: arr(obj.events),
     marks: arr(obj.marks),
     pins: arr(obj.pins),

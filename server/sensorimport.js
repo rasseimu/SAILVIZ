@@ -41,12 +41,16 @@ export function parseSensorCsv(csvText) {
 }
 
 export function buildTrack({ id, name, points, bounds, colorIndex = 0, source }) {
+  const tRange = points.length > 0
+    ? { start: points[0].t, end: points[points.length - 1].t }
+    : null;
   return {
     id, name,
     color: PALETTE[colorIndex % PALETTE.length],
     visible: true,
     points,
     bounds,
+    tRange,
     source,
   };
 }
