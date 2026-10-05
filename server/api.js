@@ -220,6 +220,7 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
           bounds: parsed.bounds,
           colorIndex: tracks.length,
           source: { importId, filename: finalName, boatNumber: boatNumber.trim(), uploadedAt },
+          excludedIntervals: parsed.excludedIntervals,
         });
         tracks.push(track);
         proj.tracks = tracks;

@@ -171,3 +171,30 @@ test('deserialize: tRange 欠落・点列も空のトラックは tRange を nul
   // 点が無ければ tRange は設定できない → undefined のまま（または null）、エラーにならない
   assert.ok(!out.tracks[0].tRange, 'tRange は falsy のまま');
 });
+
+test('excludedIntervals: 保存・読込で往復し、不正な要素は保存時に落とす', () => {
+  const st = sampleState();
+  st.tracks[0].excludedIntervals = [
+    { lo: 100, hi: 400, code: 'accuracy', extra: 1 },
+    { lo: 500, hi: 500, code: 'speed' }, // 長さ0
+    { lo: 600, hi: 700 }, // code なし
+    null,
+    { lo: 800, hi: 900, code: 'speed' },
+  ];
+  const saved = serializeProject(st, { savedAt: 's' });
+  assert.deepEqual(saved.tracks[0].excludedIntervals, [
+    { lo: 100, hi: 400, code: 'accuracy' },
+    { lo: 800, hi: 900, code: 'speed' },
+  ]);
+  const out = deserializeProject(JSON.parse(JSON.stringify(saved)));
+  assert.deepEqual(out.tracks[0].excludedIntervals, saved.tracks[0].excludedIntervals);
+});
+
+test('excludedIntervals: 項目のないトラック(旧データ)には書き出さない。空配列は書き出す', () => {
+  const saved = serializeProject(sampleState(), { savedAt: 's' });
+  assert.ok(!('excludedIntervals' in saved.tracks[0]));
+  assert.ok(!('excludedIntervals' in deserializeProject(saved).tracks[0]));
+  const st = sampleState();
+  st.tracks[0].excludedIntervals = [];
+  assert.deepEqual(serializeProject(st, { savedAt: 's' }).tracks[0].excludedIntervals, []);
+});
