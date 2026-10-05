@@ -15,6 +15,8 @@ export function serializeProject(state, { savedAt } = {}) {
       id: t.id, name: t.name, color: t.color, visible: t.visible,
       points: t.points, bounds: t.bounds, tRange: t.tRange,
       windAxisOverrides: Array.isArray(t.windAxisOverrides) ? t.windAxisOverrides : [],
+      // 読込時に点を除いた時間帯。項目のないトラック(旧データ)には書き出さない(分析側で旧データと区別するため)。
+      ...(Array.isArray(t.excludedIntervals) ? { excludedIntervals: serializeExcludedIntervals(t.excludedIntervals) } : {}),
     })),
     events: state.events.map((e) => ({ ...e })),
     marks: state.marks.map((m) => ({ ...m })),
@@ -29,6 +31,13 @@ export function serializeProject(state, { savedAt } = {}) {
     // 今日の練習サマリ(GPS読込時点のスナップショット)。形が壊れていれば保存しない。
     daySummary: isDaySummaryShape(state.daySummary) ? state.daySummary : null,
   };
+}
+
+// lo < hi の数値で code が文字列の要素だけを {lo, hi, code} で残す。
+function serializeExcludedIntervals(list) {
+  return list
+    .filter((e) => e && Number.isFinite(e.lo) && Number.isFinite(e.hi) && e.lo < e.hi && typeof e.code === 'string')
+    .map((e) => ({ lo: e.lo, hi: e.hi, code: e.code }));
 }
 
 // 実行時フィールド(img 等)は落とし、保存対象の image/bounds/z/seaColor のみ残す。

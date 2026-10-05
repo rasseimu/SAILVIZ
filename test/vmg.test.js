@@ -259,3 +259,49 @@ test('analyzeFleetVmg: 高さ調整局面を exclude として返す', () => {
   assert.equal(r.exclude.length, 1);
   assert.ok(r.exclude[0].hi - r.exclude[0].lo >= 3000);
 });
+
+// ---- summarizeNeonShare 第3引数(participation): 参加時間中の勝率(Issue #30) ----
+test('summarizeNeonShare: 第3引数なしは従来どおり(追加フィールドなし)', () => {
+  const A = { id: 'a' };
+  const B = { id: 'b' };
+  const winners = [
+    { track: A, pointOfSail: 'upwind', lo: 0, hi: 3 * M },
+    { track: B, pointOfSail: 'upwind', lo: 3 * M, hi: 4 * M },
+  ];
+  const r = summarizeNeonShare(winners, [A, B]);
+  assert.deepEqual(Object.keys(r.rows[0]).sort(), ['downwind', 'track', 'upwind']);
+  near(r.rows[0].upwind, 0.75); near(r.rows[1].upwind, 0.25);
+  assert.equal(r.rows[0].downwind, 0);
+});
+
+test('summarizeNeonShare: 途中参加の艇を欠損時間分だけ不利にしない', () => {
+  // A は10分参加、B は後半5分だけ参加し、B は参加中ずっと勝者
+  const A = { id: 'a' };
+  const B = { id: 'b' };
+  const winners = [
+    { track: A, pointOfSail: 'upwind', lo: 0, hi: 5 * M }, // 前半は別の艇(表外)と比較して A が勝った想定
+    { track: B, pointOfSail: 'upwind', lo: 5 * M, hi: 10 * M },
+  ];
+  const participation = new Map([
+    [A, { upwind: 10 * M, downwind: 0 }],
+    [B, { upwind: 5 * M, downwind: 0 }],
+  ]);
+  const { rows } = summarizeNeonShare(winners, [A, B], participation);
+  near(rows[1].upwind, 1, 1e-9); // B: 5分参加中5分勝ち = 100%
+  near(rows[0].upwind, 0.5, 1e-9); // A: 10分参加中5分勝ち = 50%
+  assert.equal(rows[0].upwindParticipationMs, 10 * M);
+  assert.equal(rows[1].upwindParticipationMs, 5 * M);
+});
+
+test('summarizeNeonShare: 参加時間0の走種・participation に無い艇は null', () => {
+  const A = { id: 'a' };
+  const B = { id: 'b' };
+  const winners = [{ track: A, pointOfSail: 'upwind', lo: 0, hi: 1 * M }];
+  const participation = new Map([[A, { upwind: 2 * M, downwind: 0 }]]);
+  const { rows } = summarizeNeonShare(winners, [A, B], participation);
+  near(rows[0].upwind, 0.5);
+  assert.equal(rows[0].downwind, null);
+  assert.equal(rows[0].downwindParticipationMs, 0);
+  assert.equal(rows[1].upwind, null);
+  assert.equal(rows[1].downwind, null);
+});
