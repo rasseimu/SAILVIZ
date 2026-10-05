@@ -105,6 +105,7 @@ CREATE TABLE roadmaps (
   legacy_name TEXT,
   goal TEXT,
   milestones TEXT,
+  extra TEXT,                    -- 未マップキー保持(§5.1「捨てない」。現状の実データは0件)
   updated_at INTEGER
 );
 

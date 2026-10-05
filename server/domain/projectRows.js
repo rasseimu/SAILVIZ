@@ -47,11 +47,14 @@ export function decomposeProject(proj, { legacyName = null, pdId = 'pd_x', date 
 
   const sessions = [];
   const tracks = [];
+  // 旧データの track.id は一意でない(全艇が 'Location.csv' 等)。rec_sessions.id は
+  // 設計上「新規 ID」なので、器×索引で一意な合成 ID を採番し、元の track.id は view に残す。
   (Array.isArray(proj.tracks) ? proj.tracks : []).forEach((t, i) => {
+    const sessionId = `${pdId}_t${i}`;
     const view = { ...t };
-    delete view.id; delete view.points; delete view.bounds; delete view.tRange; delete view.source;
+    delete view.points; delete view.bounds; delete view.tRange; delete view.source;
     sessions.push({
-      id: t.id,
+      id: sessionId,
       owner_user_id: null,
       legacy_owner_name: null,
       kind: 'practice',
@@ -71,7 +74,7 @@ export function decomposeProject(proj, { legacyName = null, pdId = 'pd_x', date 
       finalized_at: null,
     });
     tracks.push({
-      session_id: t.id,
+      session_id: sessionId,
       points: col(t, 'points'),
       bounds: col(t, 'bounds'),
       t_range: col(t, 'tRange'),
@@ -81,8 +84,10 @@ export function decomposeProject(proj, { legacyName = null, pdId = 'pd_x', date 
     });
   });
 
+  // 旧データの反省 ID もファイル間で重複しうる(progress.json は元 ID をキーに別管理)。
+  // reflections.id は器×索引の合成 ID にし、元 ID は body(verbatim)に保持する。
   const reflections = (Array.isArray(proj.reflections) ? proj.reflections : []).map((r, i) => ({
-    id: r.id,
+    id: `${pdId}_r${i}`,
     practice_day_id: pdId,
     position: i,
     author_user_id: null,
@@ -107,7 +112,8 @@ export function assembleProject({ practiceDay, sessions = [], tracks = [], refle
     .sort((a, b) => pos(a.session_id) - pos(b.session_id))
     .map((tr) => {
       const s = sessById.get(tr.session_id);
-      const t = { id: tr.session_id, ...JSON.parse(tr.view) };
+      // view に元の track.id を含む(合成 session_id ではなく元 id を復元する)。
+      const t = { ...JSON.parse(tr.view) };
       addCol(t, 'points', tr.points);
       addCol(t, 'bounds', tr.bounds);
       addCol(t, 'tRange', tr.t_range);
