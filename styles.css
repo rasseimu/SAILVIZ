@@ -467,17 +467,54 @@ main { flex: 1; display: flex; min-height: 0; }
 .refl-note textarea { resize: vertical; font-family: inherit; font-size: 13px; padding: 5px 6px;
   border: 1px solid #b7c4d0; border-radius: 4px; }
 
-/* --- スマホ: 反省入力をメイン表示(地図/動画/タイムラインは省く) --- */
+/* --- スマホ: 閲覧専用の地図＋VMG凡例を上、反省一覧を下に縦並び(動画/タイムラインは省く) (Issue #48) --- */
 @media (max-width: 768px) {
+  /* 左サイドバーはアイコン列(折りたたみ表示)に固定。狭い画面で本文幅を確保する。
+     トグルは効かないため隠す(押すと localStorage の状態だけ変わりデスクトップ側に影響するため)。 */
+  body { --sidebar-w: var(--sidebar-w-collapsed); }
+  .sb-label { display: none; }
+  .sb-brand { padding: 0; justify-content: center; }
+  .sb-collapse { display: none; }
+  .sb-item { justify-content: center; padding: 10px 0; }
+  .sb-account { justify-content: center; padding: 8px 0; }
+  #account-menu { left: 8px; width: 220px; right: auto; }
+  /* overflow: アイコン列(64px)でもアカウントメニュー(220px)を切らずに出す。各 .sb-item/.sb-account は自身の overflow:hidden で収まる。
+     transition: デスクトップ→モバイルへ幅が変わる瞬間のアニメーションを止める。resize 時点で canvas 寸法を
+     測るため、アニメーション途中の幅で測ると地図が歪む(モバイル→デスクトップ方向は JS 対応が必要で別 Issue)。 */
+  #app-sidebar { overflow: visible; transition: none; }
+  body:not(.view-landing) #topbar,
+  body:not(.view-landing) main,
+  body:not(.view-landing) #transport,
+  body:not(.view-landing) #reflection-editor,
+  body:not(.view-landing) #home-screen,
+  body:not(.view-landing) #dashboard-screen { transition: none; }
+
   /* トップバーはタイトル(=ホームへ戻る)だけ残し、操作系は隠してスッキリ */
   #topbar > :not(strong) { display: none; }
   #topbar { padding: 8px 14px; }
 
-  /* 地図・動画・タイムライン・可視化サイドバーはモバイルでは非表示 */
-  #stage, #video-panel, #transport, #viz-sections { display: none; }
+  /* 動画・タイムライン・可視化サイドバーはモバイルでは非表示 */
+  #video-panel, #transport, #viz-sections { display: none; }
 
-  /* サイドバー(=反省一覧)を全幅メイン表示に */
-  #sidebar { width: 100%; border-right: none; }
+  /* main を縦並びのスクロール容器に。地図＋凡例(#stage)を上、反省一覧(#sidebar)を下 */
+  main { flex-direction: column; overflow-y: auto; }
+  #stage { flex: 0 0 auto; order: -1; }
+
+  /* 地図は固定高さ(凡例の表示/非表示で canvas 寸法を変えない)。
+     閲覧専用: タップでのクロップ・動画再生・長押しマークメニューとスクロール競合を防ぐ */
+  #map { height: 50vh; min-height: 240px; pointer-events: none; }
+  #drop-zone { display: none; }
+
+  /* 回転コントロールは地図上部で折り返し、🏆VMG・風軸↑ トグルを必ず見せる */
+  #rotate-control { left: 10px; right: 10px; flex-wrap: wrap; }
+  #rotate-control input[type=range] { width: auto; flex: 1 1 80px; min-width: 0; }
+
+  /* VMG凡例は地図の下に通常の流れで配置。縦は main のスクロール、表が広いときは凡例内で横スクロール */
+  #vmg-legend { position: static; max-width: none; max-height: none;
+    margin: 8px 10px 10px; overflow-x: auto; }
+
+  /* サイドバー(=反省一覧)を全幅で地図の下に。内容が短いときも main の下端まで伸ばして背景色で埋める */
+  #sidebar { width: 100%; border-right: none; flex: 1 0 auto; overflow: visible; }
 
   /* 追加ボタンをタップしやすく */
   .side-add { padding: 12px; font-size: 15px; }
