@@ -328,12 +328,9 @@ export function windDirAt(series, tMs) {
   return last.windFromDeg;
 }
 
-// 統合エントリ: COG→分割→判別→除去(マーク/微小旋回)→アンカー化→クローズ優先→180°折返し→孤立スパイク除去→平滑化。
-// 風向がほぼ一定という前提で、微小旋回・誤判別・孤立飛び値というノイズ源を段階的に落とし、
-// 緩やかに漂う安定した風軸のみを残す(レグ充填は密で不安定なため出力しない)。
-// 風軸は安定なクローズ(タック)を主に推定し、前後をタックに挟まれたランニング(ジャイブ)は落として
-// 前後のタックからの内挿で埋める。片側にもタックが無い区間のジャイブのみフォールバックで残す。
-export function estimateWindAxisSeries(track, options = {}) {
+// マニューバ(タック/ジャイブ)検出: COG→レグ分割→raw点で減速を再計測→判別→マーク近傍/微小旋回を除外。
+// 風軸推定と「今日の練習サマリ」のタック/ジャイブ回数が同じ検出結果を使うために公開する。
+export function detectManeuvers(track, options = {}) {
   const opts = options.opts ?? {};
   const marks = options.marks ?? [];
   const samples = computeCog(track.points, opts);
@@ -362,8 +359,18 @@ export function estimateWindAxisSeries(track, options = {}) {
   }
 
   for (const m of maneuvers) Object.assign(m, classifyManeuver(m, opts));
-  // マーク近傍＋微小旋回(=実タック/ジャイブでない)を除外してからアンカー化。
-  const kept = rejectMinorTurns(rejectMarkRoundings(maneuvers, marks, opts), opts);
+  // マーク近傍＋微小旋回(=実タック/ジャイブでない)を除外。
+  return rejectMinorTurns(rejectMarkRoundings(maneuvers, marks, opts), opts);
+}
+
+// 統合エントリ: COG→分割→判別→除去(マーク/微小旋回)→アンカー化→クローズ優先→180°折返し→孤立スパイク除去→平滑化。
+// 風向がほぼ一定という前提で、微小旋回・誤判別・孤立飛び値というノイズ源を段階的に落とし、
+// 緩やかに漂う安定した風軸のみを残す(レグ充填は密で不安定なため出力しない)。
+// 風軸は安定なクローズ(タック)を主に推定し、前後をタックに挟まれたランニング(ジャイブ)は落として
+// 前後のタックからの内挿で埋める。片側にもタックが無い区間のジャイブのみフォールバックで残す。
+export function estimateWindAxisSeries(track, options = {}) {
+  const opts = options.opts ?? {};
+  const kept = detectManeuvers(track, options);
   // クローズ(タック)を主に、前後をタックに挟まれたランニング(ジャイブ)アンカーは落とす。
   const preferred = preferCloseHauledAnchors(kept.map(estimateWindFromManeuver));
   // 誤判別による180°反転を大域風向の半球へ折り返す。

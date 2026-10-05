@@ -261,6 +261,9 @@
       <pre id="kb-modal-body" class="kb-modal-body"></pre>
     </div>
   </div>
+  <div id="ds-modal" class="ds-modal" hidden>
+    <div id="ds-modal-inner" class="ds-modal-inner" role="dialog" aria-modal="true" aria-label="今日の練習サマリ"></div>
+  </div>
 
   <section id="roadmap-screen">
     <header id="roadmap-bar">
@@ -298,6 +301,7 @@
     </label>
     <button id="folder-import" class="btn" title="同期フォルダから、GPS範囲内の動画を自動取込">📁 動画フォルダ取込</button>
     <button id="project-save" class="btn writes-json" title="現在の状態を保存フォルダに書き出す">💾 保存</button>
+    <button id="ds-open" class="btn" title="今日の練習サマリを開く" disabled>📊 サマリ</button>
     <label>整列:
       <select id="align-mode">
         <option value="absolute">絶対時刻</option>

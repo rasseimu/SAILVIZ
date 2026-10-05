@@ -1,39 +1,18 @@
 // server/api.js
 // http (req,res) を受け /api/* を処理。処理したら true を返す。
-import {
-  listProjects, readProject, writeProject, deleteProject,
-  readOverlay, writeOverlay, OVERLAY_NAMES, isValidProjectName,
-  saveUpload, findReflectionByDate, readUpload, renameUpload, isValidImportId, isValidUploadFile,
-  findProjectByPracticeDate,
-} from './storage.js';
-import { uniqueProjectName } from '../src/projectfs.js';
-import {
-  validateCommitRows, mergeRowsByMember, reflectionsFromRows, emptyProject,
-} from './minutesimport.js';
+// ルートは routes/ のモジュールに分割し、ここは順番に試す小さなディスパッチャに徹する。
+// 保存の窓口(repo)・閲覧ゲートの状態・認可ヘルパを ctx にまとめて各ルートへ渡す。
+import { send } from './routes/http.js';
 import { isAuthorized, isViewer } from './auth.js';
-import { practiceSummary } from '../src/summary.js';
-import { geminiGenerate } from './gemini.js';
-import { parseSensorCsv, jstStamp, buildTrack } from './sensorimport.js';
+import { createFileRepo } from './repos/fileRepo.js';
+import { basemapRoute } from './routes/basemap.js';
+import { aiRoute } from './routes/ai.js';
+import { compatRoute } from './routes/compat.js';
 import { randomBytes } from 'node:crypto';
 
-function send(res, status, obj, extraHeaders = {}) {
-  const body = JSON.stringify(obj);
-  res.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'cache-control': 'no-store',
-    ...extraHeaders,
-  });
-  res.end(body);
-}
-
-async function readBody(req) {
-  const chunks = [];
-  for await (const c of req) chunks.push(c);
-  if (!chunks.length) return null;
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
-}
-
-export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword }) {
+export function createApi({ dataDir, repo, token, geminiKey, viewUser, viewPassword }) {
+  // 保存の窓口。明示 repo が無ければ dataDir からファイル実装を組み立てる(既存挙動のまま)。
+  const store = repo || createFileRepo(dataDir);
   // 閲覧ゲート: user/password が両方設定されている時のみ有効。
   // 有効時はランダム秘密を発行し、ログイン成功で Cookie に載せる(パスワードは載せない)。
   const viewEnabled = Boolean(viewUser && viewPassword);
@@ -60,261 +39,16 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
       return true;
     };
 
+    const ctx = {
+      store, token, geminiKey, viewEnabled, viewSecret, viewUser, viewPassword,
+      secureCookie, path, method, requireViewer, requireWrite,
+    };
+
     try {
       if (path === '/api/health') { send(res, 200, { ok: true }); return true; }
-
-      // 地理院タイル(淡色)の同一オリジンプロキシ。クロスオリジンでの canvas 汚染を避け、
-      // 合成画像を toDataURL 可能にする。公開地図の読み取りのみなので認証不要。
-      const tileMatch = path.match(/^\/api\/basemap\/pale\/(\d{1,2})\/(\d{1,7})\/(\d{1,7})\.png$/);
-      if (tileMatch && method === 'GET') {
-        const z = Number(tileMatch[1]), x = Number(tileMatch[2]), y = Number(tileMatch[3]);
-        const n = 2 ** z;
-        if (z < 0 || z > 18 || x < 0 || y < 0 || x >= n || y >= n) {
-          res.writeHead(400, { 'content-type': 'text/plain' }); res.end('bad tile'); return true;
-        }
-        try {
-          const r = await fetch(`https://cyberjapandata.gsi.go.jp/xyz/pale/${z}/${x}/${y}.png`, {
-            headers: { 'user-agent': 'sailviz' },
-          });
-          if (!r.ok) { res.writeHead(r.status === 404 ? 404 : 502, { 'content-type': 'text/plain' }); res.end('tile unavailable'); return true; }
-          const buf = Buffer.from(await r.arrayBuffer());
-          res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=604800' });
-          res.end(buf);
-        } catch (e) {
-          res.writeHead(502, { 'content-type': 'text/plain' }); res.end('tile fetch error');
-        }
-        return true;
-      }
-
-      // AIコメント生成のプロキシ。キーはサーバ環境変数に隠す(クライアントに出さない)。
-      // 課金が発生するため編集モード(認証)必須にし、無認証の乱用を防ぐ。
-      if (path === '/api/ai-comment' && method === 'POST') {
-        if (requireWrite()) return true;
-        if (!geminiKey) { send(res, 503, { error: 'AI未設定(GEMINI_API_KEY 未設定)' }); return true; }
-        const body = await readBody(req) || {};
-        try {
-          const text = await geminiGenerate({
-            apiKey: geminiKey,
-            model: body.model, system: body.system, parts: body.parts,
-            temperature: body.temperature, maxOutputTokens: body.maxOutputTokens,
-            responseMimeType: body.responseMimeType,
-          });
-          send(res, 200, { text });
-        } catch (e) {
-          send(res, 502, { error: String((e && e.message) || e) });
-        }
-        return true;
-      }
-
-      if (path === '/api/auth') { send(res, 200, { unlocked: isAuthorized(req, token) }); return true; }
-
-      // 閲覧セッションの状態。ゲート無効時は常にログイン済み扱い。
-      if (path === '/api/session' && method === 'GET') {
-        send(res, 200, { loggedIn: isViewer(req, viewSecret, token), gate: viewEnabled });
-        return true;
-      }
-
-      // 閲覧ログイン。user/password を照合し、成功で sailviz_view Cookie を発行。
-      if (path === '/api/login' && method === 'POST') {
-        if (!viewEnabled) { send(res, 200, { loggedIn: true }); return true; }
-        const body = await readBody(req) || {};
-        if (body.user === viewUser && body.password === viewPassword) {
-          send(res, 200, { loggedIn: true }, {
-            'set-cookie': `sailviz_view=${viewSecret}; HttpOnly; SameSite=Lax; Path=/${secureCookie}`,
-          });
-        } else send(res, 401, { error: 'ユーザー名またはパスワードが違います' });
-        return true;
-      }
-
-      if (path === '/api/logout' && method === 'POST') {
-        send(res, 200, { loggedIn: false }, {
-          'set-cookie': `sailviz_view=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secureCookie}`,
-        });
-        return true;
-      }
-
-      if (path === '/api/sensor-imports' && method === 'POST') {
-        if (requireWrite()) return true;
-        const body = await readBody(req) || {};
-        const { person, csv } = body;
-        if (typeof csv !== 'string' || typeof person !== 'string') {
-          send(res, 400, { error: 'person と csv が必要' }); return true;
-        }
-        let parsed;
-        try { parsed = parseSensorCsv(csv); }
-        catch (e) { send(res, 422, { error: String(e.message || e) }); return true; }
-        const importId = `imp_${jstStamp(parsed.practiceDate).replace(/-/g, '_')}_${randomBytes(4).toString('hex')}`;
-        await saveUpload(dataDir, importId, 'raw.csv', csv);
-        const matched = await findReflectionByDate(dataDir, person, parsed.practiceDate);
-        send(res, 200, {
-          importId,
-          practiceDate: parsed.practiceDate,
-          points: parsed.points.length,
-          bounds: parsed.bounds,
-          matched,
-        });
-        return true;
-      }
-
-      if (path === '/api/minutes-imports/commit' && method === 'POST') {
-        if (requireWrite()) return true;
-        const body = await readBody(req) || {};
-        const practiceDate = Number(body.practiceDate);
-        const rows = Array.isArray(body.rows) ? body.rows : [];
-        const bad = validateCommitRows(rows, practiceDate);
-        if (bad) { send(res, 400, { error: bad }); return true; }
-
-        const reflections = reflectionsFromRows({ rows: mergeRowsByMember(rows), now: Date.now() });
-        const found = await findProjectByPracticeDate(dataDir, practiceDate);
-        let name, created = false, proj;
-        if (found) {
-          name = found.name;
-          proj = await readProject(dataDir, name);
-          if (!Array.isArray(proj.reflections)) proj.reflections = [];
-        } else {
-          const existing = (await listProjects(dataDir)).map((p) => p.name);
-          name = uniqueProjectName(practiceDate, existing);
-          proj = emptyProject(practiceDate, new Date().toISOString());
-          created = true;
-        }
-        proj.reflections.push(...reflections);
-        if (typeof proj.practiceDate !== 'number') proj.practiceDate = practiceDate;
-        await writeProject(dataDir, name, proj);
-        send(res, 200, { name, added: reflections.length, created });
-        return true;
-      }
-
-      const commitMatch = path.match(/^\/api\/sensor-imports\/([^/]+)\/commit$/);
-      if (commitMatch && method === 'POST') {
-        if (requireWrite()) return true;
-        const importId = decodeURIComponent(commitMatch[1]);
-        if (!isValidImportId(importId)) { send(res, 400, { error: 'bad importId' }); return true; }
-        const body = await readBody(req) || {};
-        const { name, boatNumber } = body;
-        if (typeof name !== 'string' || !isValidProjectName(name) ||
-            typeof boatNumber !== 'string' || !boatNumber.trim()) {
-          send(res, 400, { error: 'name と boatNumber が必要' }); return true;
-        }
-        let csv;
-        try { csv = await readUpload(dataDir, importId, 'raw.csv'); }
-        catch { send(res, 404, { error: 'import not found' }); return true; }
-        let proj;
-        try { proj = await readProject(dataDir, name); }
-        catch { send(res, 404, { error: 'project not found' }); return true; }
-
-        const parsed = parseSensorCsv(csv);
-        const finalName = `${boatNumber.trim()}_${jstStamp(parsed.points[0].t)}.csv`;
-        await renameUpload(dataDir, importId, 'raw.csv', finalName);
-
-        const uploadedAt = Date.now();
-        const tracks = Array.isArray(proj.tracks) ? proj.tracks : [];
-        const track = buildTrack({
-          id: importId,
-          name: boatNumber.trim(),
-          points: parsed.points,
-          bounds: parsed.bounds,
-          colorIndex: tracks.length,
-          source: { importId, filename: finalName, boatNumber: boatNumber.trim(), uploadedAt },
-          excludedIntervals: parsed.excludedIntervals,
-        });
-        tracks.push(track);
-        proj.tracks = tracks;
-        const logs = Array.isArray(proj.sensorLogs) ? proj.sensorLogs : [];
-        logs.push({ id: importId, filename: finalName, size: Buffer.byteLength(csv, 'utf8'), uploadedAt });
-        proj.sensorLogs = logs;
-
-        await writeProject(dataDir, name, proj);
-        send(res, 200, { name });
-        return true;
-      }
-
-      const upMatch = path.match(/^\/api\/uploads\/([^/]+)\/([^/]+)$/);
-      if (upMatch && method === 'GET') {
-        if (requireViewer()) return true;
-        const importId = decodeURIComponent(upMatch[1]);
-        const file = decodeURIComponent(upMatch[2]);
-        if (!isValidImportId(importId) || !isValidUploadFile(file)) {
-          send(res, 400, { error: 'bad path' }); return true;
-        }
-        try {
-          const text = await readUpload(dataDir, importId, file);
-          res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store' });
-          res.end(text);
-        } catch { send(res, 404, { error: 'not found' }); }
-        return true;
-      }
-
-      if (path === '/api/unlock' && method === 'POST') {
-        if (!token) { send(res, 503, { error: 'write disabled' }); return true; }
-        const body = await readBody(req);
-        if (body?.password === token) {
-          send(res, 200, { unlocked: true }, {
-            'set-cookie': `sailviz_token=${token}; HttpOnly; SameSite=Lax; Path=/${secureCookie}`,
-          });
-        } else send(res, 401, { error: 'invalid password' });
-        return true;
-      }
-
-      if (path === '/api/lock' && method === 'POST') {
-        send(res, 200, { unlocked: false }, {
-          'set-cookie': `sailviz_token=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secureCookie}`,
-        });
-        return true;
-      }
-
-      if (path === '/api/projects' && method === 'GET') {
-        if (requireViewer()) return true;
-        send(res, 200, await listProjects(dataDir)); return true;
-      }
-
-      if (path === '/api/summaries' && method === 'GET') {
-        if (requireViewer()) return true;
-        const list = await listProjects(dataDir);
-        const rows = [];
-        for (const { name } of list) {
-          try { rows.push({ name, ...practiceSummary(await readProject(dataDir, name), { name }) }); }
-          catch { /* 壊れたファイルは飛ばす */ }
-        }
-        send(res, 200, rows); return true;
-      }
-
-      const projMatch = path.match(/^\/api\/projects\/([^/]+)$/);
-      if (projMatch) {
-        const name = decodeURIComponent(projMatch[1]);
-        if (!isValidProjectName(name)) { send(res, 400, { error: 'bad name' }); return true; }
-        if (method === 'GET') {
-          if (requireViewer()) return true;
-          try { send(res, 200, await readProject(dataDir, name)); }
-          catch { send(res, 404, { error: 'not found' }); }
-          return true;
-        }
-        if (method === 'PUT') {
-          if (requireWrite()) return true;
-          await writeProject(dataDir, name, await readBody(req));
-          send(res, 200, { ok: true }); return true;
-        }
-        if (method === 'DELETE') {
-          if (requireWrite()) return true;
-          try { await deleteProject(dataDir, name); } catch { /* 既に無ければ黙認 */ }
-          send(res, 200, { ok: true }); return true;
-        }
-      }
-
-      const ovMatch = path.match(/^\/api\/overlays\/([^/]+)$/);
-      if (ovMatch) {
-        const name = ovMatch[1];
-        if (!OVERLAY_NAMES.includes(name)) { send(res, 400, { error: 'bad overlay' }); return true; }
-        if (method === 'GET') {
-          if (requireViewer()) return true;
-          send(res, 200, await readOverlay(dataDir, name)); return true;
-        }
-        if (method === 'PUT') {
-          if (requireWrite()) return true;
-          await writeOverlay(dataDir, name, await readBody(req));
-          send(res, 200, { ok: true }); return true;
-        }
-      }
-
+      if (await basemapRoute(req, res, ctx)) return true;
+      if (await aiRoute(req, res, ctx)) return true;
+      if (await compatRoute(req, res, ctx)) return true;
       send(res, 404, { error: 'no route' });
       return true;
     } catch (e) {

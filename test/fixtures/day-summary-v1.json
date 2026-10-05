@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "sourceKey": "a.csv|300|1787000000000|1787000299000|0a1b2c3d;b.csv|30|1787000000000|1787000290000|4e5f6a7b",
+  "computedAt": 1787000400000,
+  "overall": {
+    "startMs": 1787000000000,
+    "endMs": 1787000299000,
+    "durationMs": 299000,
+    "boatCount": 2,
+    "quality": { "level": "poor", "note": "欠損0%・記録間隔10秒", "boatIndex": 1 },
+    "windAxis": { "ok": true, "value": { "deg": 215 } },
+    "windRange": { "ok": false, "reason": "tacks-insufficient" }
+  },
+  "boats": [
+    {
+      "index": 0, "name": "a.csv", "color": "#1c72b8",
+      "distanceM": 870, "durationMs": 299000,
+      "avgSpeedMps": { "ok": true, "value": 2.9 },
+      "maxSpeedMps": { "ok": true, "value": 3.1 },
+      "tacks": { "ok": true, "value": 4 },
+      "gybes": { "ok": true, "value": 0 },
+      "quality": { "level": "good", "note": "欠損0%・記録間隔1秒・精度5m" }
+    },
+    {
+      "index": 1, "name": "b.csv", "color": "#e67e22",
+      "distanceM": 850, "durationMs": 290000,
+      "avgSpeedMps": { "ok": true, "value": 2.8 },
+      "maxSpeedMps": { "ok": true, "value": 3.0 },
+      "tacks": { "ok": false, "reason": "gps-poor" },
+      "gybes": { "ok": false, "reason": "gps-poor" },
+      "quality": { "level": "poor", "note": "欠損0%・記録間隔10秒" }
+    }
+  ],
+  "comparison": {
+    "comparableMs": { "ok": true, "value": 270000 },
+    "bestUpwind": { "ok": true, "value": { "index": 0, "name": "a.csv", "color": "#1c72b8", "vmgMps": 1.9 } },
+    "bestDownwind": { "ok": false, "reason": "no-overlap" }
+  }
+}
