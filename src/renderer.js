@@ -13,9 +13,11 @@ export function trackForHighlight(tracks, boatId) {
 }
 
 // crop(グローバル時間)を各トラックの絶対時刻窓に変換
+// tRange が欠落している場合は start=0 としてフォールバックする（B2 防御ガード）。
 function trackWindow(track, crop, mode) {
   if (mode === 'elapsed') {
-    return { lo: track.tRange.start + crop.start, hi: track.tRange.start + crop.end };
+    const start = track?.tRange?.start ?? 0;
+    return { lo: start + crop.start, hi: start + crop.end };
   }
   return { lo: crop.start, hi: crop.end };
 }
