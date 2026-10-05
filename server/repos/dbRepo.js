@@ -27,6 +27,15 @@ function insertRow(db, table, row) {
 
 const genId = (prefix) => `${prefix}_${randomBytes(5).toString('hex')}`;
 
+// 点列の指紋。別艇の GPS 軌跡は点数と端点が異なるので同定に十分。
+// 互換 PUT で incoming トラックを既存 DB トラックに対応づけるのに使う(id が一意でないため)。
+function trackFingerprint(points) {
+  const a = Array.isArray(points) ? points : [];
+  if (!a.length) return 'empty';
+  const f = a[0]; const l = a[a.length - 1];
+  return `${a.length}|${f.t},${f.lat},${f.lon}|${l.t},${l.lat},${l.lon}`;
+}
+
 export function createDbRepo({ db, dataDir }) {
   const getPd = db.prepare('SELECT * FROM practice_days WHERE legacy_name = ?');
 
@@ -78,20 +87,33 @@ export function createDbRepo({ db, dataDir }) {
           // practice_day メタ
           db.prepare('UPDATE practice_days SET web_state = ?, saved_at = ?, date = ?, rev = rev + 1, updated_at = ? WHERE id = ?')
             .run(decomp.practiceDay.web_state, decomp.practiceDay.saved_at, decomp.practiceDay.date, now, pdId);
-          // トラック(②③)
-          const existingTrackIds = new Set(
-            db.prepare('SELECT id FROM rec_sessions WHERE practice_day_id = ?').all(pdId).map((r) => r.id),
-          );
-          const tById = new Map(decomp.tracks.map((t) => [t.session_id, t]));
-          const sById = new Map(decomp.sessions.map((s) => [s.id, s]));
-          decomp.sessions.forEach((s) => {
-            if (existingTrackIds.has(s.id)) {
-              // ③ 点列は書き換えず view(表示設定)のみ。position は配列順に追従。
-              db.prepare('UPDATE tracks SET view = ? WHERE session_id = ?').run(tById.get(s.id).view, s.id);
-              db.prepare('UPDATE rec_sessions SET position = ? WHERE id = ?').run(s.position, s.id);
+          // トラック(②③): 旧データは track.id が一意でない(全艇 'Location.csv')ため、
+          // index でも id でも同定できない。点列の指紋(fingerprint)で incoming↔既存 を対応づける。
+          // これで並べ替え・中抜き削除でも「表示設定だけ反映・点列は不変」を正しく保てる。
+          const existingTracks = db.prepare(
+            `SELECT rs.id AS sid, t.points AS points FROM rec_sessions rs
+               JOIN tracks t ON t.session_id = rs.id WHERE rs.practice_day_id = ?`,
+          ).all(pdId);
+          const fpQueue = new Map(); // fingerprint -> [sessionId,...](同指紋は順に消費)
+          for (const et of existingTracks) {
+            const key = trackFingerprint(JSON.parse(et.points || 'null'));
+            if (!fpQueue.has(key)) fpQueue.set(key, []);
+            fpQueue.get(key).push(et.sid);
+          }
+          const incomingTracks = Array.isArray(incoming.tracks) ? incoming.tracks : [];
+          incomingTracks.forEach((t, i) => {
+            const key = trackFingerprint(t.points);
+            const q = fpQueue.get(key);
+            const matchId = q && q.length ? q.shift() : null;
+            if (matchId) {
+              // ③ 点列は書き換えず view(表示設定)だけ反映。position は配列順。
+              db.prepare('UPDATE tracks SET view = ? WHERE session_id = ?').run(decomp.tracks[i].view, matchId);
+              db.prepare('UPDATE rec_sessions SET position = ? WHERE id = ?').run(i, matchId);
             } else {
-              insertRow(db, 'rec_sessions', s);
-              insertRow(db, 'tracks', tById.get(s.id));
+              // 新規トラック: 既存 ID と衝突しない一意 ID で点列込み挿入。
+              const newId = `${pdId}_t_${randomBytes(4).toString('hex')}`;
+              insertRow(db, 'rec_sessions', { ...decomp.sessions[i], id: newId });
+              insertRow(db, 'tracks', { ...decomp.tracks[i], session_id: newId });
             }
           });
           // ② incoming に無い既存トラックは残す(何もしない)
@@ -104,7 +126,6 @@ export function createDbRepo({ db, dataDir }) {
             db.prepare('DELETE FROM reflections WHERE id = ?').run(r.id);
             insertRow(db, 'reflections', r);
           }
-          void sById;
         }
         db.exec('COMMIT');
       } catch (e) {

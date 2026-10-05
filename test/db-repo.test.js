@@ -63,17 +63,19 @@ test('削除ルール②: _rev 無し PUT で既存トラックを消さない(�
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('削除ルール③: 既存トラックの点列は書き換えず、表示設定だけ反映', async () => {
+test('削除ルール③: 表示設定の編集は in-place 更新(複製せず点列も保持)', async () => {
+  // Web は GPS 点列を編集しない。同じ点列で view(visible/name)だけ変えて保存する。
+  // トラックは点列の指紋で同定され、既存行を上書き更新する(複製しない・点列列は触らない)。
   const { repo, dataDir } = await freshRepo();
   await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj({ tracks: [track('t1')] }));
-  // 同じ id で points を改変し visible/name を変えて PUT
-  const mutated = { ...track('t1'), visible: false, name: 'renamed', points: [{ t: 9, lat: 0, lon: 0, speed: 9 }] };
-  await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj({ tracks: [mutated] }));
+  const edited = { ...track('t1'), visible: false, name: 'renamed' }; // 点列は同じ
+  await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj({ tracks: [edited] }));
   const got = await repo.readProject('sailviz-20260901-0900.sailviz.json');
-  const t = got.tracks.find((x) => x.id === 't1');
+  assert.equal(got.tracks.length, 1, '複製されない(in-place 更新)');
+  const t = got.tracks[0];
   assert.equal(t.visible, false, '表示設定は反映');
   assert.equal(t.name, 'renamed');
-  assert.deepStrictEqual(t.points, [{ t: 1, lat: 35, lon: 139, speed: 1 }], '点列は元のまま');
+  assert.deepStrictEqual(t.points, [{ t: 1, lat: 35, lon: 139, speed: 1 }], '点列は保持');
   await rm(dataDir, { recursive: true, force: true });
 });
 
@@ -124,6 +126,37 @@ test('findProjectByPracticeDate は practiceDate を持つ器だけ JST 日で�
   const found = await repo.findProjectByPracticeDate(pd);
   assert.equal(found.name, 'sailviz-20260901-0900.sailviz.json');
   assert.equal(await repo.findProjectByPracticeDate(Date.UTC(2020, 0, 1)), null);
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test('中抜き削除で残トラックの color↔points が崩れない(id 重複でも)', async () => {
+  // 旧データは全艇 id='Location.csv'。index 一致だと中抜き削除で view と点列がズレる。
+  const { repo, dataDir } = await freshRepo();
+  const t = (lat, color) => ({ id: 'Location.csv', name: `b${lat}`, color, visible: true,
+    points: [{ t: lat, lat, lon: 0, speed: 0 }], bounds: { minLat: lat, maxLat: lat, minLon: 0, maxLon: 0 } });
+  const NAME = 'sailviz-20260901-0900.sailviz.json';
+  await repo.writeProject(NAME, baseProj({ tracks: [t(0, '#000'), t(1, '#111'), t(2, '#222')] }));
+  // 真ん中(lat=1)を削除して PUT(Web の splice 相当)。rule② で残るが、各トラックの色↔点列は保たれること。
+  await repo.writeProject(NAME, baseProj({ tracks: [t(0, '#000'), t(2, '#222')] }));
+  const got = await repo.readProject(NAME);
+  const byLat = new Map(got.tracks.map((tr) => [tr.points[0].lat, tr.color]));
+  assert.equal(byLat.get(0), '#000');
+  assert.equal(byLat.get(1), '#111', 'lat=1 の色が別トラックの色に化けない');
+  assert.equal(byLat.get(2), '#222');
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test('トラック並べ替え PUT で points↔view がズレない', async () => {
+  const { repo, dataDir } = await freshRepo();
+  const t = (lat, color) => ({ id: 'Location.csv', name: `b${lat}`, color, visible: true,
+    points: [{ t: lat, lat, lon: 0, speed: 0 }], bounds: { minLat: lat, maxLat: lat, minLon: 0, maxLon: 0 } });
+  const NAME = 'sailviz-20260901-0900.sailviz.json';
+  await repo.writeProject(NAME, baseProj({ tracks: [t(0, '#000'), t(1, '#111')] }));
+  await repo.writeProject(NAME, baseProj({ tracks: [t(1, '#111'), t(0, '#000')] })); // 並べ替え
+  const got = await repo.readProject(NAME);
+  const byLat = new Map(got.tracks.map((tr) => [tr.points[0].lat, tr.color]));
+  assert.equal(byLat.get(0), '#000');
+  assert.equal(byLat.get(1), '#111');
   await rm(dataDir, { recursive: true, force: true });
 });
 
