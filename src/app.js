@@ -243,7 +243,7 @@ function renderVmgLegend() {
 // elapsedモードでの軸オフセット(基準トラック開始)。軸時刻⇄絶対時刻の変換に使う。
 function currentBase() {
   const refTrack = state.tracks.find((t) => t.visible) || null;
-  return state.mode === 'elapsed' && refTrack ? refTrack.tRange.start : 0;
+  return state.mode === 'elapsed' && refTrack ? (refTrack.tRange?.start ?? 0) : 0;
 }
 
 let mapRot = 0; // マップ回転角(ラジアン、表示のみ・保存しない)。fitTransform後に再適用。
@@ -256,7 +256,7 @@ function applyWindUpRotation(now) {
   const ref = state.tracks.find((t) => t.visible) || null;
   const series = ref ? windSeriesByTrack.get(ref) : null;
   if (!ref || !series || series.length === 0) return;
-  const lookupT = state.mode === 'elapsed' ? ref.tRange.start + now : now;
+  const lookupT = state.mode === 'elapsed' ? (ref.tRange?.start ?? 0) + now : now;
   const dir = windDirAt(series, lookupT);
   if (dir == null) return;
   mapRot = (-dir * Math.PI) / 180; // 回転は従来どおり(風を真上へ)
@@ -375,7 +375,7 @@ function draw() {
   const windSeries = state.tracks
     .filter((t) => t.visible && (windSeriesByTrack.get(t) || []).length)
     .map((t) => {
-      const off = state.mode === 'elapsed' ? t.tRange.start : 0;
+      const off = state.mode === 'elapsed' ? (t.tRange?.start ?? 0) : 0;
       return {
         color: t.color,
         series: windSeriesByTrack.get(t).map((p) => ({ tMs: p.tMs - off, windFromDeg: p.windFromDeg })),
@@ -425,7 +425,7 @@ let videoSeq = 0;
 function firstVisibleTrack() { return state.tracks.find((t) => t.visible) || null; }
 function nowAbsolute() {
   const r = firstVisibleTrack();
-  return state.mode === 'elapsed' && r ? r.tRange.start + playback.getNow() : playback.getNow();
+  return state.mode === 'elapsed' && r ? (r.tRange?.start ?? 0) + playback.getNow() : playback.getNow();
 }
 // 時刻 t(絶対ms) に動画を配置。src を渡すと status に配置理由を表示。
 function placeVideo(file, t, durationMs, src) {
@@ -1226,7 +1226,7 @@ function pickTrackTime(px, py) {
       const s = worldToScreen(project(p.lat, p.lon, T.proj), T);
       const d = Math.hypot(s.px - px, s.py - py);
       if (d <= PICK_PX && (!best || d < best.d)) {
-        best = { d, time: state.mode === 'elapsed' ? p.t - tr.tRange.start : p.t };
+        best = { d, time: state.mode === 'elapsed' ? p.t - (tr.tRange?.start ?? 0) : p.t };
       }
     }
   }
@@ -1293,7 +1293,7 @@ function refitTransform() {
 function syncFromVideo() {
   if (!currentVideo) return;
   const r = firstVisibleTrack();
-  const base = state.mode === 'elapsed' && r ? r.tRange.start : 0;
+  const base = state.mode === 'elapsed' && r ? (r.tRange?.start ?? 0) : 0;
   playback.seek(currentVideo.t + $('video-el').currentTime * 1000 - base);
 }
 // syncFromVideo の逆算。軸時刻 t を動画の currentTime(秒) に直して動画をシーク。
@@ -1302,7 +1302,7 @@ function seekVideoToAxisTime(t) {
   if (!currentVideo) return;
   const vid = $('video-el');
   const r = firstVisibleTrack();
-  const base = state.mode === 'elapsed' && r ? r.tRange.start : 0;
+  const base = state.mode === 'elapsed' && r ? (r.tRange?.start ?? 0) : 0;
   const max = Number.isFinite(vid.duration) ? vid.duration : Infinity;
   vid.currentTime = Math.max(0, Math.min((t + base - currentVideo.t) / 1000, max));
 }

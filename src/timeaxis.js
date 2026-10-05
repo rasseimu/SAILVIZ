@@ -4,7 +4,8 @@ export function clamp(v, lo, hi) {
 
 // 可視トラックのグローバル時間範囲。absolute=絶対時刻, elapsed=0起点の経過。
 export function globalRange(tracks, mode) {
-  const visible = tracks.filter((t) => t.visible);
+  // tRange が欠落しているトラックは範囲計算から除外する（B2 防御ガード）。
+  const visible = tracks.filter((t) => t.visible && t.tRange != null);
   if (visible.length === 0) return { start: 0, end: 0 };
   if (mode === 'elapsed') {
     const maxDur = Math.max(...visible.map((t) => t.tRange.end - t.tRange.start));
@@ -17,8 +18,9 @@ export function globalRange(tracks, mode) {
 }
 
 // トラックの点列を引くための絶対時刻に変換。
+// tRange が欠落している場合は start=0 としてフォールバックする（B2 防御ガード）。
 export function trackLookupTime(track, now, mode) {
-  return mode === 'elapsed' ? track.tRange.start + now : now;
+  return mode === 'elapsed' ? (track?.tRange?.start ?? 0) + now : now;
 }
 
 // タイムライン軸に合わせてイベント時刻を変換。

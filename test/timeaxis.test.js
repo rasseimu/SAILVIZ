@@ -47,3 +47,37 @@ test('remapEventsToAxis: elapsed subtracts base from t and tEnd', () => {
   // 元配列は不変
   assert.equal(evs[0].t, 5000);
 });
+
+// B2: tRange 欠落時でも例外を投げないガード
+test('globalRange: tRange が null のトラックは visible フィルタで除外されても例外を投げない', () => {
+  // tRange あり + tRange なし の混在
+  const withRange = { visible: true, tRange: { start: 1000, end: 5000 } };
+  const noRange   = { visible: true, tRange: null };
+  // 正常系は変わらない
+  assert.deepEqual(globalRange([withRange], 'absolute'), { start: 1000, end: 5000 });
+  // tRange なしトラックだけが visible → 安全なフォールバック
+  assert.doesNotThrow(() => globalRange([noRange], 'absolute'));
+  assert.doesNotThrow(() => globalRange([noRange], 'elapsed'));
+  const r = globalRange([noRange], 'absolute');
+  assert.deepEqual(r, { start: 0, end: 0 });
+});
+
+test('globalRange: tRange が undefined のトラックも例外を投げない', () => {
+  const noRange = { visible: true };
+  assert.doesNotThrow(() => globalRange([noRange], 'absolute'));
+  assert.doesNotThrow(() => globalRange([noRange], 'elapsed'));
+  assert.deepEqual(globalRange([noRange], 'absolute'), { start: 0, end: 0 });
+});
+
+test('trackLookupTime: tRange が null でも elapsed モードで例外を投げない', () => {
+  const noRange = { visible: true, tRange: null };
+  assert.doesNotThrow(() => trackLookupTime(noRange, 500, 'elapsed'));
+  // tRange.start が取れない場合は 0 を使ってフォールバック(now がそのまま返る)
+  assert.equal(trackLookupTime(noRange, 500, 'elapsed'), 500);
+});
+
+test('trackLookupTime: tRange が undefined でも elapsed モードで例外を投げない', () => {
+  const noRange = { visible: true };
+  assert.doesNotThrow(() => trackLookupTime(noRange, 500, 'elapsed'));
+  assert.equal(trackLookupTime(noRange, 500, 'elapsed'), 500);
+});
