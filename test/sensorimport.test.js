@@ -42,3 +42,11 @@ test('buildTrack: 既存 Track 形状', () => {
   assert.ok(tr.bounds && typeof tr.bounds.minLat === 'number');
   assert.deepEqual(tr.source, { importId: 'imp_x' });
 });
+
+test('buildTrack: tRange が点列の最初と最後の t から計算される', () => {
+  const { points, bounds } = parseSensorCsv(CSV);
+  const tr = buildTrack({ id: 'imp_y', name: '0001', points, bounds, colorIndex: 1, source: { importId: 'imp_y' } });
+  assert.ok(tr.tRange, 'tRange が存在する');
+  assert.equal(tr.tRange.start, points[0].t, 'tRange.start は先頭点の t');
+  assert.equal(tr.tRange.end, points[points.length - 1].t, 'tRange.end は末尾点の t');
+});

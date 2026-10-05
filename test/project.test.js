@@ -111,3 +111,63 @@ test('practiceDate が数値でなければ null', () => {
   const out = deserializeProject({ version: 1, practiceDate: 'bad' });
   assert.equal(out.practiceDate, null);
 });
+
+test('deserialize: tRange が欠けていれば点列から補う（後方互換）', () => {
+  // サーバ側の旧データ（buildTrack が tRange を付けていなかった版）を模す
+  const obj = {
+    version: 1,
+    tracks: [{
+      id: 'imp_old', name: '旧軌跡', color: '#e6194B', visible: true,
+      points: [
+        { t: 1000000, lat: 35.3, lon: 139.48 },
+        { t: 1010000, lat: 35.31, lon: 139.49 },
+        { t: 1020000, lat: 35.32, lon: 139.50 },
+      ],
+      bounds: { minLat: 35.3, maxLat: 35.32, minLon: 139.48, maxLon: 139.50 },
+      // tRange なし（旧データ）
+      windAxisOverrides: [],
+    }],
+    events: [], marks: [], pins: [], videos: [], reflections: [],
+  };
+  const out = deserializeProject(obj);
+  const tr = out.tracks[0];
+  assert.ok(tr.tRange, 'tRange が補完される');
+  assert.equal(tr.tRange.start, 1000000, 'tRange.start = 最初の点の t');
+  assert.equal(tr.tRange.end, 1020000, 'tRange.end = 最後の点の t');
+});
+
+test('deserialize: tRange が既にあれば点列から上書きしない', () => {
+  const obj = {
+    version: 1,
+    tracks: [{
+      id: 'imp_new', name: '新軌跡', color: '#3cb44b', visible: true,
+      points: [
+        { t: 2000000, lat: 35.3, lon: 139.48 },
+        { t: 2050000, lat: 35.31, lon: 139.49 },
+      ],
+      bounds: { minLat: 35.3, maxLat: 35.31, minLon: 139.48, maxLon: 139.49 },
+      tRange: { start: 2000000, end: 2050000 },
+      windAxisOverrides: [],
+    }],
+    events: [], marks: [], pins: [], videos: [], reflections: [],
+  };
+  const out = deserializeProject(obj);
+  assert.deepEqual(out.tracks[0].tRange, { start: 2000000, end: 2050000 });
+});
+
+test('deserialize: tRange 欠落・点列も空のトラックは tRange を null のまま補完しない', () => {
+  const obj = {
+    version: 1,
+    tracks: [{
+      id: 'imp_empty', name: '空軌跡', color: '#ffe119', visible: false,
+      points: [],
+      bounds: null,
+      // tRange なし・点列も空
+      windAxisOverrides: [],
+    }],
+    events: [], marks: [], pins: [], videos: [], reflections: [],
+  };
+  const out = deserializeProject(obj);
+  // 点が無ければ tRange は設定できない → undefined のまま（または null）、エラーにならない
+  assert.ok(!out.tracks[0].tRange, 'tRange は falsy のまま');
+});
