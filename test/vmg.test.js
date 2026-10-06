@@ -218,15 +218,16 @@ test('summarizeNeonShare: 勝者なしなら全艇0%・合計0', () => {
 
 // ===== 高さ調整局面フィルタ: detectHeightAdjustWindows =====
 // クローズを走り続ける1艇に対し、他艇の過半数が下った(フット/リーチ帯)時間帯を全艇除外する。
+// minHoldSec のデフォルトが 30 秒なので、確実に検出されるよう 60 秒のシナリオを使う。
 test('detectHeightAdjustWindows: クローズ1艇＋過半数フットで区間検出', () => {
   const t0 = 1_787_000_000_000;
-  const ws = [{ tMs: t0, windFromDeg: 0 }, { tMs: t0 + 30000, windFromDeg: 0 }];
-  const a = straightTrack('A', t0, 45, 30, 3);  // クローズ(|Δ|=45 <55)
-  const b = straightTrack('B', t0, 75, 30, 3);  // フット(|Δ|=75: 45+15以上 かつ <100)
-  const c = straightTrack('C', t0, 75, 30, 3);  // フット
+  const ws = [{ tMs: t0, windFromDeg: 0 }, { tMs: t0 + 120_000, windFromDeg: 0 }];
+  const a = straightTrack('A', t0, 45, 120, 3);  // クローズ(|Δ|=45 <55), 120 秒継続
+  const b = straightTrack('B', t0, 75, 120, 3);  // フット(|Δ|=75: 45+15以上 かつ <100)
+  const c = straightTrack('C', t0, 75, 120, 3);  // フット
   const win = detectHeightAdjustWindows([a, b, c], ws);
   assert.equal(win.length, 1);
-  assert.ok(win[0].hi - win[0].lo >= 3000, `duration ${win[0].hi - win[0].lo}`);
+  assert.ok(win[0].hi - win[0].lo >= 30_000, `duration ${win[0].hi - win[0].lo} ms`);
 });
 
 test('detectHeightAdjustWindows: minHoldSec 未満は検出しない', () => {
@@ -248,6 +249,32 @@ test('detectHeightAdjustWindows: ランニング艇は誤検出しない', () =>
   const c = straightTrack('C', t0, 175, 30, 3);  // ランニング
   const win = detectHeightAdjustWindows([a, b, c], ws);
   assert.equal(win.length, 0);
+});
+
+// B3: minHoldSec の既定値は 30 秒以上 — タック中の短い状態変化(< 30 秒)を高さ調整局面として
+// 誤検出しない。これが 3 秒だとタック前後の一時的な走種変化が過検出され、比較区間を削って
+// VMG 勝者が消える(Issue B3 の原因)。
+test('detectHeightAdjustWindows: デフォルト minHoldSec > 9 秒 — 9 秒未満の局面は検出しない', () => {
+  const t0 = 1_787_000_000_000;
+  // 9 秒だけクローズ1艇＋フット他艇 → デフォルト minHoldSec(>=10 秒)なら検出しない
+  const ws = [{ tMs: t0, windFromDeg: 0 }, { tMs: t0 + 30000, windFromDeg: 0 }];
+  const a = straightTrack('A', t0, 45, 9, 3);   // クローズ 9 秒
+  const b = straightTrack('B', t0, 75, 9, 3);   // フット 9 秒
+  const c = straightTrack('C', t0, 75, 9, 3);   // フット 9 秒
+  const win = detectHeightAdjustWindows([a, b, c], ws);
+  assert.equal(win.length, 0, '9 秒未満の局面はデフォルト minHoldSec で検出しない');
+});
+
+test('detectHeightAdjustWindows: デフォルト minHoldSec — 30 秒以上の局面は検出する', () => {
+  const t0 = 1_787_000_000_000;
+  // 30 秒継続するクローズ1艇＋フット他艇 → デフォルト minHoldSec(<=30 秒)なら検出する
+  const ws = [{ tMs: t0, windFromDeg: 0 }, { tMs: t0 + 60000, windFromDeg: 0 }];
+  const a = straightTrack('A', t0, 45, 60, 3);  // クローズ 60 秒継続
+  const b = straightTrack('B', t0, 75, 60, 3);  // フット 60 秒継続
+  const c = straightTrack('C', t0, 75, 60, 3);  // フット 60 秒継続
+  const win = detectHeightAdjustWindows([a, b, c], ws);
+  assert.ok(win.length >= 1, '30 秒以上の局面はデフォルト minHoldSec で検出する');
+  assert.ok(win[0].hi - win[0].lo >= 30_000, '検出した窓は 30 秒以上');
 });
 
 test('analyzeFleetVmg: 高さ調整局面を exclude として返す', () => {

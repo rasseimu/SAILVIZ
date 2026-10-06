@@ -304,11 +304,13 @@ function validIntervalsDetailed(track, windSeries, o) {
     if (!(dt > 0)) continue; // 同時刻・逆順は区間を作らない
     const code = subIntervalFailure(a, b, dt, o) ?? (dt > gapLimit ? 'record-gap' : null);
     if (code) { drop(a.t, b.t, code); continue; }
-    // 風軸: 系列端から windTolMs 以内の時刻だけを残す(小区間の途中で切る)。
-    const lo = Math.max(a.t, wLo), hi = Math.min(b.t, wHi);
-    if (lo > a.t) drop(a.t, Math.min(lo, b.t), 'wind-out-of-range');
-    if (hi > lo) keep(lo, hi);
-    if (hi < b.t) drop(Math.max(hi, a.t), b.t, 'wind-out-of-range');
+    // B3方針: wind-out-of-range は「明らかな異常」でないため比較区間から除外しない。
+    // 信頼度情報としてのみ記録する(excludedMs に加算しないよう _infoOnly フラグを付ける)。
+    // 風向はクランプ値(windFromAt の端点クランプ)を使うため VMG 計算は動作する。
+    keep(a.t, b.t);
+    const roLo = Math.max(a.t, wLo), roHi = Math.min(b.t, wHi);
+    if (roLo > a.t) excluded.push({ lo: a.t, hi: Math.min(roLo, b.t), code: 'wind-out-of-range', _infoOnly: true });
+    if (roHi < b.t) excluded.push({ lo: Math.max(roHi, a.t), hi: b.t, code: 'wind-out-of-range', _infoOnly: true });
   }
   if (!recorded || recorded.length === 0) return { intervals, excluded };
 
@@ -431,6 +433,7 @@ export function assessComparison(tracks, windSeriesByTrack, opts = {}) {
   const noWind = [];
   const validByTrack = new Map();
   const excludedMs = new Map(); // code -> 生の重なり時間内で除外された ms
+  const infoOnlyMs = new Map(); // _infoOnly な理由(wind-out-of-range 等) → 主理由選択に使わず信頼度情報として添える
   for (const t of withData) {
     const ws = wsOf(t);
     if (ws.length === 0) { noWind.push(t); continue; }
@@ -439,7 +442,13 @@ export function assessComparison(tracks, windSeriesByTrack, opts = {}) {
     validByTrack.set(t, d.intervals);
     for (const e of d.excluded) {
       const ms = sumMs(intersectIntervals([[e.lo, e.hi]], rawOverlapIvs));
-      if (ms > 0) excludedMs.set(e.code, (excludedMs.get(e.code) ?? 0) + ms);
+      if (ms <= 0) continue;
+      if (e._infoOnly) {
+        // wind-out-of-range 等の情報のみ理由: 主理由の選択には使わず、情報として reasons に添える
+        infoOnlyMs.set(e.code, (infoOnlyMs.get(e.code) ?? 0) + ms);
+      } else {
+        excludedMs.set(e.code, (excludedMs.get(e.code) ?? 0) + ms);
+      }
     }
   }
 
@@ -578,7 +587,8 @@ export function assessComparison(tracks, windSeriesByTrack, opts = {}) {
     }
   }
   for (const [code, fmt] of Object.entries(EXCLUSION_MESSAGES)) {
-    if (code !== primaryCode && excludedMs.get(code) > 0) reasons.push(reason(code, fmt(o, false)));
+    const hasExcluded = excludedMs.get(code) > 0 || infoOnlyMs.get(code) > 0;
+    if (code !== primaryCode && hasExcluded) reasons.push(reason(code, fmt(o, false)));
   }
   if (primaryCode !== 'no-same-point-of-sail' && anyPosMs > samePosPreMs) {
     reasons.push(reason('no-same-point-of-sail', '走種が異なる時間帯は比較から除外しました'));
