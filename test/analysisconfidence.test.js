@@ -217,7 +217,9 @@ test('風軸: 片方の系列が [] → no-wind-axis', () => {
   assert.equal(r.perTrack.get(B).windAxis.level, 'unavailable');
 });
 
-test('風軸: 系列端から windTolMs ちょうど → 合格、+1ms → 不合格', () => {
+test('風軸: 系列端から windTolMs ちょうど → 合格・+1ms → 比較区間から除外しないが wind-out-of-range を添える', () => {
+  // B3方針: wind-out-of-range は「明らかな異常」ではないため比較区間から除外しない。
+  // 信頼度情報として reasons に添えるのみ。
   const tol = DEFAULT_CONFIDENCE_OPTS.windTolMs;
   const A = straightTrack('A', { durationSec: 300 });
   const B = straightTrack('B', { lon0: 139.01, durationSec: 300 });
@@ -229,8 +231,11 @@ test('風軸: 系列端から windTolMs ちょうど → 合格、+1ms → 不�
 
   const ng = new Map([A, B].map((t) => [t, wind4(T0 - 100 * S, end - tol - 1)]));
   const r2 = assessComparison([A, B], ng);
-  assert.equal(r2.comparableMs, 299_999, '系列端から windTolMs を1ms超えた時刻は除外');
-  assert.ok(codes(r2).includes('wind-out-of-range'));
+  // B3変更後: wind-out-of-range でも比較区間から除外しないため comparableMs は変わらない
+  assert.equal(r2.comparableMs, 300_000, 'wind-out-of-range でも比較区間は削らない');
+  // wind-out-of-range は信頼度情報として reasons に添える
+  assert.ok(codes(r2).includes('wind-out-of-range'), '信頼度情報として reasons に添える');
+  assert.notEqual(r2.level, 'unavailable', 'wind-out-of-range だけで unavailable にしない');
 });
 
 // --- 精度 ---
@@ -600,15 +605,21 @@ test('主理由: accuracy(精度超過)', () => {
   assert.equal(p.message, 'GPS 精度が50mを超えていて比較できません');
 });
 
-test('主理由: wind-out-of-range(風軸の推定範囲外)', () => {
+test('情報理由: wind-out-of-range(風軸の推定範囲外)は比較区間を削らず信頼度情報として添える', () => {
+  // B3方針: wind-out-of-range は比較区間から除外しない。信頼度情報として reasons に添える。
+  // 風向はクランプ値(windFromAt の端点クランプ)で計算するため VMG 計算は動作する。
   const A = straightTrack('A', { durationSec: 300 });
   const B = straightTrack('B', { lon0: 139.01, durationSec: 300 });
   const far = T0 + 10 * 3_600_000; // 記録終了より十分後の系列だけ
   const ws = new Map([[A, wind4(far, far + 600 * S)], [B, wind4(far, far + 600 * S)]]);
   const r = assessComparison([A, B], ws);
-  assert.equal(r.level, 'unavailable');
-  assert.equal(r.reasons[0].code, 'wind-out-of-range');
-  assert.equal(r.reasons[0].message, '風軸の推定範囲外のため比較できません');
+  // B3変更後: unavailable にはならない(比較区間は出る)
+  assert.notEqual(r.level, 'unavailable', 'wind-out-of-range だけで unavailable にしない');
+  assert.ok(r.comparableMs > 0, '比較区間が出る');
+  // wind-out-of-range は信頼度情報として reasons に含まれる(主理由ではない)
+  assert.ok(codes(r).includes('wind-out-of-range'), '信頼度情報として reasons に含まれる');
+  const wor = r.reasons.find((x) => x.code === 'wind-out-of-range');
+  assert.equal(wor.message, '風軸の推定範囲から外れた時間帯を除外しました');
 });
 
 test('主理由: no-point-of-sail(全艇リーチ)', () => {
@@ -645,7 +656,8 @@ test('情報理由: 3艇中1艇だけ風軸なし → 残り2艇で比較し、�
   assert.deepEqual(r.segments[0].tracks, [A, B]);
 });
 
-test('風軸: 系列の開始側も windTolMs ちょうどは合格、-1ms は不合格', () => {
+test('風軸: 系列の開始側も windTolMs ちょうどは合格・-1ms は比較区間から除外しないが wind-out-of-range を添える', () => {
+  // B3方針: wind-out-of-range は「明らかな異常」でないため比較区間から除外しない。
   const tol = DEFAULT_CONFIDENCE_OPTS.windTolMs;
   const A = straightTrack('A', { durationSec: 300 });
   const B = straightTrack('B', { lon0: 139.01, durationSec: 300 });
@@ -657,10 +669,11 @@ test('風軸: 系列の開始側も windTolMs ちょうどは合格、-1ms は�
   assert.ok(!codes(ok).includes('wind-out-of-range'));
 
   const ng = assessComparison([A, B], new Map([A, B].map((t) => [t, wind4(T0 + tol + 1, hi)])));
-  assert.equal(ng.comparableMs, 299_999, '系列開始から windTolMs より前の時刻は除外');
+  // B3変更後: wind-out-of-range でも比較区間から除外しないため comparableMs は変わらない
+  assert.equal(ng.comparableMs, 300_000, 'wind-out-of-range でも比較区間は削らない');
   assert.equal(ng.reasons[0].code, 'short-compare');
   const w = ng.reasons.find((x) => x.code === 'wind-out-of-range');
-  assert.equal(w.message, '風軸の推定範囲から外れた時間帯を除外しました');
+  assert.equal(w.message, '風軸の推定範囲から外れた時間帯を除外しました', '信頼度情報として reasons に添える');
 });
 
 test('風軸: tMs が非数だけの系列は風軸なし(no-wind-axis が主理由)', () => {
@@ -880,4 +893,38 @@ test('windAxisReasonRows: perTrack がない・不正な入力でも例外なく
     [{ level: 'unavailable', head: '風軸推定不可', reasons: [], participating: false }]);
   assert.deepEqual(windAxisReasonRows(null, new Map()), []);
   assert.deepEqual(windAxisReasonRows([null, undefined], new Map()), []);
+});
+
+// --- B3: wind-out-of-range は比較区間から除外しない(信頼度として表示に添える) ---
+// 方針: 除外は明らかな異常(GPS 欠損・異常速度)に限る。風軸推定範囲外は信頼度の低下として表示に添えるのみ。
+test('B3: 風軸推定範囲外(wind-out-of-range)でも比較区間に含める', () => {
+  // 艇の記録は T0〜T0+300s だが風軸系列は T0+200s〜T0+500s(最初の200秒は wind-out-of-range)
+  // 変更後: 最初の200秒も有効区間に含め、比較区間から除外しない
+  const tol = DEFAULT_CONFIDENCE_OPTS.windTolMs;
+  const A = straightTrack('A', { durationSec: 300 });
+  const B = straightTrack('B', { lon0: 139.01, durationSec: 300 });
+  // 系列の先頭が記録終了の tol ms 前より後(tol+1ms 外) にある
+  const end = T0 + 300 * S;
+  const ng = new Map([A, B].map((t) => [t, wind4(T0 - 100 * S, end - tol - 1)]));
+  const r = assessComparison([A, B], ng);
+  // 変更後: wind-out-of-range でも比較区間から除外しない → comparableMs は除外前と変わらない
+  assert.equal(r.comparableMs, 300_000, 'wind-out-of-range でも比較区間から除外しない');
+  // ただし理由として wind-out-of-range が含まれる
+  assert.ok(codes(r).includes('wind-out-of-range'), 'wind-out-of-range を信頼度理由として添える');
+  // level は風軸の信頼度や比較時間で決まる(unavailable にはならない)
+  assert.notEqual(r.level, 'unavailable', 'wind-out-of-range だけで unavailable にしない');
+});
+
+test('B3: 風軸推定範囲外が全時間帯でも比較区間を出す', () => {
+  // 風軸系列が記録時刻より遠い未来にある → 従来は unavailable(wind-out-of-range が主理由)
+  // 変更後: 比較区間は出る(風向はクランプ値を使う)。信頼度は lower になりうる
+  const A = straightTrack('A', { durationSec: 300 });
+  const B = straightTrack('B', { lon0: 139.01, durationSec: 300 });
+  const far = T0 + 10 * 3_600_000; // 記録終了より十分後の系列だけ
+  const ws = new Map([[A, wind4(far, far + 600 * S)], [B, wind4(far, far + 600 * S)]]);
+  const r = assessComparison([A, B], ws);
+  // 変更後: 風軸が遠くにあっても比較区間は出る
+  assert.ok(r.comparableMs > 0, '風軸が遠い未来でも比較区間から除外しない');
+  assert.ok(codes(r).includes('wind-out-of-range'), 'wind-out-of-range を理由として添える');
+  assert.notEqual(r.level, 'unavailable', 'wind-out-of-range だけで unavailable にしない');
 });
