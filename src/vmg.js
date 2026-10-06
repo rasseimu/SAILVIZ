@@ -133,7 +133,10 @@ function detectHeightAdjustCore(perBoat, opts = {}) {
   const closeDeg = opts.closeDeg ?? 55;      // これ未満を「クローズ」とみなす
   const bearAwayDeg = opts.bearAwayDeg ?? 15; // クローズ艇よりこれ以上開いたら「下った」
   const runningDeg = opts.runningDeg ?? 100;  // これ以上はランニング扱いで対象外
-  const minHoldSec = opts.minHoldSec ?? 3;
+  // B3: タック中の一時的な走種変化（~9秒）を誤検出しないよう 30 秒に引き上げ。
+  // 本物の「高さ調整局面」は数十秒以上継続するため、3 秒では折り返し付近の状態変化まで
+  // 検出してしまい、比較区間の断片を削って VMG 勝者が消える過検出が起きていた。
+  const minHoldSec = opts.minHoldSec ?? 30;
   const tolMs = opts.activeTolMs ?? 2000;
   const boats = perBoat.filter((b) => b.samples.length > 0);
   if (boats.length < 2) return [];
