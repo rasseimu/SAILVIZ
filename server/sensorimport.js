@@ -43,12 +43,16 @@ export function parseSensorCsv(csvText) {
 
 // excludedIntervals は配列を渡したときだけトラックに載せる(未指定なら項目なし=旧データと同じ扱い)。
 export function buildTrack({ id, name, points, bounds, colorIndex = 0, source, excludedIntervals }) {
+  const tRange = points.length > 0
+    ? { start: points[0].t, end: points[points.length - 1].t }
+    : null;
   const track = {
     id, name,
     color: PALETTE[colorIndex % PALETTE.length],
     visible: true,
     points,
     bounds,
+    tRange,
     source,
   };
   if (Array.isArray(excludedIntervals)) track.excludedIntervals = excludedIntervals;

@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { serializeProject, deserializeProject, PROJECT_VERSION } from '../src/project.js';
+import { daySummarySourceKey } from '../src/daysummary.js';
 
 function sampleState() {
   return {
@@ -112,6 +114,66 @@ test('practiceDate が数値でなければ null', () => {
   assert.equal(out.practiceDate, null);
 });
 
+test('deserialize: tRange が欠けていれば点列から補う（後方互換）', () => {
+  // サーバ側の旧データ（buildTrack が tRange を付けていなかった版）を模す
+  const obj = {
+    version: 1,
+    tracks: [{
+      id: 'imp_old', name: '旧軌跡', color: '#e6194B', visible: true,
+      points: [
+        { t: 1000000, lat: 35.3, lon: 139.48 },
+        { t: 1010000, lat: 35.31, lon: 139.49 },
+        { t: 1020000, lat: 35.32, lon: 139.50 },
+      ],
+      bounds: { minLat: 35.3, maxLat: 35.32, minLon: 139.48, maxLon: 139.50 },
+      // tRange なし（旧データ）
+      windAxisOverrides: [],
+    }],
+    events: [], marks: [], pins: [], videos: [], reflections: [],
+  };
+  const out = deserializeProject(obj);
+  const tr = out.tracks[0];
+  assert.ok(tr.tRange, 'tRange が補完される');
+  assert.equal(tr.tRange.start, 1000000, 'tRange.start = 最初の点の t');
+  assert.equal(tr.tRange.end, 1020000, 'tRange.end = 最後の点の t');
+});
+
+test('deserialize: tRange が既にあれば点列から上書きしない', () => {
+  const obj = {
+    version: 1,
+    tracks: [{
+      id: 'imp_new', name: '新軌跡', color: '#3cb44b', visible: true,
+      points: [
+        { t: 2000000, lat: 35.3, lon: 139.48 },
+        { t: 2050000, lat: 35.31, lon: 139.49 },
+      ],
+      bounds: { minLat: 35.3, maxLat: 35.31, minLon: 139.48, maxLon: 139.49 },
+      tRange: { start: 2000000, end: 2050000 },
+      windAxisOverrides: [],
+    }],
+    events: [], marks: [], pins: [], videos: [], reflections: [],
+  };
+  const out = deserializeProject(obj);
+  assert.deepEqual(out.tracks[0].tRange, { start: 2000000, end: 2050000 });
+});
+
+test('deserialize: tRange 欠落・点列も空のトラックは tRange を null のまま補完しない', () => {
+  const obj = {
+    version: 1,
+    tracks: [{
+      id: 'imp_empty', name: '空軌跡', color: '#ffe119', visible: false,
+      points: [],
+      bounds: null,
+      // tRange なし・点列も空
+      windAxisOverrides: [],
+    }],
+    events: [], marks: [], pins: [], videos: [], reflections: [],
+  };
+  const out = deserializeProject(obj);
+  // 点が無ければ tRange は設定できない → undefined のまま（または null）、エラーにならない
+  assert.ok(!out.tracks[0].tRange, 'tRange は falsy のまま');
+});
+
 test('excludedIntervals: 保存・読込で往復し、不正な要素は保存時に落とす', () => {
   const st = sampleState();
   st.tracks[0].excludedIntervals = [
@@ -137,4 +199,27 @@ test('excludedIntervals: 項目のないトラック(旧データ)には書き�
   const st = sampleState();
   st.tracks[0].excludedIntervals = [];
   assert.deepEqual(serializeProject(st, { savedAt: 's' }).tracks[0].excludedIntervals, []);
+});
+
+const DS = JSON.parse(readFileSync(new URL('./fixtures/day-summary-v1.json', import.meta.url), 'utf8'));
+
+test('daySummary が serialize→deserialize で往復する', () => {
+  const out = deserializeProject(serializeProject({ ...sampleState(), daySummary: DS }));
+  assert.deepEqual(out.daySummary, DS);
+});
+
+test('daySummary が無い・壊れている場合は null', () => {
+  assert.equal(deserializeProject(serializeProject(sampleState())).daySummary, null);
+  const obj = serializeProject(sampleState());
+  assert.equal(deserializeProject({ ...obj, daySummary: { version: 99 } }).daySummary, null);
+  assert.equal(deserializeProject({ ...obj, daySummary: 'x' }).daySummary, null);
+  const noTacks = structuredClone(DS);
+  delete noTacks.boats[0].tacks;
+  assert.equal(deserializeProject({ ...obj, daySummary: noTacks }).daySummary, null);
+});
+
+test('保存JSONを読み直しても sourceKey は変わらない(開き直しで stale 扱いにならない)', () => {
+  const state = sampleState();
+  const reloaded = deserializeProject(JSON.parse(JSON.stringify(serializeProject(state))));
+  assert.equal(daySummarySourceKey(reloaded.tracks), daySummarySourceKey(state.tracks));
 });

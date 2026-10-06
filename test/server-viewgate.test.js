@@ -35,6 +35,13 @@ test('session reports gate on and logged out initially', async () => {
   assert.equal(s.loggedIn, false);
 });
 
+// ログイン画面の候補表示用に、設定済みユーザー名(パスワードは含めない)を公開する。
+test('session exposes configured usernames (no password)', async () => {
+  const s = await (await fetch(`${base}/api/session`)).json();
+  assert.deepEqual(s.users, [VIEW_USER]);
+  assert.equal('password' in s, false);
+});
+
 test('GET data is blocked without login', async () => {
   assert.equal((await fetch(`${base}/api/projects`)).status, 401);
   assert.equal((await fetch(`${base}/api/summaries`)).status, 401);

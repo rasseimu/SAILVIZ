@@ -36,6 +36,11 @@ import { createDashboard } from './dashboard.js';
 import { createProgress } from './progress.js';
 import { createRoadmap } from './roadmap.js';
 import { summarizeNeonShare } from './vmg.js';
+import {
+  refreshDaySummary, daySummaryAfterGpsLoad, daySummaryAfterPracticeLoad, runDaySummaryAction,
+} from './daysummaryflow.js';
+import { renderDaySummaryHtml } from './daysummaryview.js';
+import { isDaySummaryShape } from './daysummaryschema.js';
 
 // トラック自動割当＆色変更メニューの共通パレット(識別しやすい12色)。
 const PALETTE = [
@@ -67,6 +72,8 @@ const state = {
   crop: { start: 0, end: 0 },
   transform: { scale: 1, cx: 0, cy: 0, w: 1, h: 1, proj: null },
   basemap: null,           // 背景地図 {image(dataURL), bounds, z, img(Image)}。初回CSV取込時に1回だけ取得。
+  daySummary: null,        // 今日の練習サマリ(GPS読込時点のスナップショット)。保存対象。
+  daySummarySaved: false,  // daySummary が保存済みの内容と同じか(未保存ならモーダルに保存案内を出す)。
 };
 
 const $ = (id) => document.getElementById(id);
@@ -236,7 +243,7 @@ function renderVmgLegend() {
 // elapsedモードでの軸オフセット(基準トラック開始)。軸時刻⇄絶対時刻の変換に使う。
 function currentBase() {
   const refTrack = state.tracks.find((t) => t.visible) || null;
-  return state.mode === 'elapsed' && refTrack ? refTrack.tRange.start : 0;
+  return state.mode === 'elapsed' && refTrack ? (refTrack.tRange?.start ?? 0) : 0;
 }
 
 let mapRot = 0; // マップ回転角(ラジアン、表示のみ・保存しない)。fitTransform後に再適用。
@@ -249,7 +256,7 @@ function applyWindUpRotation(now) {
   const ref = state.tracks.find((t) => t.visible) || null;
   const series = ref ? windSeriesByTrack.get(ref) : null;
   if (!ref || !series || series.length === 0) return;
-  const lookupT = state.mode === 'elapsed' ? ref.tRange.start + now : now;
+  const lookupT = state.mode === 'elapsed' ? (ref.tRange?.start ?? 0) + now : now;
   const dir = windDirAt(series, lookupT);
   if (dir == null) return;
   mapRot = (-dir * Math.PI) / 180; // 回転は従来どおり(風を真上へ)
@@ -368,7 +375,7 @@ function draw() {
   const windSeries = state.tracks
     .filter((t) => t.visible && (windSeriesByTrack.get(t) || []).length)
     .map((t) => {
-      const off = state.mode === 'elapsed' ? t.tRange.start : 0;
+      const off = state.mode === 'elapsed' ? (t.tRange?.start ?? 0) : 0;
       return {
         color: t.color,
         series: windSeriesByTrack.get(t).map((p) => ({ tMs: p.tMs - off, windFromDeg: p.windFromDeg })),
@@ -389,6 +396,7 @@ function formatClock(now, mode) {
 }
 
 async function loadFiles(fileList) {
+  const tracksBefore = state.tracks.length;
   for (const file of fileList) {
     if (file.type.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(file.name)) {
       await addVideo(file);
@@ -406,6 +414,10 @@ async function loadFiles(fileList) {
   renderSidebar();
   // 初回CSV取込時のみ背景地図を取得(GPSトラックがあり未取得のとき)。非ブロッキング。
   if (state.tracks.length) ensureBasemap();
+  // GPS が増えたら(初回・後付け)今日の練習サマリを作り直して自動表示する。
+  const ds = applyDaySummary(
+    daySummaryAfterGpsLoad(currentDaySummary(), state.tracks, tracksBefore, daySummaryOpts()));
+  if (ds.autoOpen) openDaySummary(ds.summary);
 }
 
 // ドロップされた動画を、その瞬間の再生位置(絶対時刻)に紐付けて登録。
@@ -413,7 +425,7 @@ let videoSeq = 0;
 function firstVisibleTrack() { return state.tracks.find((t) => t.visible) || null; }
 function nowAbsolute() {
   const r = firstVisibleTrack();
-  return state.mode === 'elapsed' && r ? r.tRange.start + playback.getNow() : playback.getNow();
+  return state.mode === 'elapsed' && r ? (r.tRange?.start ?? 0) + playback.getNow() : playback.getNow();
 }
 // 時刻 t(絶対ms) に動画を配置。src を渡すと status に配置理由を表示。
 function placeVideo(file, t, durationMs, src) {
@@ -469,6 +481,9 @@ async function ensureProjectDir() {
 
 // 現在の状態を store(API)へ書き出す。
 async function saveProject() {
+  // 保存の直前に GPS と照合する。削除・差し替え後なら作り直し、艇名・色は同期する。
+  // 作り直しに失敗したら null になり、GPS と食い違う古いサマリは保存しない。
+  const ds = applyDaySummary(refreshDaySummary(currentDaySummary(), state.tracks, daySummaryOpts()));
   const obj = serializeProject(state, { savedAt: new Date().toISOString() });
   // 既存ファイルを開いている/一度保存済みなら同名に上書き(後付けGPSでファイルを増やさない)。
   // 新規は練習日時(ユーザー指定→データ時刻→now)から採番し、衝突は分単位でずらす。
@@ -484,8 +499,11 @@ async function saveProject() {
   } catch (e) {
     statusEl.textContent = `保存に失敗: ${e.message}`; return;
   }
+  state.daySummarySaved = !!state.daySummary;
   invalidateProjectEntriesCache();
-  statusEl.textContent = `保存しました: ${name}`;
+  statusEl.textContent = ds.error
+    ? `保存しました: ${name}（サマリは計算に失敗したため保存していません）`
+    : `保存しました: ${name}`;
 }
 
 // 選択した練習ファイルを読み込み、state を置換する。成否を boolean で返す。
@@ -511,6 +529,9 @@ async function loadPractice(name) {
   state.videos = data.videos; // url なし=未リンク
   state.reflections = data.reflections;
   state.practiceDate = data.practiceDate ?? null;
+  // 保存済み練習を開いても自動表示しない。サマリが無い(機能追加前)・GPSと食い違うときは
+  // 黙って作り直す(次の保存で永続化)。
+  applyDaySummary(daySummaryAfterPracticeLoad(data.daySummary, state.tracks, daySummaryOpts()));
   setBasemap(data.basemap || null); // 保存済み背景地図を復元(なければ消す)
   state.currentFileName = name;
   saveReflections(state.reflections); // localStorage にも反映
@@ -530,6 +551,67 @@ async function loadPractice(name) {
     : `読込: ${name}`;
   return true;
 }
+
+// ================= 今日の練習サマリ =================
+// 状態遷移(作り直す・自動表示する・保存する)は daysummaryflow.js でテスト済み。
+// ここはその結果を state と DOM に反映するだけにする。
+
+// 開いているサマリの文脈。fromHomeName があればホームカードから開いた(練習は未読込)。
+let dsContext = null;
+
+function openDaySummary(summary, { fromHomeName = null } = {}) {
+  dsContext = { fromHomeName };
+  $('ds-modal-inner').innerHTML = renderDaySummaryHtml(summary, {
+    canRecompute: !fromHomeName && state.tracks.length > 0,
+    unsaved: !fromHomeName && !state.daySummarySaved,
+  });
+  $('ds-modal').hidden = false;
+}
+
+function closeDaySummary() {
+  $('ds-modal').hidden = true;
+  dsContext = null;
+}
+
+const currentDaySummary = () => ({ summary: state.daySummary, saved: state.daySummarySaved });
+const daySummaryOpts = (extra = {}) => ({ marks: state.marks, ...extra });
+
+// daysummaryflow の結果を state に反映する。計算失敗は null になっており(古いサマリは残さない)、
+// ステータスバーに出す(GPS読込・保存自体は成功扱い)。
+function applyDaySummary(r) {
+  state.daySummary = r.summary;
+  state.daySummarySaved = r.saved;
+  if (r.error) {
+    console.error(r.error);
+    statusEl.textContent = 'サマリの計算に失敗しました';
+  }
+  return r;
+}
+
+// トップバー: 開く直前に GPS と照合する(削除・差し替え後なら作り直し、艇名・色は同期)。
+$('ds-open').addEventListener('click', () => {
+  const r = applyDaySummary(refreshDaySummary(currentDaySummary(), state.tracks, daySummaryOpts()));
+  if (r.summary) openDaySummary(r.summary);
+});
+
+$('ds-modal').addEventListener('click', async (e) => {
+  if (e.target === $('ds-modal')) { closeDaySummary(); return; } // 背景クリック
+  const btn = e.target.closest('[data-ds-action]');
+  if (!btn) return;
+  const action = btn.dataset.dsAction;
+  if (action === 'close') { closeDaySummary(); return; }
+  if (action === 'recompute') {
+    // 現在のマーク・風軸補正で作り直す。失敗したら null にしてモーダルを閉じる。
+    const r = applyDaySummary(refreshDaySummary(currentDaySummary(), state.tracks, daySummaryOpts({ force: true })));
+    if (r.summary) openDaySummary(r.summary); else closeDaySummary();
+    return;
+  }
+  // 導線: ホームから開いた場合は先に練習を読み込む(確認ダイアログでキャンセルなら何もしない)
+  const fromHomeName = dsContext?.fromHomeName ?? null;
+  closeDaySummary();
+  await runDaySummaryAction(action, { fromHomeName },
+    { loadPractice, showTrack, setVmgOn, openReflectionEditor });
+});
 
 // ================= ホーム画面(カード型ランチャー) =================
 
@@ -573,6 +655,8 @@ function resetState() {
   state.videos = []; state.reflections = [];
   state.crop = { start: 0, end: 0 };
   state.practiceDate = null;
+  state.daySummary = null;
+  state.daySummarySaved = false;
   state.basemap = null; // 新規練習では背景地図もクリア(次の初回取込で再取得)
   state.currentFileName = null;
   saveReflections(state.reflections);
@@ -660,6 +744,19 @@ async function renderHome() {
     });
     wrap.appendChild(card);
     wrap.appendChild(del);
+    // 保存済みサマリがある練習だけ「📊 サマリ」を出す。本体を読まずにモーダルを開く。
+    // 一覧APIで検証済みだが、表示側は形を前提にするのでここでも確かめる。
+    if (isDaySummaryShape(it.daySummary)) {
+      const dsBtn = document.createElement('button');
+      dsBtn.className = 'home-card-ds';
+      dsBtn.textContent = '📊 サマリ';
+      dsBtn.title = '今日の練習サマリを開く';
+      dsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openDaySummary(it.daySummary, { fromHomeName: it.name });
+      });
+      wrap.appendChild(dsBtn);
+    }
     grid.appendChild(wrap);
   }
 }
@@ -762,6 +859,7 @@ function addTags(header, rows) {
 }
 
 function renderSidebar() {
+  $('ds-open').disabled = !state.tracks.length; // GPS が無ければサマリは開けない
   const tl = $('track-list'); tl.innerHTML = '';
   state.tracks.forEach((tr, i) => {
     const row = document.createElement('div'); row.className = 'track-row';
@@ -992,12 +1090,27 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAccou
 const viewLoginDialog = $('viewLoginDialog');
 const viewLoginForm = $('viewLoginForm');
 const viewLoginUser = $('viewLoginUser');
+const viewLoginUserList = $('viewLoginUserList');
 const viewLoginPassword = $('viewLoginPassword');
 const viewLoginError = $('viewLoginError');
 const contactDialog = $('contactDialog');
+// セッションから候補ユーザー名を取得し datalist に反映(選択＋入力絞り込み用)。
+// 失敗時は候補なし(手入力は従来どおり可能)。DOM API で組み立て、値は自動エスケープ。
+async function populateUserOptions() {
+  try {
+    const s = await store.session();
+    const users = Array.isArray(s.users) ? s.users : [];
+    viewLoginUserList.replaceChildren(...users.map((u) => {
+      const o = document.createElement('option');
+      o.value = u;
+      return o;
+    }));
+  } catch { /* 候補取得失敗は無視 */ }
+}
 function openViewLogin() {
   viewLoginError.hidden = true;
   viewLoginForm.reset();
+  populateUserOptions();
   viewLoginDialog.showModal();
   viewLoginUser.focus();
 }
@@ -1091,11 +1204,14 @@ $('windup-toggle').addEventListener('change', (e) => {
 });
 
 // VMG勝者ネオン トグル: ONで30秒ごと(比較区間内)の最良VMG艇を発光表示。OFFで消灯。表示のみ・保存しない。
-$('vmg-minute-toggle').addEventListener('change', (e) => {
-  vmgOn = e.target.checked;
+// サマリの「艇ごとに比較する」からも ON にする。
+function setVmgOn(on) {
+  vmgOn = on;
+  $('vmg-minute-toggle').checked = on;
   recomputeVmgWinners();
   draw();
-});
+}
+$('vmg-minute-toggle').addEventListener('change', (e) => setVmgOn(e.target.checked));
 
 // 区間選択: 軌跡上の点を単クリック→1回目=始点, 2回目=終点でクロップを設定
 let pendingStart = null; // 選択軸上の時刻(絶対 or elapsed)
@@ -1110,7 +1226,7 @@ function pickTrackTime(px, py) {
       const s = worldToScreen(project(p.lat, p.lon, T.proj), T);
       const d = Math.hypot(s.px - px, s.py - py);
       if (d <= PICK_PX && (!best || d < best.d)) {
-        best = { d, time: state.mode === 'elapsed' ? p.t - tr.tRange.start : p.t };
+        best = { d, time: state.mode === 'elapsed' ? p.t - (tr.tRange?.start ?? 0) : p.t };
       }
     }
   }
@@ -1177,7 +1293,7 @@ function refitTransform() {
 function syncFromVideo() {
   if (!currentVideo) return;
   const r = firstVisibleTrack();
-  const base = state.mode === 'elapsed' && r ? r.tRange.start : 0;
+  const base = state.mode === 'elapsed' && r ? (r.tRange?.start ?? 0) : 0;
   playback.seek(currentVideo.t + $('video-el').currentTime * 1000 - base);
 }
 // syncFromVideo の逆算。軸時刻 t を動画の currentTime(秒) に直して動画をシーク。
@@ -1186,7 +1302,7 @@ function seekVideoToAxisTime(t) {
   if (!currentVideo) return;
   const vid = $('video-el');
   const r = firstVisibleTrack();
-  const base = state.mode === 'elapsed' && r ? r.tRange.start : 0;
+  const base = state.mode === 'elapsed' && r ? (r.tRange?.start ?? 0) : 0;
   const max = Number.isFinite(vid.duration) ? vid.duration : Infinity;
   vid.currentTime = Math.max(0, Math.min((t + base - currentVideo.t) / 1000, max));
 }
@@ -1325,7 +1441,7 @@ window.addEventListener('pointerdown', (e) => {
   if (!colorMenu.contains(e.target) && !e.target.classList.contains('swatch-btn')) hideColorMenu();
 });
 
-window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideMenu(); hideColorMenu(); cancelPending(); closeVideoPanel(); } });
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideMenu(); hideColorMenu(); cancelPending(); closeVideoPanel(); closeDaySummary(); } });
 $('video-close').addEventListener('click', closeVideoPanel);
 $('video-rotate').addEventListener('click', () => { videoRotation = nextRotation(videoRotation); applyVideoRotation(); });
 $('video-delete').addEventListener('click', () => { if (currentVideo) deleteVideo(state.videos.indexOf(currentVideo)); });

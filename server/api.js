@@ -110,7 +110,12 @@ export function createApi({ dataDir, token, geminiKey, viewUser, viewPassword })
 
       // 閲覧セッションの状態。ゲート無効時は常にログイン済み扱い。
       if (path === '/api/session' && method === 'GET') {
-        send(res, 200, { loggedIn: isViewer(req, viewSecret, token), gate: viewEnabled });
+        // users はログイン画面の候補表示用(ユーザー名のみ・パスワードは返さない)。
+        send(res, 200, {
+          loggedIn: isViewer(req, viewSecret, token),
+          gate: viewEnabled,
+          users: viewEnabled ? [viewUser] : [],
+        });
         return true;
       }
 
