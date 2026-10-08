@@ -285,10 +285,17 @@ function validIntervalsDetailed(track, windSeries, o) {
     const last = intervals[intervals.length - 1];
     if (last && last[1] === lo) last[1] = hi; else intervals.push([lo, hi]);
   };
-  const drop = (lo, hi, code) => {
+  const drop = (lo, hi, code, infoOnly = false) => {
     if (!(hi > lo)) return;
     const last = excluded[excluded.length - 1];
-    if (last && last.hi === lo && last.code === code) last.hi = hi; else excluded.push({ lo, hi, code });
+    // code・_infoOnly が同じ隣接区間は結合する（B3-P3-1: infoOnly 区間も drop() と同様に結合）
+    if (last && last.hi === lo && last.code === code && !!last._infoOnly === infoOnly) {
+      last.hi = hi;
+    } else {
+      const entry = { lo, hi, code };
+      if (infoOnly) entry._infoOnly = true;
+      excluded.push(entry);
+    }
   };
 
   // 読込時に点を除いた時間帯(track.excludedIntervals)。項目のない旧データは、除いた点の跡を
@@ -309,8 +316,8 @@ function validIntervalsDetailed(track, windSeries, o) {
     // 風向はクランプ値(windFromAt の端点クランプ)を使うため VMG 計算は動作する。
     keep(a.t, b.t);
     const roLo = Math.max(a.t, wLo), roHi = Math.min(b.t, wHi);
-    if (roLo > a.t) excluded.push({ lo: a.t, hi: Math.min(roLo, b.t), code: 'wind-out-of-range', _infoOnly: true });
-    if (roHi < b.t) excluded.push({ lo: Math.max(roHi, a.t), hi: b.t, code: 'wind-out-of-range', _infoOnly: true });
+    if (roLo > a.t) drop(a.t, Math.min(roLo, b.t), 'wind-out-of-range', true);
+    if (roHi < b.t) drop(Math.max(roHi, a.t), b.t, 'wind-out-of-range', true);
   }
   if (!recorded || recorded.length === 0) return { intervals, excluded };
 
