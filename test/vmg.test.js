@@ -254,15 +254,15 @@ test('detectHeightAdjustWindows: ランニング艇は誤検出しない', () =>
 // B3: minHoldSec の既定値は 30 秒以上 — タック中の短い状態変化(< 30 秒)を高さ調整局面として
 // 誤検出しない。これが 3 秒だとタック前後の一時的な走種変化が過検出され、比較区間を削って
 // VMG 勝者が消える(Issue B3 の原因)。
-test('detectHeightAdjustWindows: デフォルト minHoldSec > 9 秒 — 9 秒未満の局面は検出しない', () => {
+test('detectHeightAdjustWindows: デフォルト minHoldSec = 30 秒 — 30 秒未満の局面は検出しない', () => {
   const t0 = 1_787_000_000_000;
-  // 9 秒だけクローズ1艇＋フット他艇 → デフォルト minHoldSec(>=10 秒)なら検出しない
+  // 9 秒だけクローズ1艇＋フット他艇 → デフォルト minHoldSec(30 秒)なら検出しない
   const ws = [{ tMs: t0, windFromDeg: 0 }, { tMs: t0 + 30000, windFromDeg: 0 }];
   const a = straightTrack('A', t0, 45, 9, 3);   // クローズ 9 秒
   const b = straightTrack('B', t0, 75, 9, 3);   // フット 9 秒
   const c = straightTrack('C', t0, 75, 9, 3);   // フット 9 秒
   const win = detectHeightAdjustWindows([a, b, c], ws);
-  assert.equal(win.length, 0, '9 秒未満の局面はデフォルト minHoldSec で検出しない');
+  assert.equal(win.length, 0, '30 秒未満の局面はデフォルト minHoldSec で検出しない');
 });
 
 test('detectHeightAdjustWindows: デフォルト minHoldSec — 30 秒以上の局面は検出する', () => {
