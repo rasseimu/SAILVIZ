@@ -160,7 +160,8 @@ test('segmentLegs: タック直後のベアアウェイ開始でも代表方位�
     `セトリング有無で headingDeg に差がなければ settling 処理が無効化されている: noSettle=${headNoSettle} withSettle=${headWithSettle}`);
 });
 
-test('classifyManeuver: 大きく失速=タック / 速度維持=ジャイブ', () => {
+// classifyManeuver: 速度ベースでタック/ジャイブを判別（B5設計でも維持）
+test('classifyManeuver: 大きく失速=タック / 速度維持=ジャイブ（速度ベース判別）', () => {
   const tack = classifyManeuver({ speedDropRatio: 0.3, turnDeg: 90 });
   const gybe = classifyManeuver({ speedDropRatio: 0.9, turnDeg: 90 });
   assert.equal(tack.type, 'tack');
@@ -484,4 +485,129 @@ test('windDirAtMulti: 北またぎの複数系列で両端のどちらかが返�
   const r = windDirAtMulti([seriesA, seriesB], 500);
   // r は 350 か 10 のどちらかであり、どちらも北から 10° 以内
   nearCirc(r, 0, 20); // 北から 20° 以内
+});
+
+// ===== B5: 風軸推定 再設計 (2026-10-08) =====
+// 設計 (1)〜(6) に対応するテスト。
+
+// 設計 (1): 約90°の方向転換を検知してタックと断定
+// - 速度ベースのタック/ジャイブ判別は維持（タックは失速が大きい）
+// - confidence は旋回角が90°に近いほど高くなる（B5設計の追加要素）
+test('B5-(1): classifyManeuver confidence は旋回角が90°に近いほど高い', () => {
+  // 旋回角90°（完璧なタック）は旋回角45°（微妙な角度）より confidence が高い
+  const perfect = classifyManeuver({ speedDropRatio: 0.3, turnDeg: 90 });
+  const shallow = classifyManeuver({ speedDropRatio: 0.3, turnDeg: 45 });
+  assert.ok(perfect.confidence > shallow.confidence,
+    `旋回角90°の方が45°より confidence が高いはず: perfect=${perfect.confidence}, shallow=${shallow.confidence}`);
+});
+
+test('B5-(1): classifyManeuver 速度ベースのタック/ジャイブ判別は維持', () => {
+  // タック: 速度ドロップが大きい（0.3 < 0.6）
+  const tack = classifyManeuver({ speedDropRatio: 0.3, turnDeg: 90 });
+  assert.equal(tack.type, 'tack');
+  // ジャイブ: 速度維持（0.9 > 0.6）
+  const gybe = classifyManeuver({ speedDropRatio: 0.9, turnDeg: 90 });
+  assert.equal(gybe.type, 'gybe');
+});
+
+// 設計 (6): minSpeedMps=1.5 の足切りを外す
+test('B5-(6): computeCog は minSpeedMps=0 デフォルトで低速点も含む', () => {
+  // minSpeedMps のデフォルトを 0 にした場合、低速点が除外されない
+  const pts = [];
+  const t0 = 1_787_000_000_000;
+  let lat = 35.30, lon = 139.48;
+  const mPerDegLon = 111_320 * Math.cos(lat * Math.PI / 180);
+  const speed = 0.5; // 従来の閾値 1.5 未満
+  for (let i = 0; i < 30; i++) {
+    pts.push({ t: t0 + i * 200, lat, lon, speed, bearing: 90, accuracy: 5 });
+    lon += (speed * 0.2) / mPerDegLon;
+  }
+  // デフォルト（minSpeedMps=0）なら低速点も含まれる
+  const samplesDefault = computeCog(pts, { windowMs: 1000 });
+  assert.ok(samplesDefault.length > 0, 'minSpeedMps=0 デフォルトなら低速点も含まれるはず');
+
+  // 明示的に 1.5 を指定すると従来どおり除外される
+  const samplesFiltered = computeCog(pts, { windowMs: 1000, minSpeedMps: 1.5 });
+  assert.equal(samplesFiltered.length, 0, 'minSpeedMps=1.5 なら低速点は除外されるはず');
+});
+
+// 設計 (3): 風下の90°ジャイブは速度維持で正しくジャイブとして分類される
+test('B5-(3): 速度維持の90°旋回はジャイブとして分類される', () => {
+  // ジャイブ: 速度維持（0.9 > 0.6）なので gybe
+  const gybe = classifyManeuver({ speedDropRatio: 0.9, turnDeg: 90 });
+  assert.equal(gybe.type, 'gybe');
+  // タック: 速度ドロップ（0.3 < 0.6）なので tack
+  const tack = classifyManeuver({ speedDropRatio: 0.3, turnDeg: 90 });
+  assert.equal(tack.type, 'tack');
+});
+
+// 設計 (1): rejectMinorTurns のデフォルト閾値が 75° に引き上げられた
+test('B5-(1): rejectMinorTurns デフォルト 75° 未満の旋回は除外', () => {
+  // デフォルト（75°）: 旋回角70°は除外、80°は通過
+  const mans = [
+    { tMs: 0, turnDeg: 70 }, // 75° 未満 → 除外
+    { tMs: 1, turnDeg: 80 }, // 75° 以上 → 通過
+    { tMs: 2, turnDeg: 90 }, // 90° → 通過
+  ];
+  const kept = rejectMinorTurns(mans); // デフォルトで呼ぶ
+  assert.deepEqual(kept.map((m) => m.tMs), [1, 2], `70°は除外、80°と90°は通過するはず`);
+});
+
+// 設計 (4): タックに挟まれたジャイブの推定は捨てる（preferCloseHauledAnchors は変更なし）
+test('B5-(4): preferCloseHauledAnchors は変更なし・タック区間内のジャイブを捨てる', () => {
+  const anchors = [
+    { tMs: 0,  type: 'tack', windFromDeg: 5 },
+    { tMs: 5,  type: 'gybe', windFromDeg: 185 }, // タック区間内 → 捨てる
+    { tMs: 10, type: 'tack', windFromDeg: 8 },
+    { tMs: 15, type: 'gybe', windFromDeg: 190 }, // タック以降 → 残す
+  ];
+  const out = preferCloseHauledAnchors(anchors);
+  assert.deepEqual(out.map((a) => a.tMs), [0, 10, 15]);
+});
+
+// 設計 (6): minSpeedMps=0 で停船中のふらつきを含んだ場合の影響確認
+// （物差しで実際のデータで確認するが、合成テストでもスモーク的に検証）
+test('B5-(6): estimateWindAxisSeries は minSpeedMps=0 でも有効なアンカーを返す', () => {
+  // beatWithTacks 相当の合成データをここで使う
+  // 設計(6)はCOGサンプルが増えることで逆にノイズが増える可能性があるが
+  // foldAnchorsToHemisphere・rejectAnchorOutliers で対処できることを確認
+  const t0 = 1_787_000_000_000;
+  const legs = [45, 315, 45];
+  const legSpeed = 3;
+  const tackSpeed = 0.5; // 1.5m/s 未満（旧実装では除外される）
+  const mLat = 111_320;
+  const refLat = 35.30;
+  const mLon = 111_320 * Math.cos(refLat * Math.PI / 180);
+  const pts = [];
+  let t = t0;
+  let lat = refLat, lon = 139.48;
+  for (let li = 0; li < legs.length; li++) {
+    const headDeg = legs[li];
+    const rad = headDeg * Math.PI / 180;
+    const n = 60; // 30秒
+    for (let i = 0; i < n; i++) {
+      pts.push({ t, lat, lon, speed: legSpeed, bearing: -1, accuracy: 5 });
+      lat += (Math.cos(rad) * legSpeed * 0.5) / mLat;
+      lon += (Math.sin(rad) * legSpeed * 0.5) / mLon;
+      t += 500;
+    }
+    if (li < legs.length - 1) {
+      // タック中（低速）
+      for (let j = 0; j < 8; j++) {
+        pts.push({ t, lat, lon, speed: tackSpeed, bearing: -1, accuracy: 5 });
+        t += 500;
+      }
+    }
+  }
+  // minSpeedMps=0 (新デフォルト) で実行
+  const series = estimateWindAxisSeries({ points: pts }, {
+    opts: { minLegSec: 5, settleSec: 4, windowMs: 1000, minSpeedMps: 0 },
+  });
+  // アンカーが少なくとも1つ取れること
+  assert.ok(series.length > 0, 'minSpeedMps=0 でもアンカーが得られるはず');
+  // タックアンカーから風向が北付近（±15°）に収まること
+  const windVals = series.map((s) => s.windFromDeg);
+  const median = circMedianDeg(windVals);
+  assert.ok(Math.abs(circDiffDeg(median, 0)) < 20,
+    `推定風向(中央値)は北付近のはず: median=${median}°`);
 });
