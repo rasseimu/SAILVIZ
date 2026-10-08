@@ -13,7 +13,7 @@ import { planBasemap, stitchBasemap } from './basemap.js';
 import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
 import { createWindStrip } from './windstripview.js';
-import { windDirAt } from './windaxis.js';
+import { windDirAt, windDirAtMulti } from './windaxis.js';
 import { applyWindAxisOverrides, pushOverride } from './windaxisoverride.js';
 import { minuteWinnersDetailed } from './vmgminute.js';
 import { assessComparison, formatConfidenceLabel, windAxisReasonRows } from './analysisconfidence.js';
@@ -249,21 +249,40 @@ function currentBase() {
 let mapRot = 0; // マップ回転角(ラジアン、表示のみ・保存しない)。fitTransform後に再適用。
 let windUp = false; // 風軸を常に画面上へ向けるモード(再生時刻の推定風向に追従)。保存しない。
 
-// windUp時: 基準トラックの推定風向を現在時刻で引き、風向が真上を向く回転(rot=-風向)を適用する。
-// 風向データが無ければ回転は据え置き。ラベル/スライダーは「風向そのもの」を表示する
-// (回転角=-風向ではなく、ユーザーが向けている風向を見せる。例: 風160°→160°表示)。
+// windUp時: その時刻をカバーする全艇の推定風向の円周中央値を求め、風向が真上を向く回転(rot=-風向)を適用する。
+// 各艇の風軸系列のうち「現在時刻をカバーする」系列だけを使い windDirAtMulti で合成する(B4修正)。
+// カバーする艇が無い時刻は回転を据え置きし、ラベルに「推定なし」を示す。
+// ラベル/スライダーは「風向そのもの」を表示(例: 風160°→160°表示)。
+// どの艇の系列を使っているかをラベルに表示する。
 function applyWindUpRotation(now) {
-  const ref = state.tracks.find((t) => t.visible) || null;
-  const series = ref ? windSeriesByTrack.get(ref) : null;
-  if (!ref || !series || series.length === 0) return;
-  const lookupT = state.mode === 'elapsed' ? (ref.tRange?.start ?? 0) + now : now;
-  const dir = windDirAt(series, lookupT);
-  if (dir == null) return;
-  mapRot = (-dir * Math.PI) / 180; // 回転は従来どおり(風を真上へ)
+  const visible = state.tracks.filter((t) => t.visible);
+  if (visible.length === 0) return;
+  // elapsed モードでは各艇の絶対時刻を求める(refTrack を基準に変換)
+  const refStart = state.mode === 'elapsed' ? (visible[0].tRange?.start ?? 0) : 0;
+  const lookupT = state.mode === 'elapsed' ? refStart + now : now;
+  // 各艇の系列を収集
+  const seriesArray = visible.map((tr) => windSeriesByTrack.get(tr) ?? []);
+  const dir = windDirAtMulti(seriesArray, lookupT);
+  const windupLabel = $('windup-label');
+  if (dir == null) {
+    // カバーする艇が無い: 回転は据え置き。ラベルに「推定なし」を表示。
+    if (windupLabel) windupLabel.title = '推定風軸を常に画面上に向ける（この時刻は風軸の推定なし）';
+    $('rotate-label').textContent = '—°（風軸推定なし）';
+    return;
+  }
+  mapRot = (-dir * Math.PI) / 180; // 回転(風を真上へ)
   state.transform.rot = mapRot;
   const d = Math.round(((dir % 360) + 360) % 360); // 表示は風向そのもの
   $('rotate-slider').value = String(d);
   $('rotate-label').textContent = `${d}°`;
+  // カバーしている艇数をツールチップに表示
+  const coveringCount = seriesArray.filter((s) => {
+    if (!s || s.length === 0) return false;
+    return lookupT >= s[0].tMs && lookupT <= s[s.length - 1].tMs;
+  }).length;
+  if (windupLabel) {
+    windupLabel.title = `推定風軸を常に画面上に向ける（${coveringCount}艇の推定の中央値）`;
+  }
 }
 
 // 回転ラベル/スライダーを、現在の上向き方位(= -mapRot)に同期する。
