@@ -328,6 +328,26 @@ export function windDirAt(series, tMs) {
   return last.windFromDeg;
 }
 
+// 複数の風軸系列から「その時刻をカバーする系列」の値を集め、円周中央値を返す。
+// カバーする = 系列の先頭.tMs <= tMs <= 末尾.tMs (端点を含む範囲に入っていること)。
+// 範囲外の系列はクランプせず無視する(端点に固定しない)。カバーする系列が0本なら null。
+// windUp の全艇対応に使う: 1艇依存 → その時刻をカバーする全艇の円周中央値。
+export function windDirAtMulti(seriesArray, tMs) {
+  if (!seriesArray || seriesArray.length === 0) return null;
+  const values = [];
+  for (const series of seriesArray) {
+    if (!series || series.length === 0) continue;
+    const first = series[0].tMs;
+    const last = series[series.length - 1].tMs;
+    // 系列が tMs をカバーしていない場合は無視(端点クランプはしない)
+    if (tMs < first || tMs > last) continue;
+    const v = windDirAt(series, tMs);
+    if (v != null) values.push(v);
+  }
+  if (values.length === 0) return null;
+  return circMedianDeg(values);
+}
+
 // マニューバ(タック/ジャイブ)検出: COG→レグ分割→raw点で減速を再計測→判別→マーク近傍/微小旋回を除外。
 // 風軸推定と「今日の練習サマリ」のタック/ジャイブ回数が同じ検出結果を使うために公開する。
 export function detectManeuvers(track, options = {}) {

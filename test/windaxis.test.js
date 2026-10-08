@@ -6,6 +6,7 @@ import {
   assignLegKinds, fillLegEstimates, rejectMarkRoundings, rejectMinorTurns,
   foldAnchorsToHemisphere, rejectAnchorOutliers, smoothWindSeries,
   preferCloseHauledAnchors, estimateWindAxisSeries, windDirAt, detectManeuvers,
+  windDirAtMulti,
 } from '../src/windaxis.js';
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -413,4 +414,74 @@ test('preferCloseHauledAnchors: タックが1本も無ければ全ジャイブ�
   ];
   const out = preferCloseHauledAnchors(anchors);
   assert.equal(out.length, 2);
+});
+
+// --- B4: windDirAtMulti（全艇の風軸から時刻をカバーする艇の円周中央値）---
+// 問題：applyWindUpRotation は最初の可視艇の系列だけを参照しており、
+// その艇の系列が練習時間の一部しか覆っていない場合に回転が固定される。
+// 修正：複数の系列から「その時刻をカバーする」ものだけを集め、円周中央値を返す純関数。
+
+test('windDirAtMulti: 1艇目の系列が短く2艇目の系列が長い場合、2艇目の範囲で回転角が変わる', () => {
+  // 1艇目: t=0..2000 の間だけ 風向=90°
+  const series1 = [
+    { tMs: 0,    windFromDeg: 90 },
+    { tMs: 2000, windFromDeg: 90 },
+  ];
+  // 2艇目: t=0..10000 の間を 風向=90°→180° に変化
+  const series2 = [
+    { tMs: 0,     windFromDeg: 90 },
+    { tMs: 10000, windFromDeg: 180 },
+  ];
+
+  // t=1000: 両方の系列がカバーする → circMedianDeg([90, 90+45]) = 約 112.5°
+  // (series2 は 0〜10000 の中点で 1000/10000 * 90 = 9°変化 → 99°)
+  const r1 = windDirAtMulti([series1, series2], 1000);
+  assert.ok(r1 != null, 't=1000 は null であってはならない');
+
+  // t=5000: series1 は範囲外(last=2000), series2 のみカバー → series2 の値を返す
+  const r5 = windDirAtMulti([series1, series2], 5000);
+  assert.ok(r5 != null, 't=5000 は null であってはならない');
+  // series2 で t=5000: (5000/10000)*90+90 = 135°
+  nearCirc(r5, 135, 1);
+
+  // t=8000: series1 は範囲外, series2 のみカバー → series2 の値(162°)を返す
+  const r8 = windDirAtMulti([series1, series2], 8000);
+  assert.ok(r8 != null, 't=8000 は null であってはならない');
+  // series2: (8000/10000)*90+90=162°
+  nearCirc(r8, 162, 1);
+
+  // t=5000 と t=8000 は系列1がカバーしていない → 値が変わること(系列2のみで動いている)
+  const diff = Math.abs(circDiffDeg(r5, r8));
+  assert.ok(diff > 5, `t=5000(${r5}°) と t=8000(${r8}°) の間で回転角が変化しているはず`);
+});
+
+test('windDirAtMulti: 全系列が空 or null なら null を返す', () => {
+  assert.equal(windDirAtMulti([], 1000), null);
+  assert.equal(windDirAtMulti([[], []], 1000), null);
+  assert.equal(windDirAtMulti(null, 1000), null);
+});
+
+test('windDirAtMulti: どの系列も時刻をカバーしない（全て範囲外）なら null', () => {
+  const series1 = [{ tMs: 0, windFromDeg: 90 }, { tMs: 1000, windFromDeg: 90 }];
+  // t=5000 は series1 の末端(1000)より後ろ → 範囲外
+  assert.equal(windDirAtMulti([series1], 5000), null);
+});
+
+test('windDirAtMulti: 1系列のみがカバーする場合はその値を返す', () => {
+  const series1 = [{ tMs: 0, windFromDeg: 90 }, { tMs: 1000, windFromDeg: 90 }];
+  const series2 = [{ tMs: 5000, windFromDeg: 180 }, { tMs: 6000, windFromDeg: 180 }];
+  // t=500: series1 のみカバー
+  nearCirc(windDirAtMulti([series1, series2], 500), 90, 0.1);
+  // t=5500: series2 のみカバー
+  nearCirc(windDirAtMulti([series1, series2], 5500), 180, 0.1);
+});
+
+test('windDirAtMulti: 北またぎの複数系列で両端のどちらかが返り（circMedianDeg のmedoid仕様）、北から20°以内に収まる', () => {
+  // 350° と 10° の2系列 → circMedianDeg は観測値のいずれかを返す(medoid)
+  // 350° も 10° も北から 10° 以内 → 結果は北から 20° 以内
+  const seriesA = [{ tMs: 0, windFromDeg: 350 }, { tMs: 1000, windFromDeg: 350 }];
+  const seriesB = [{ tMs: 0, windFromDeg: 10 }, { tMs: 1000, windFromDeg: 10 }];
+  const r = windDirAtMulti([seriesA, seriesB], 500);
+  // r は 350 か 10 のどちらかであり、どちらも北から 10° 以内
+  nearCirc(r, 0, 20); // 北から 20° 以内
 });
