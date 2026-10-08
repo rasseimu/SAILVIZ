@@ -54,9 +54,11 @@ export function bearingDeg(from, to) {
 }
 
 // 位置から中心差分でCOGを算出し、speed>=閾値の点のみ返す
+// B5設計(6): minSpeedMps のデフォルトを 0 に変更（足切りなし）。
+// 旧動作に戻す場合は opts.minSpeedMps=1.5 を明示する。
 export function computeCog(points, opts = {}) {
   const windowMs = opts.windowMs ?? 3000;
-  const minSpeedMps = opts.minSpeedMps ?? 1.5;
+  const minSpeedMps = opts.minSpeedMps ?? 0;
   const half = windowMs / 2;
   const out = [];
   for (const p of points) {
@@ -93,11 +95,20 @@ function representativeHeading(seg, settleSec, settleM) {
   return { headingDeg, meanSpeed, lenM };
 }
 
-// 減速比でタック/ジャイブを判別（タックは失速が大きい）
+// タック/ジャイブを判別する。
+// B5設計(1): 旋回角 ≥ tackTurnDegMin (デフォルト 75°) のマニューバを有効とする。
+// タックとジャイブの区別は速度ベース（タックは失速が大きい）で行う。
+// 速度ベースの閾値 tackMaxSpeedDropRatio のデフォルトは 0.6。
+// confidence は旋回角が90°に近いほど高い（0〜1）。
 export function classifyManeuver(m, opts = {}) {
   const thr = opts.tackMaxSpeedDropRatio ?? 0.6;
   const type = m.speedDropRatio < thr ? 'tack' : 'gybe';
-  const confidence = Math.max(0, Math.min(1, Math.abs(m.speedDropRatio - thr) / thr));
+  // confidence: 旋回角が90°に近いほど高い（B5設計: 旋回角を主指標に）
+  // ±90° の範囲で 0〜1 に線形正規化。速度ドロップの確信度も加味する
+  const turnDeg = m.turnDeg ?? 0;
+  const angleFactor = Math.max(0, Math.min(1, 1 - Math.abs(turnDeg - 90) / 90));
+  const speedFactor = Math.max(0, Math.min(1, Math.abs(m.speedDropRatio - thr) / thr));
+  const confidence = Math.max(0, Math.min(1, (angleFactor + speedFactor) / 2));
   return { type, confidence };
 }
 
@@ -261,11 +272,13 @@ export function rejectMarkRoundings(maneuvers, marks, opts = {}) {
   return maneuvers.filter((m) => marks.every((mk) => haversineMeters(m, mk) > radiusM));
 }
 
-// 微小な向き変化を除外。本物のタック/ジャイブは大きく向きを変える(概ね>=45°)が、
+// 微小な向き変化を除外。本物のタック/ジャイブは大きく向きを変える(約90°)が、
 // 進路の微調整やGPSのふらつきも「マニューバ」として検出される。これらは風向推定を
 // コンパス全域にばらけさせる主要なノイズ源なので、旋回角の小さいものを足切りする。
+// B5設計(1): 約90°の方向転換を検知するためデフォルトを 45° → 75° に引き上げ。
+// 旧動作（45°）に戻す場合は opts.minManeuverTurnDeg=45 を指定する。
 export function rejectMinorTurns(maneuvers, opts = {}) {
-  const minTurnDeg = opts.minManeuverTurnDeg ?? 45;
+  const minTurnDeg = opts.minManeuverTurnDeg ?? 75;
   return maneuvers.filter((m) => m.turnDeg >= minTurnDeg);
 }
 
