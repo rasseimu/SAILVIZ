@@ -8,11 +8,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
-import { openDb } from '../server/db/connection.js';
-import { migrate, loadMigrations } from '../server/db/migrate.js';
-import { createDbRepo } from '../server/repos/dbRepo.js';
+
+// node:sqlite ガード: Node <22.5 では skip する
+const [major, minor] = process.versions.node.split('.').map(Number);
+const hasSqlite = major > 22 || (major === 22 && minor >= 5);
+const skipMsg = hasSqlite ? undefined : 'node:sqlite が要る(Node >=22.5 / 24)';
 
 const MIG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'server', 'db', 'migrations');
+
+let openDb, migrate, loadMigrations, createDbRepo;
+if (hasSqlite) {
+  ({ openDb } = await import('../server/db/connection.js'));
+  ({ migrate, loadMigrations } = await import('../server/db/migrate.js'));
+  ({ createDbRepo } = await import('../server/repos/dbRepo.js'));
+}
 
 async function freshRepo() {
   const dataDir = await mkdtemp(join(tmpdir(), 'sailviz-dbrepo-'));
@@ -31,7 +40,7 @@ const baseProj = (over = {}) => ({
   tracks: [], events: [], marks: [], pins: [], videos: [], reflections: [], ...over,
 });
 
-test('write→read 往復(assemble + _rev 付与)', async () => {
+test('write→read 往復(assemble + _rev 付与)', { skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
   const proj = baseProj({ tracks: [track('t1', { tRange: { start: 1, end: 2 } })],
     reflections: [{ id: 'r1', createdAt: 1, text: 'x', people: ['村瀬 礼'], notes: {} }] });
@@ -43,7 +52,7 @@ test('write→read 往復(assemble + _rev 付与)', async () => {
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('listProjects が書いた器を返す(降順)', async () => {
+test('listProjects が書いた器を返す(降順)', { skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
   await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj());
   await repo.writeProject('sailviz-20260902-0900.sailviz.json', baseProj());
@@ -51,7 +60,7 @@ test('listProjects が書いた器を返す(降順)', async () => {
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('削除ルール②: _rev 無し PUT で既存トラックを消さない(新しく届いた軌跡が残る)', async () => {
+test('削除ルール②: _rev 無し PUT で既存トラックを消さない(新しく届いた軌跡が残る)', { skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
   // 初期2トラック
   await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj({ tracks: [track('t1'), track('t2')] }));
@@ -63,7 +72,7 @@ test('削除ルール②: _rev 無し PUT で既存トラックを消さない(�
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('削除ルール③: 表示設定の編集は in-place 更新(複製せず点列も保持)', async () => {
+test('削除ルール③: 表示設定の編集は in-place 更新(複製せず点列も保持)', { skip: skipMsg }, async () => {
   // Web は GPS 点列を編集しない。同じ点列で view(visible/name)だけ変えて保存する。
   // トラックは点列の指紋で同定され、既存行を上書き更新する(複製しない・点列列は触らない)。
   const { repo, dataDir } = await freshRepo();
@@ -79,7 +88,7 @@ test('削除ルール③: 表示設定の編集は in-place 更新(複製せず�
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('新規トラックは追加される(点列込み)', async () => {
+test('新規トラックは追加される(点列込み)', { skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
   await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj({ tracks: [track('t1')] }));
   await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj({ tracks: [track('t1'), track('t2')] }));
@@ -88,7 +97,7 @@ test('新規トラックは追加される(点列込み)', async () => {
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('反省は入れ替わる(Web の編集を尊重: 消したものは消える)', async () => {
+test('反省は入れ替わる(Web の編集を尊重: 消したものは消える)', { skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
   const r = (id) => ({ id, createdAt: 1, text: id, people: [], notes: {} });
   await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj({ reflections: [r('r1'), r('r2')] }));
@@ -98,7 +107,7 @@ test('反省は入れ替わる(Web の編集を尊重: 消したものは消え�
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('overlay progress/roadmap 往復', async () => {
+test('overlay progress/roadmap 往復', { skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
   const progress = { r1: { issueStage: 1, goalDone: true, text: { goal: 'g' },
     comments: { goal: [{ text: 'c', ts: 5, url: 'u' }] } } };
@@ -110,7 +119,7 @@ test('overlay progress/roadmap 往復', async () => {
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('deleteProject で器が消える', async () => {
+test('deleteProject で器が消える', { skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
   await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj());
   await repo.deleteProject('sailviz-20260901-0900.sailviz.json');
@@ -118,7 +127,7 @@ test('deleteProject で器が消える', async () => {
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('findProjectByPracticeDate は practiceDate を持つ器だけ JST 日で照合', async () => {
+test('findProjectByPracticeDate は practiceDate を持つ器だけ JST 日で照合', { skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
   const pd = Date.UTC(2026, 8, 3, 1, 0, 0); // JST 2026-09-03
   await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj({ practiceDate: pd }));
@@ -129,7 +138,7 @@ test('findProjectByPracticeDate は practiceDate を持つ器だけ JST 日で�
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('中抜き削除で残トラックの color↔points が崩れない(id 重複でも)', async () => {
+test('中抜き削除で残トラックの color↔points が崩れない(id 重複でも)', { skip: skipMsg }, async () => {
   // 旧データは全艇 id='Location.csv'。index 一致だと中抜き削除で view と点列がズレる。
   const { repo, dataDir } = await freshRepo();
   const t = (lat, color) => ({ id: 'Location.csv', name: `b${lat}`, color, visible: true,
@@ -146,7 +155,7 @@ test('中抜き削除で残トラックの color↔points が崩れない(id 重
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('トラック並べ替え PUT で points↔view がズレない', async () => {
+test('トラック並べ替え PUT で points↔view がズレない', { skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
   const t = (lat, color) => ({ id: 'Location.csv', name: `b${lat}`, color, visible: true,
     points: [{ t: lat, lat, lon: 0, speed: 0 }], bounds: { minLat: lat, maxLat: lat, minLon: 0, maxLon: 0 } });
@@ -160,7 +169,7 @@ test('トラック並べ替え PUT で points↔view がズレない', async () 
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('uploads はファイルに委譲(save/read/rename)', async () => {
+test('uploads はファイルに委譲(save/read/rename)', { skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
   await repo.saveUpload('imp_x', 'raw.csv', 'a,b\n1,2\n');
   assert.equal(await repo.readUpload('imp_x', 'raw.csv'), 'a,b\n1,2\n');
