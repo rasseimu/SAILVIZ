@@ -101,13 +101,17 @@ function loadCsvTrack(csvPath) {
 // ───────────────────────────────────────────────
 // 実装の設定
 // ───────────────────────────────────────────────
+// 設定の注意:
+// 「旧opts相当」は現行コード(B5実装済み)に旧来のopts値を渡したもの。
+// d136a90コミットの実装を再構築したものではない。
+// confidence の旋回角化(B5変更)は opts トグルがないため、旧opts設定でも B5 の confidence が適用される。
 const CONFIGS = [
   {
-    name: '旧版相当(d136a90 minSpeedMps=1.5, minTurnDeg=45)',
+    name: '旧opts相当(minSpeedMps=1.5, minTurnDeg=45)',
     opts: { minSpeedMps: 1.5, minManeuverTurnDeg: 45, windowMs: 3000, minLegSec: 8, settleSec: 12 },
   },
   {
-    name: '現行(B5前: minSpeedMps=1.5, minTurnDeg=45)',
+    name: '現行(B5前相当: minSpeedMps=1.5, minTurnDeg=45)',
     opts: { minSpeedMps: 1.5, minManeuverTurnDeg: 45, windowMs: 3000, minLegSec: 8, settleSec: 12 },
   },
   {
