@@ -341,12 +341,16 @@ export function windDirAt(series, tMs) {
   return last.windFromDeg;
 }
 
-// 複数の風軸系列から「その時刻をカバーする系列」の値を集め、円周中央値を返す。
+// 複数の風軸系列から「その時刻をカバーする系列」の値を集め、円周中央値とカバー本数を返す。
 // カバーする = 系列の先頭.tMs <= tMs <= 末尾.tMs (端点を含む範囲に入っていること)。
-// 範囲外の系列はクランプせず無視する(端点に固定しない)。カバーする系列が0本なら null。
+// 範囲外の系列はクランプせず無視する(端点に固定しない)。
+// 戻り値: { dir: number|null, coverCount: number }
+//   dir: カバーした系列の円周中央値。カバー系列が0本なら null。
+//   coverCount: カバーした系列の本数(ツールチップ等の表示用)。
 // windUp の全艇対応に使う: 1艇依存 → その時刻をカバーする全艇の円周中央値。
+// カバー本数を一緒に返すことで呼び出し側の二重集計を不要にする。
 export function windDirAtMulti(seriesArray, tMs) {
-  if (!seriesArray || seriesArray.length === 0) return null;
+  if (!seriesArray || seriesArray.length === 0) return { dir: null, coverCount: 0 };
   const values = [];
   for (const series of seriesArray) {
     if (!series || series.length === 0) continue;
@@ -357,8 +361,8 @@ export function windDirAtMulti(seriesArray, tMs) {
     const v = windDirAt(series, tMs);
     if (v != null) values.push(v);
   }
-  if (values.length === 0) return null;
-  return circMedianDeg(values);
+  if (values.length === 0) return { dir: null, coverCount: 0 };
+  return { dir: circMedianDeg(values), coverCount: values.length };
 }
 
 // マニューバ(タック/ジャイブ)検出: COG→レグ分割→raw点で減速を再計測→判別→マーク近傍/微小旋回を除外。

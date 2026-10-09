@@ -437,44 +437,50 @@ test('windDirAtMulti: 1艇目の系列が短く2艇目の系列が長い場合�
   // t=1000: 両方の系列がカバーする → circMedianDeg([90, 90+45]) = 約 112.5°
   // (series2 は 0〜10000 の中点で 1000/10000 * 90 = 9°変化 → 99°)
   const r1 = windDirAtMulti([series1, series2], 1000);
-  assert.ok(r1 != null, 't=1000 は null であってはならない');
+  assert.ok(r1.dir != null, 't=1000 は null であってはならない');
 
   // t=5000: series1 は範囲外(last=2000), series2 のみカバー → series2 の値を返す
   const r5 = windDirAtMulti([series1, series2], 5000);
-  assert.ok(r5 != null, 't=5000 は null であってはならない');
+  assert.ok(r5.dir != null, 't=5000 は null であってはならない');
   // series2 で t=5000: (5000/10000)*90+90 = 135°
-  nearCirc(r5, 135, 1);
+  nearCirc(r5.dir, 135, 1);
+  assert.equal(r5.coverCount, 1, 't=5000 は series2 のみカバー');
 
   // t=8000: series1 は範囲外, series2 のみカバー → series2 の値(162°)を返す
   const r8 = windDirAtMulti([series1, series2], 8000);
-  assert.ok(r8 != null, 't=8000 は null であってはならない');
+  assert.ok(r8.dir != null, 't=8000 は null であってはならない');
   // series2: (8000/10000)*90+90=162°
-  nearCirc(r8, 162, 1);
+  nearCirc(r8.dir, 162, 1);
 
   // t=5000 と t=8000 は系列1がカバーしていない → 値が変わること(系列2のみで動いている)
-  const diff = Math.abs(circDiffDeg(r5, r8));
-  assert.ok(diff > 5, `t=5000(${r5}°) と t=8000(${r8}°) の間で回転角が変化しているはず`);
+  const diff = Math.abs(circDiffDeg(r5.dir, r8.dir));
+  assert.ok(diff > 5, `t=5000(${r5.dir}°) と t=8000(${r8.dir}°) の間で回転角が変化しているはず`);
 });
 
-test('windDirAtMulti: 全系列が空 or null なら null を返す', () => {
-  assert.equal(windDirAtMulti([], 1000), null);
-  assert.equal(windDirAtMulti([[], []], 1000), null);
-  assert.equal(windDirAtMulti(null, 1000), null);
+test('windDirAtMulti: 全系列が空 or null なら { dir: null, coverCount: 0 } を返す', () => {
+  assert.equal(windDirAtMulti([], 1000).dir, null);
+  assert.equal(windDirAtMulti([[], []], 1000).dir, null);
+  assert.equal(windDirAtMulti(null, 1000).dir, null);
+  assert.equal(windDirAtMulti(null, 1000).coverCount, 0);
 });
 
-test('windDirAtMulti: どの系列も時刻をカバーしない（全て範囲外）なら null', () => {
+test('windDirAtMulti: どの系列も時刻をカバーしない（全て範囲外）なら dir: null', () => {
   const series1 = [{ tMs: 0, windFromDeg: 90 }, { tMs: 1000, windFromDeg: 90 }];
   // t=5000 は series1 の末端(1000)より後ろ → 範囲外
-  assert.equal(windDirAtMulti([series1], 5000), null);
+  const r = windDirAtMulti([series1], 5000);
+  assert.equal(r.dir, null);
+  assert.equal(r.coverCount, 0);
 });
 
 test('windDirAtMulti: 1系列のみがカバーする場合はその値を返す', () => {
   const series1 = [{ tMs: 0, windFromDeg: 90 }, { tMs: 1000, windFromDeg: 90 }];
   const series2 = [{ tMs: 5000, windFromDeg: 180 }, { tMs: 6000, windFromDeg: 180 }];
   // t=500: series1 のみカバー
-  nearCirc(windDirAtMulti([series1, series2], 500), 90, 0.1);
+  nearCirc(windDirAtMulti([series1, series2], 500).dir, 90, 0.1);
+  assert.equal(windDirAtMulti([series1, series2], 500).coverCount, 1);
   // t=5500: series2 のみカバー
-  nearCirc(windDirAtMulti([series1, series2], 5500), 180, 0.1);
+  nearCirc(windDirAtMulti([series1, series2], 5500).dir, 180, 0.1);
+  assert.equal(windDirAtMulti([series1, series2], 5500).coverCount, 1);
 });
 
 test('windDirAtMulti: 北またぎの複数系列で両端のどちらかが返り（circMedianDeg のmedoid仕様）、北から20°以内に収まる', () => {
@@ -483,8 +489,99 @@ test('windDirAtMulti: 北またぎの複数系列で両端のどちらかが返�
   const seriesA = [{ tMs: 0, windFromDeg: 350 }, { tMs: 1000, windFromDeg: 350 }];
   const seriesB = [{ tMs: 0, windFromDeg: 10 }, { tMs: 1000, windFromDeg: 10 }];
   const r = windDirAtMulti([seriesA, seriesB], 500);
-  // r は 350 か 10 のどちらかであり、どちらも北から 10° 以内
-  nearCirc(r, 0, 20); // 北から 20° 以内
+  // r.dir は 350 か 10 のどちらかであり、どちらも北から 10° 以内
+  nearCirc(r.dir, 0, 20); // 北から 20° 以内
+  assert.equal(r.coverCount, 2);
+});
+
+// ===== B4-P2: elapsed モード参照時刻ずれ修正 / windDirAtMulti リファクタ =====
+
+// P3-1: windDirAtMulti は { dir, coverCount } を返す（リファクタ・挙動変更なし）
+test('P3-1: windDirAtMulti は { dir, coverCount } を返す', () => {
+  const series1 = [{ tMs: 0, windFromDeg: 90 }, { tMs: 1000, windFromDeg: 90 }];
+  const series2 = [{ tMs: 0, windFromDeg: 90 }, { tMs: 1000, windFromDeg: 90 }];
+  const r = windDirAtMulti([series1, series2], 500);
+  assert.ok(r !== null, '結果は null でない');
+  assert.ok(typeof r === 'object', '結果はオブジェクト');
+  assert.ok('dir' in r, 'dir フィールドがある');
+  assert.ok('coverCount' in r, 'coverCount フィールドがある');
+  nearCirc(r.dir, 90, 0.1);
+  assert.equal(r.coverCount, 2);
+});
+
+test('P3-1: windDirAtMulti は 1系列カバー時に coverCount=1 を返す', () => {
+  const series1 = [{ tMs: 0, windFromDeg: 90 }, { tMs: 1000, windFromDeg: 90 }];
+  const series2 = [{ tMs: 5000, windFromDeg: 180 }, { tMs: 6000, windFromDeg: 180 }];
+  const r = windDirAtMulti([series1, series2], 500);
+  assert.ok(r !== null);
+  assert.equal(r.coverCount, 1);
+  nearCirc(r.dir, 90, 0.1);
+});
+
+test('P3-1: windDirAtMulti はカバーなし時に { dir: null, coverCount: 0 } を返す', () => {
+  const series1 = [{ tMs: 0, windFromDeg: 90 }, { tMs: 1000, windFromDeg: 90 }];
+  const r = windDirAtMulti([series1], 5000);
+  assert.ok(r !== null, '結果はオブジェクト（null ではない）');
+  assert.equal(r.dir, null);
+  assert.equal(r.coverCount, 0);
+});
+
+test('P3-1: windDirAtMulti は空/null 入力時に { dir: null, coverCount: 0 } を返す', () => {
+  const r1 = windDirAtMulti([], 1000);
+  assert.equal(r1.dir, null);
+  assert.equal(r1.coverCount, 0);
+  const r2 = windDirAtMulti(null, 1000);
+  assert.equal(r2.dir, null);
+  assert.equal(r2.coverCount, 0);
+});
+
+// P2-1: elapsed モードで各艇が自艇の tRange.start を基準に絶対時刻を計算する
+// applyWindUpRotation の修正を純粋関数ロジックで検証する。
+// 合成データ: 2艇で tRange.start が大きくズレている。
+// elapsed now=500 のとき:
+//   修正前: 全艇に visible[0].tRange.start + now = 1000+500=1500 で引く
+//           → 艇2の系列(5000..7000) は 1500 をカバーしない → 艇2が除外される
+//   修正後: 各艇に trackN.tRange.start + now で引く
+//           → 艇1は 1500, 艇2は 5500 → どちらもカバーされる
+test('P2-1: elapsed モードで各艇が自艇 tRange.start+now を使えば2艇ともカバーされる', () => {
+  const series1 = [{ tMs: 1000, windFromDeg: 90 }, { tMs: 2000, windFromDeg: 90 }];
+  const series2 = [{ tMs: 5000, windFromDeg: 180 }, { tMs: 7000, windFromDeg: 180 }];
+  const tracks = [
+    { tRange: { start: 1000 } },
+    { tRange: { start: 5000 } },
+  ];
+  const seriesList = [series1, series2];
+  const now = 500; // elapsed 軸上の時刻
+
+  // 修正後のロジック: 各艇が自艇の tRange.start + now を絶対時刻として使う
+  const values = [];
+  for (let i = 0; i < tracks.length; i++) {
+    const series = seriesList[i];
+    const absT = (tracks[i].tRange?.start ?? 0) + now;
+    if (!series || series.length === 0) continue;
+    if (absT < series[0].tMs || absT > series[series.length - 1].tMs) continue;
+    const v = windDirAt(series, absT);
+    if (v != null) values.push(v);
+  }
+  assert.equal(values.length, 2, '修正後: 各艇が自艇基準の絶対時刻でカバーされる (2艇)');
+});
+
+test('P2-1: 修正前のロジック(visible[0].start+now)では2艇目がカバーされない', () => {
+  const series1 = [{ tMs: 1000, windFromDeg: 90 }, { tMs: 2000, windFromDeg: 90 }];
+  const series2 = [{ tMs: 5000, windFromDeg: 180 }, { tMs: 7000, windFromDeg: 180 }];
+  const seriesList = [series1, series2];
+  const tracks = [
+    { tRange: { start: 1000 } },
+    { tRange: { start: 5000 } },
+  ];
+  const now = 500;
+
+  // 修正前のロジック: visible[0].tRange.start + now を全艇共通の参照時刻にする
+  const refStart = tracks[0].tRange?.start ?? 0;
+  const lookupT = refStart + now; // = 1500
+  const r = windDirAtMulti(seriesList, lookupT);
+  // lookupT=1500 は series2 (tMs: 5000..7000) に含まれない → coverCount=1 のみ
+  assert.equal(r.coverCount, 1, '修正前: 艇1のみカバーされ、艇2は除外される');
 });
 
 // ===== B5: 風軸推定 再設計 (2026-10-08) =====
