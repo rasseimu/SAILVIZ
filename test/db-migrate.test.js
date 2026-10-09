@@ -3,17 +3,26 @@
 // node:sqlite が要る(Node >=22.5 / 24)。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { openDb } from '../server/db/connection.js';
-import { migrate } from '../server/db/migrate.js';
 
-test('接続は外部キーが有効', () => {
+// node:sqlite ガード: Node <22.5 では skip する
+const [major, minor] = process.versions.node.split('.').map(Number);
+const hasSqlite = major > 22 || (major === 22 && minor >= 5);
+const skipMsg = hasSqlite ? undefined : 'node:sqlite が要る(Node >=22.5 / 24)';
+
+let openDb, migrate;
+if (hasSqlite) {
+  ({ openDb } = await import('../server/db/connection.js'));
+  ({ migrate } = await import('../server/db/migrate.js'));
+}
+
+test('接続は外部キーが有効', { skip: skipMsg }, () => {
   const db = openDb(':memory:');
   const fk = db.prepare('PRAGMA foreign_keys').get();
   assert.equal(fk.foreign_keys, 1);
   db.close();
 });
 
-test('migrate は未適用を順に当て、schema_migrations に記録する', () => {
+test('migrate は未適用を順に当て、schema_migrations に記録する', { skip: skipMsg }, () => {
   const db = openDb(':memory:');
   const migrations = [
     { version: 2, sql: 'CREATE TABLE b (id TEXT PRIMARY KEY);' },
@@ -29,7 +38,7 @@ test('migrate は未適用を順に当て、schema_migrations に記録する', 
   db.close();
 });
 
-test('migrate は冪等(2回目は0件適用)', () => {
+test('migrate は冪等(2回目は0件適用)', { skip: skipMsg }, () => {
   const db = openDb(':memory:');
   const migrations = [{ version: 1, sql: 'CREATE TABLE a (id TEXT PRIMARY KEY);' }];
   assert.equal(migrate(db, migrations, 1000), 1);
@@ -37,7 +46,7 @@ test('migrate は冪等(2回目は0件適用)', () => {
   db.close();
 });
 
-test('失敗したマイグレーションはロールバックし記録しない', () => {
+test('失敗したマイグレーションはロールバックし記録しない', { skip: skipMsg }, () => {
   const db = openDb(':memory:');
   const migrations = [{ version: 1, sql: 'CREATE TABLE a (id TEXT PRIMARY KEY); THIS IS NOT SQL;' }];
   assert.throws(() => migrate(db, migrations, 1000));

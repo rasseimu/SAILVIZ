@@ -1,16 +1,26 @@
 // test/db-import.test.js
 // ファイル→DB 取込: dry-run は書かず件数と orphan 警告を出す。実行は冪等。
+// node:sqlite が要る(Node >=22.5 / 24)。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openDb } from '../server/db/connection.js';
-import { migrate, loadMigrations } from '../server/db/migrate.js';
-import { importFromFiles } from '../server/db/importFromFiles.js';
+
+// node:sqlite ガード: Node <22.5 では skip する
+const [major, minor] = process.versions.node.split('.').map(Number);
+const hasSqlite = major > 22 || (major === 22 && minor >= 5);
+const skipMsg = hasSqlite ? undefined : 'node:sqlite が要る(Node >=22.5 / 24)';
 
 const MIG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'server', 'db', 'migrations');
+
+let openDb, migrate, loadMigrations, importFromFiles;
+if (hasSqlite) {
+  ({ openDb } = await import('../server/db/connection.js'));
+  ({ migrate, loadMigrations } = await import('../server/db/migrate.js'));
+  ({ importFromFiles } = await import('../server/db/importFromFiles.js'));
+}
 
 async function fixture() {
   const dataDir = await mkdtemp(join(tmpdir(), 'sailviz-import-'));
@@ -35,7 +45,7 @@ async function fixture() {
 
 const count = (db, t) => db.prepare(`SELECT count(*) c FROM ${t}`).get().c;
 
-test('dry-run は件数と orphan 警告を返し、DB に書かない', async () => {
+test('dry-run は件数と orphan 警告を返し、DB に書かない', { skip: skipMsg }, async () => {
   const { dataDir, db } = await fixture();
   const report = importFromFiles({ db, dataDir, dryRun: true, now: 1 });
   assert.equal(report.projects, 2);
@@ -48,7 +58,7 @@ test('dry-run は件数と orphan 警告を返し、DB に書かない', async (
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('実行で行が入り、2回流しても件数が変わらない(冪等)', async () => {
+test('実行で行が入り、2回流しても件数が変わらない(冪等)', { skip: skipMsg }, async () => {
   const { dataDir, db } = await fixture();
   importFromFiles({ db, dataDir, now: 1 });
   const snap = () => ['practice_days', 'rec_sessions', 'tracks', 'reflections', 'reflection_progress', 'reflection_comments', 'roadmaps'].map((t) => count(db, t));
@@ -60,7 +70,7 @@ test('実行で行が入り、2回流しても件数が変わらない(冪等)',
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('取込後の往復: readProject が元ファイルと一致(_rev 除く)', async () => {
+test('取込後の往復: readProject が元ファイルと一致(_rev 除く)', { skip: skipMsg }, async () => {
   const { dataDir, db } = await fixture();
   importFromFiles({ db, dataDir, now: 1 });
   const { createDbRepo } = await import('../server/repos/dbRepo.js');

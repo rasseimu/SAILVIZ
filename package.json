@@ -9,5 +9,8 @@
     "start": "node server/index.js",
     "serve": "node server/index.js",
     "import": "node server/import.js"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }
