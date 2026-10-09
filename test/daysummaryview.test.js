@@ -97,6 +97,7 @@ test('練習全体: UTCでは日付が変わってもJSTで同日なら終了側
   assert.ok(renderDaySummaryHtml(ds).includes('2026-08-07 08:30〜09:30（1時間0分）'));
 });
 
+
 test('2艇で quality.boatIndex があれば、その艇の現在の名前を品質の根拠の前に付ける', () => {
   const ds = twoBoats();
   ds.overall.quality = { level: 'poor', note: '欠損0%・記録間隔10秒', boatIndex: 1 };

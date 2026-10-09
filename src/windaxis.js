@@ -365,6 +365,7 @@ export function windDirAtMulti(seriesArray, tMs) {
   return { dir: circMedianDeg(values), coverCount: values.length };
 }
 
+
 // マニューバ(タック/ジャイブ)検出: COG→レグ分割→raw点で減速を再計測→判別→マーク近傍/微小旋回を除外。
 // 風軸推定と「今日の練習サマリ」のタック/ジャイブ回数が同じ検出結果を使うために公開する。
 export function detectManeuvers(track, options = {}) {
