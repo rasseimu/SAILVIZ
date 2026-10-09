@@ -315,4 +315,4 @@ daySummary = {
 
 ## 次のステップ
 
-- writing-plans で実装計画を作成する
+- 実装計画: `docs/superpowers/plans/2026-09-26-day-summary.md`

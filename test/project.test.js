@@ -201,6 +201,7 @@ test('excludedIntervals: 項目のないトラック(旧データ)には書き�
   assert.deepEqual(serializeProject(st, { savedAt: 's' }).tracks[0].excludedIntervals, []);
 });
 
+
 const DS = JSON.parse(readFileSync(new URL('./fixtures/day-summary-v1.json', import.meta.url), 'utf8'));
 
 test('daySummary が serialize→deserialize で往復する', () => {
