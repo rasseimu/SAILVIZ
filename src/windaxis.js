@@ -96,10 +96,10 @@ function representativeHeading(seg, settleSec, settleM) {
 }
 
 // タック/ジャイブを判別する。
-// B5設計(1): 旋回角 ≥ tackTurnDegMin (デフォルト 75°) のマニューバを有効とする。
-// タックとジャイブの区別は速度ベース（タックは失速が大きい）で行う。
+// B5設計(H14 (a)採用): タック/ジャイブの判別は speed ベース（speedDropRatio < tackMaxSpeedDropRatio）で行う。
+// 幾何でタック/ジャイブを断定する案（opts.useGeometricTackClassification 等）は H14 で不採用。
 // 速度ベースの閾値 tackMaxSpeedDropRatio のデフォルトは 0.6。
-// confidence は旋回角が90°に近いほど高い（0〜1）。
+// B5変更: confidence を旋回角で改修。旋回角が90°に近いほど confidence が高い（0〜1）。
 export function classifyManeuver(m, opts = {}) {
   const thr = opts.tackMaxSpeedDropRatio ?? 0.6;
   const type = m.speedDropRatio < thr ? 'tack' : 'gybe';
