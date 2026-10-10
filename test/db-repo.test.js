@@ -107,7 +107,29 @@ test('反省は入れ替わる(Web の編集を尊重: 消したものは消え�
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('overlay progress/roadmap 往復', { skip: skipMsg }, async () => {
+test('反省の更新保存は UPSERT: 内容更新・件数不変・rowid 不変・同期削除も効く', { skip: skipMsg }, async () => {
+  const { repo, db, dataDir } = await freshRepo();
+  const NAME = 'sailviz-20260901-0900.sailviz.json';
+  // reflections.id は器×索引の合成 ID(`${pdId}_r${i}`)。同じ位置の反省は同じ行を更新する。
+  const r = (id, text) => ({ id, createdAt: 1, text, people: [], notes: {} });
+  const rows = () => db.prepare('SELECT rowid AS n, id, position FROM reflections ORDER BY position').all();
+  await repo.writeProject(NAME, baseProj({ reflections: [r('a', 'a'), r('b', 'b')] }));
+  await repo.writeProject(NAME, baseProj({ reflections: [r('a', 'a2'), r('b', 'b2')] })); // 既存行あり
+  const before = rows();
+  await repo.writeProject(NAME, baseProj({ reflections: [r('a', 'a3'), r('b', 'b3'), r('c', 'c3')] }));
+  const mid = rows();
+  assert.equal(mid.length, 3);
+  assert.deepEqual(mid.slice(0, 2).map((x) => x.n), before.map((x) => x.n), '既存行は作り直されない(rowid 不変)');
+  assert.deepEqual((await repo.readProject(NAME)).reflections.map((x) => x.text), ['a3', 'b3', 'c3']);
+  await repo.writeProject(NAME, baseProj({ reflections: [r('a', 'a4')] })); // 同期削除
+  const after = rows();
+  assert.equal(after.length, 1);
+  assert.equal(after[0].n, before[0].n);
+  assert.deepEqual((await repo.readProject(NAME)).reflections.map((x) => x.text), ['a4']);
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test('overlay progress/roadmap 往復',{ skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
   const progress = { r1: { issueStage: 1, goalDone: true, text: { goal: 'g' },
     comments: { goal: [{ text: 'c', ts: 5, url: 'u' }] } } };
