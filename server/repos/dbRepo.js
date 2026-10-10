@@ -34,7 +34,7 @@ function upsertRow(db, table, row, pk) {
   db.prepare(sql).run(...keys.map((k) => (row[k] === undefined ? null : row[k])));
 }
 
-const genId =(prefix) => `${prefix}_${randomBytes(5).toString('hex')}`;
+const genId = (prefix) => `${prefix}_${randomBytes(5).toString('hex')}`;
 
 // 点列の指紋。別艇の GPS 軌跡は点数と端点が異なるので同定に十分。
 // 互換 PUT で incoming トラックを既存 DB トラックに対応づけるのに使う(id が一意でないため)。

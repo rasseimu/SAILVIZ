@@ -129,7 +129,7 @@ test('反省の更新保存は UPSERT: 内容更新・件数不変・rowid 不�
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('overlay progress/roadmap 往復',{ skip: skipMsg }, async () => {
+test('overlay progress/roadmap 往復', { skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
   const progress = { r1: { issueStage: 1, goalDone: true, text: { goal: 'g' },
     comments: { goal: [{ text: 'c', ts: 5, url: 'u' }] } } };
