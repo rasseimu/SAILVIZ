@@ -25,6 +25,15 @@ function insertRow(db, table, row) {
   db.prepare(sql).run(...keys.map((k) => (row[k] === undefined ? null : row[k])));
 }
 
+// INSERT ... ON CONFLICT(pk) DO UPDATE。既存行を作り直さない(rowid を保つ)。
+function upsertRow(db, table, row, pk) {
+  const keys = Object.keys(row);
+  const sets = keys.filter((k) => k !== pk).map((k) => `${k} = excluded.${k}`).join(', ');
+  const sql = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`
+    + ` ON CONFLICT(${pk}) DO UPDATE SET ${sets}`;
+  db.prepare(sql).run(...keys.map((k) => (row[k] === undefined ? null : row[k])));
+}
+
 const genId = (prefix) => `${prefix}_${randomBytes(5).toString('hex')}`;
 
 // 点列の指紋。別艇の GPS 軌跡は点数と端点が異なるので同定に十分。
@@ -123,8 +132,7 @@ export function createDbRepo({ db, dataDir }) {
             if (!incomingReflIds.has(ex.id)) db.prepare('DELETE FROM reflections WHERE id = ?').run(ex.id);
           }
           for (const r of decomp.reflections) {
-            db.prepare('DELETE FROM reflections WHERE id = ?').run(r.id);
-            insertRow(db, 'reflections', r);
+            upsertRow(db, 'reflections', r, 'id');
           }
         }
         db.exec('COMMIT');
