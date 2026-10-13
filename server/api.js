@@ -21,7 +21,7 @@ export function createApi({
   const store = repo || createFileRepo(dataDir);
   const authRoute = accounts
     ? createAuthRoute({
-      accounts, mailer: mailer || createMailer({}), baseUrl: baseUrl || 'http://localhost:8000', writeToken: token,
+      accounts, mailer: mailer || createMailer({ redactToken: process.env.NODE_ENV === 'production' }), baseUrl: baseUrl || 'http://localhost:8000', writeToken: token,
       secureCookie: process.env.NODE_ENV === 'production' ? '; Secure' : '', ...authOptions,
     })
     : unavailableRoute;

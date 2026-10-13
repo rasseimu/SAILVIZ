@@ -25,6 +25,7 @@ export const LIMITS = {
   resetRequestEmail: { max: 3, windowMs: 60 * MIN }, // 超えたら黙って送らない(登録の有無を漏らさない)
   resetConfirmIp: { max: 10, windowMs: 15 * MIN }, // トークン推測の失敗
   resend: { max: 3, windowMs: 60 * MIN }, // 本人ごと
+  emailChange: { max: 3, windowMs: 60 * MIN }, // PATCH /api/me のメール変更(確認メールの乱発防止)、本人ごと
   deletePassword: { max: 5, windowMs: 15 * MIN }, // 本人ごとの削除時パスワード失敗
 };
 
@@ -93,7 +94,8 @@ export function createAuthRoute({
   };
 
   const issueVerify = (user) => (user.email_verified_at == null
-    ? issueEmailToken(accounts, { userId: user.id, purpose: 'verify', now: now() }) : null);
+    // 発行時のアドレスを保存し、確認時に「今のアドレスと同じ」を必須にする(変更前アドレス宛てのリンクで新アドレスを確認済みにさせない)
+    ? issueEmailToken(accounts, { userId: user.id, purpose: 'verify', newEmail: user.email, now: now() }) : null);
 
   const handlers = {
     // ---- POST /api/auth/register ----
@@ -126,8 +128,8 @@ export function createAuthRoute({
       const hit = consumeEmailToken(accounts, token, 'verify', now())
         || consumeEmailToken(accounts, token, 'change', now());
       const user = hit && accounts.getUser(hit.userId);
-      // 削除済み・メール変更後に古くなった change トークンは無効
-      if (!user || user.deleted_at != null || (hit.newEmail && hit.newEmail !== user.email)) {
+      // 削除済み・メール変更後に古くなったトークン(verify・change とも発行時のアドレスが今と違う)は無効
+      if (!user || user.deleted_at != null || !hit.newEmail || hit.newEmail !== user.email) {
         return err(res, 422, 'invalid_token', 'リンクが無効か、期限切れまたは使用済みです');
       }
       if (user.email_verified_at == null) accounts.markEmailVerified(user.id, now());
@@ -232,7 +234,9 @@ export function createAuthRoute({
       const patch = { ...v.value };
       const emailChanged = patch.email !== undefined && patch.email !== id.user.email;
       if (!emailChanged) delete patch.email;
+      if (emailChanged && limited(res, [limiters.emailChange, id.user.id])) return;
       if (emailChanged && accounts.getUserByEmail(patch.email)) return err(res, 409, 'email_taken', 'このメールアドレスは既に使われています');
+      if (emailChanged) limiters.emailChange.record(id.user.id, now());
       let verify = null;
       try {
         accounts.withTx(() => {

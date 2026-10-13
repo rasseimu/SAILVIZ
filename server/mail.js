@@ -13,10 +13,12 @@ export function buildLink(baseUrl, kind, token) {
 const maskEmail = (e) => String(e).replace(/^(.).*(@.*)$/, '$1***$2'); // ログに宛先の全文を残さない
 
 // 確認リンクをログに出すだけ(開発・ステージング用)。
-export function createLogMailer({ logger = console.log } = {}) {
+// redactToken=true(本番)ではリンクのトークンを伏せる(ログを読めた人がアカウントを乗っ取れないように)。
+export function createLogMailer({ logger = console.log, redactToken = false } = {}) {
   return {
     async send({ to, kind, url }) {
-      logger(`[mail:log] kind=${kind} to=${maskEmail(to)} url=${url}`);
+      const shown = redactToken ? String(url).replace(/([?&]token=)[^&#]*/, '$1<redacted>') : url;
+      logger(`[mail:log] kind=${kind} to=${maskEmail(to)} url=${shown}`);
     },
   };
 }
@@ -31,8 +33,8 @@ export function createStubMailer() {
   };
 }
 
-export function createMailer({ provider = 'log', logger } = {}) {
-  if (!provider || provider === 'log') return createLogMailer({ logger });
+export function createMailer({ provider = 'log', logger, redactToken = false } = {}) {
+  if (!provider || provider === 'log') return createLogMailer({ logger, redactToken });
   // TODO(S2.8): provider='brevo' など。未実装の値は起動時に気づけるよう例外にする。
   throw new Error(`MAIL_PROVIDER=${provider} は未実装です(使えるのは log)`);
 }

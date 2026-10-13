@@ -354,6 +354,29 @@ test('PATCH /api/me: メールを再変更したら古い確認リンクは無�
   assert.equal((await call('POST', '/api/auth/verify-email', { verifyToken: tokenFrom(mailer.last('verify').url) })).status, 200);
 });
 
+test('PATCH /api/me: 登録時の verify リンクは、メール変更後は 422 で、新アドレスは未確認のまま', { skip }, async () => {
+  const reg = await register();
+  const old = tokenFrom(mailer.last('verify').url);
+  await call('PATCH', '/api/me', { email: 'new@example.test' }, { token: reg.json.token });
+  assert.equal((await call('POST', '/api/auth/verify-email', { verifyToken: old })).status, 422);
+  assert.equal((await call('GET', '/api/me', undefined, { token: reg.json.token })).json.emailVerified, false);
+  // 新アドレス宛てのリンクなら確認できる
+  assert.equal((await call('POST', '/api/auth/verify-email', { verifyToken: tokenFrom(mailer.last('verify').url) })).status, 200);
+  assert.equal((await call('GET', '/api/me', undefined, { token: reg.json.token })).json.emailVerified, true);
+});
+
+test('PATCH /api/me: メール変更は本人ごとに 1 時間 3 回まで(429・Retry-After)。窓が過ぎれば再開', { skip }, async () => {
+  const reg = await register();
+  const patch = (e) => call('PATCH', '/api/me', { email: e }, { token: reg.json.token });
+  for (let i = 0; i < LIMITS.emailChange.max; i++) assert.equal((await patch(`n${i}@example.test`)).status, 200);
+  const r = await patch('over@example.test');
+  assert.equal(r.status, 429);
+  assert.ok(Number(r.headers.get('retry-after')) >= 1);
+  assert.equal((await call('PATCH', '/api/me', { name: '名前だけ' }, { token: reg.json.token })).status, 200); // メール以外は数えない
+  clock.t += LIMITS.emailChange.windowMs + 1000;
+  assert.equal((await patch('after@example.test')).status, 200);
+});
+
 test('DELETE /api/me: パスワード必須(誤りは 403)。成功で全トークン失効・個人情報の匿名化・同じメールで再登録できる', { skip }, async () => {
   const reg = await register();
   const org = accounts.createOrg({ name: 'テスト部', adminUserIds: [], now: clock.t });

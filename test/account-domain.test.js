@@ -61,6 +61,16 @@ test('mail: リンクは Web のページ、トークンは URL エンコード'
   assert.equal(buildLink('http://localhost:8000', 'reset', 'x y'), 'http://localhost:8000/reset-password?token=x%20y');
 });
 
+test('mail: redactToken(本番)ではリンクのトークンを伏せる。既定は出す', async () => {
+  const lines = [];
+  const m = createMailer({ provider: 'log', logger: (l) => lines.push(l), redactToken: true });
+  await m.send({ to: 'taro@example.test', kind: 'reset', url: 'https://x.test/reset-password?token=SECRET_abc-1' });
+  assert.ok(!lines[0].includes('SECRET_abc-1'));
+  assert.match(lines[0], /reset-password\?token=<redacted>/);
+  await createMailer({ logger: (l) => lines.push(l) }).send({ to: 'a@example.test', kind: 'verify', url: 'https://x.test/verify-email?token=VISIBLE' });
+  assert.match(lines[1], /token=VISIBLE/);
+});
+
 test('mail: log アダプタはリンクを出し、宛先はマスクする。stub は溜める。未実装 provider は例外', async () => {
   const lines = [];
   await createLogMailer({ logger: (l) => lines.push(l) }).send({ to: 'taro@example.test', kind: 'verify', url: 'http://x/verify-email?token=t' });
