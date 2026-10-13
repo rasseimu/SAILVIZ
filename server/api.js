@@ -9,6 +9,7 @@ import { basemapRoute } from './routes/basemap.js';
 import { aiRoute } from './routes/ai.js';
 import { compatRoute } from './routes/compat.js';
 import { createAuthRoute, unavailableRoute } from './routes/auth.js';
+import { createOrgsRoute } from './routes/orgs.js';
 import { createMailer } from './mail.js';
 import { randomBytes } from 'node:crypto';
 
@@ -25,6 +26,9 @@ export function createApi({
       secureCookie: process.env.NODE_ENV === 'production' ? '; Secure' : '', ...authOptions,
     })
     : unavailableRoute;
+  const orgsRoute = accounts
+    ? createOrgsRoute({ accounts, writeToken: token, now: authOptions.now })
+    : async () => false;
   // 閲覧ゲート: user/password が両方設定されている時のみ有効。
   // 有効時はランダム秘密を発行し、ログイン成功で Cookie に載せる(パスワードは載せない)。
   const viewEnabled = Boolean(viewUser && viewPassword);
@@ -62,6 +66,7 @@ export function createApi({
       if (await basemapRoute(req, res, ctx)) return true;
       if (await aiRoute(req, res, ctx)) return true;
       if (await authRoute(req, res, ctx)) return true;
+      if (await orgsRoute(req, res, ctx)) return true;
       if (await compatRoute(req, res, ctx)) return true;
       send(res, 404, { error: 'no route' });
       return true;

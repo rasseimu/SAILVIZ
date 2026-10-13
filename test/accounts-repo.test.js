@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 
-// db.isTransaction を使うので Node 24 以上で十分。
+// withTx が db.isTransaction(呼び出し側が BEGIN 済みかの判定)を使うため Node 24 以上が要る。
 const [major] = process.versions.node.split('.').map(Number);
 const hasSqlite = major >= 24;
 const skipMsg = hasSqlite ? undefined : 'node:sqlite の isTransaction が要る(Node >=24)';
@@ -272,8 +272,10 @@ test('P3-2 replaceRoster: 既存の同メール重複行を指す会員は残る
 test('P2-1 withTx: COMMIT が失敗しても depth が戻り、元の例外が出て、次の withTx が動く', { skip: skipMsg }, () => {
   const { db } = setup();
   let failCommit = true;
+  const log = [];
   const wrapped = {
     exec(sql) {
+      log.push(sql);
       if (sql === 'COMMIT' && failCommit) { failCommit = false; throw new Error('commit failed'); }
       return db.exec(sql);
     },
@@ -284,10 +286,13 @@ test('P2-1 withTx: COMMIT が失敗しても depth が戻り、元の例外が�
   assert.throws(() => repo.withTx(() => { db.exec("INSERT INTO orgs (id, name, created_at) VALUES ('o_x', 'x', 1)"); }), /commit failed/);
   assert.equal(db.isTransaction, false);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM orgs WHERE id = 'o_x'").get().n, 0);
-  // depth が -1 になっていると、ここで入れ子判定を誤って BEGIN が二重になる
-  repo.withTx(() => {
-    repo.withTx(() => { db.exec("INSERT INTO orgs (id, name, created_at) VALUES ('o_y', 'y', 1)"); });
-  });
+  // depth が狂っていると savepoint 名が sp_-1 / sp_1 になる。
+  // 呼び出し側が BEGIN 済みの状態で withTx を呼び、実際に発行された SQL で検出する。
+  log.length = 0;
+  db.exec('BEGIN');
+  repo.withTx(() => { db.exec("INSERT INTO orgs (id, name, created_at) VALUES ('o_y', 'y', 1)"); });
+  db.exec('COMMIT');
+  assert.deepEqual(log.filter((s) => /SAVEPOINT|RELEASE/.test(s)), ['SAVEPOINT sp_0', 'RELEASE sp_0']);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM orgs WHERE id = 'o_y'").get().n, 1);
   assert.equal(db.isTransaction, false);
   db.close();
@@ -306,6 +311,49 @@ test('P3-1 withTx: ROLLBACK が失敗しても元の例外を投げ直す', { sk
   const repo = createAccountsRepo({ db: wrapped });
   assert.throws(() => repo.withTx(() => { throw new Error('original'); }), /original/);
   db.exec('ROLLBACK'); // 後始末(偽物が失敗させたため)
+  assert.equal(db.isTransaction, false);
+  // ROLLBACK 失敗の後でも withTx は普通に動く(depth が戻っている)
+  repo.withTx(() => { db.exec("INSERT INTO orgs (id, name, created_at) VALUES ('o_z', 'z', 1)"); });
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM orgs WHERE id = 'o_z'").get().n, 1);
+  db.close();
+});
+
+test('P3-1 withTx: 入れ子で ROLLBACK TO が失敗しても元の例外が出て、depth が戻る', { skip: skipMsg }, () => {
+  const { db } = setup();
+  const log = [];
+  const wrapped = {
+    exec(sql) {
+      log.push(sql);
+      if (sql.startsWith('ROLLBACK TO')) throw new Error('rollback to failed');
+      return db.exec(sql);
+    },
+    prepare: (s) => db.prepare(s),
+    get isTransaction() { return db.isTransaction; },
+  };
+  const repo = createAccountsRepo({ db: wrapped });
+  repo.withTx(() => {
+    assert.throws(() => repo.withTx(() => { throw new Error('inner original'); }), /inner original/);
+    // 内側の失敗後も depth は 1 に戻っており、次の入れ子は sp_1 を使う
+    log.length = 0;
+    repo.withTx(() => {});
+    assert.deepEqual(log, ['SAVEPOINT sp_1', 'RELEASE sp_1']);
+  });
+  assert.equal(db.isTransaction, false);
+  log.length = 0;
+  repo.withTx(() => {});
+  assert.deepEqual(log, ['BEGIN', 'COMMIT']);
+  db.close();
+});
+
+test('P3-4 listRoster: 並びは挿入順(rowid)で、ID の辞書順に依存しない', { skip: skipMsg }, () => {
+  const { db, repo } = setup();
+  const o = repo.createOrg({ name: '合成部' });
+  const ins = db.prepare('INSERT INTO org_roster (id, org_id, name, email, updated_at) VALUES (?, ?, ?, ?, ?)');
+  ins.run('r_z', o.id, 'first', 'a@example.test', 1);
+  ins.run('r_a', o.id, 'second', 'b@example.test', 1);
+  ins.run('r_m', o.id, 'third', null, 1);
+  assert.deepEqual(repo.listRoster(o.id).map((r) => r.name), ['first', 'second', 'third']);
+  assert.deepEqual(repo.listRoster(o.id).map((r) => r.id), ['r_z', 'r_a', 'r_m']);
   db.close();
 });
 
