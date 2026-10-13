@@ -26,15 +26,31 @@ export function extractBearer(req) {
   return m ? m[1] : null;
 }
 
-// 優先順位は Bearer → Cookie sailviz_token で、取得元も返す。
+// Web のアカウント(S2.3)のセッション Cookie 名。旧共有ログインの sailviz_token(共有の書込トークンを入れる)や
+// 閲覧ゲートの sailviz_view と別名にして、同じブラウザで両方にログインしても上書きし合わないようにする。
+export const SESSION_COOKIE = 'sailviz_session';
+export const LEGACY_TOKEN_COOKIE = 'sailviz_token';
+
+// 認証情報の候補をすべて取り出す。bearer は不正な形(例 "Bearer a b")なら null。
+export function extractCredentials(req) {
+  const cookies = parseCookies(req.headers.cookie);
+  return {
+    bearer: extractBearer(req),
+    session: cookies[SESSION_COOKIE] || null, // アカウントのセッショントークン(Web)
+    legacy: cookies[LEGACY_TOKEN_COOKIE] || null, // 旧共有ログインの書込トークン
+  };
+}
+
+// 優先順位は Bearer → Cookie sailviz_session → 旧 Cookie sailviz_token で、取得元も返す
+// (source は 'bearer' | 'cookie' | 'legacy-cookie')。
 // extractToken との違い: Authorization が不正な形(例 "Bearer a b")のとき、extractToken は "a b" を返すが、
 // extractAuth は Bearer を無いものとして Cookie にフォールバックする。
-// TODO(S2.3): Web のアカウント用 Cookie の名前は設計書に無い。今は sailviz_token を共用する。
 export function extractAuth(req) {
-  const bearer = extractBearer(req);
+  const { bearer, session, legacy } = extractCredentials(req);
   if (bearer) return { token: bearer, source: 'bearer' };
-  const cookie = parseCookies(req.headers.cookie).sailviz_token;
-  return cookie ? { token: cookie, source: 'cookie' } : { token: null, source: null };
+  if (session) return { token: session, source: 'cookie' };
+  if (legacy) return { token: legacy, source: 'legacy-cookie' };
+  return { token: null, source: null };
 }
 
 export function isAuthorized(req, token) {

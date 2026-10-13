@@ -39,9 +39,26 @@ test('verifyPassword: 現行パラメータ(本番値)で往復できる', async
   assert.equal(needsRehash(h), false);
 });
 
-test('verifyPassword: 1024 文字を超える入力は false', async () => {
+test('verifyPassword: 1024 文字を超える入力は scrypt を呼ばずに false', async () => {
   const h = await hashPassword('pass-word-1', FAST);
   assert.equal(await verifyPassword('x'.repeat(1025), h), false);
+  // scrypt が走らないこと: 重いパラメータで、長すぎる入力は通常の不一致より桁違いに速く返る
+  const heavy = await hashPassword('pass-word-1', { N: 32768, r: 8, p: 1, keyLen: 32, saltLen: 16 });
+  const t0 = process.hrtime.bigint();
+  assert.equal(await verifyPassword('wrong-pass-1', heavy), false);
+  const tWrong = process.hrtime.bigint() - t0;
+  const t1 = process.hrtime.bigint();
+  assert.equal(await verifyPassword('x'.repeat(1025), heavy), false);
+  const tLong = process.hrtime.bigint() - t1;
+  assert.ok(tLong * 4n < tWrong, `long=${tLong} wrong=${tWrong}`);
+});
+
+test('verifyPassword: r=1 かつ N>=65536 の保存値(OpenSSL が拒否)は例外でなく false', async () => {
+  const salt = 'AAAAAAAAAAAAAAAAAAAAAA';
+  const hash = 'A'.repeat(43);
+  assert.equal(await verifyPassword('pass-word-1', `scrypt$65536$1$1$${salt}$${hash}`), false);
+  assert.equal(await verifyPassword('pass-word-1', `scrypt$131072$1$1$${salt}$${hash}`), false);
+  assert.equal(needsRehash(`scrypt$65536$1$1$${salt}$${hash}`), true);
 });
 
 test('verifyPassword: NFKC で同じになる入力(全角/半角 ASCII)は一致する', async () => {
@@ -96,14 +113,17 @@ test('extractBearer / extractAuth: Bearer を優先し Cookie と共存、extrac
   assert.equal(extractBearer({ headers: { authorization: 'Bearer a b' } }), null);
   assert.equal(extractBearer({ headers: { cookie: 'sailviz_token=c' } }), null);
   assert.deepEqual(extractAuth({ headers: { authorization: 'Bearer abc', cookie: 'sailviz_token=c' } }), { token: 'abc', source: 'bearer' });
-  assert.deepEqual(extractAuth({ headers: { cookie: 'sailviz_token=c' } }), { token: 'c', source: 'cookie' });
+  assert.deepEqual(extractAuth({ headers: { cookie: 'sailviz_session=s' } }), { token: 's', source: 'cookie' });
+  // アカウントの Cookie は旧共有ログインの sailviz_token と別名(両方あれば session を優先)
+  assert.deepEqual(extractAuth({ headers: { cookie: 'sailviz_token=c; sailviz_session=s' } }), { token: 's', source: 'cookie' });
+  assert.deepEqual(extractAuth({ headers: { cookie: 'sailviz_token=c' } }), { token: 'c', source: 'legacy-cookie' });
   assert.deepEqual(extractAuth({ headers: {} }), { token: null, source: null });
   assert.equal(extractToken({ headers: { authorization: 'Bearer abc', cookie: 'sailviz_token=c' } }), 'abc');
 });
 
 test('extractAuth: 不正な Bearer と Cookie 併用は Cookie にフォールバック(extractToken は "a b")', () => {
   const req = { headers: { authorization: 'Bearer a b', cookie: 'sailviz_token=c' } };
-  assert.deepEqual(extractAuth(req), { token: 'c', source: 'cookie' });
+  assert.deepEqual(extractAuth(req), { token: 'c', source: 'legacy-cookie' });
   assert.equal(extractToken(req), 'a b');
   assert.deepEqual(extractAuth({ headers: { authorization: 'Bearer a b' } }), { token: null, source: null });
 });
@@ -199,6 +219,11 @@ test('resolveIdentity: 共有トークン・アカウントのトークン・ど
   const u = resolveIdentity({ headers: { authorization: `Bearer ${token}` } }, opts);
   assert.equal(u.kind, 'user');
   assert.equal(u.user.id, user.id);
+  // Web のアカウントは Cookie sailviz_session。旧共有の Cookie と同居しても両方判定できる
+  const w = resolveIdentity({ headers: { cookie: `sailviz_session=${token}` } }, opts);
+  assert.equal(w.kind, 'user');
+  assert.deepEqual(resolveIdentity({ headers: { cookie: `sailviz_session=${token}; sailviz_token=dummy-write` } }, opts), { kind: 'shared' });
+  assert.equal(resolveIdentity({ headers: { cookie: `sailviz_token=${token}` } }, opts), null); // アカウントのトークンを旧 Cookie 名では受けない
   assert.equal(resolveIdentity({ headers: { authorization: 'Bearer nope' } }, opts), null);
   assert.equal(resolveIdentity({ headers: {} }, opts), null);
   // 書込トークン未設定でも、空トークンが共有扱いにならない
