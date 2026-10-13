@@ -4,6 +4,14 @@
 export const ORG_NAME_MAX = 80;
 export const MAX_ORGS_PER_USER = 5; // 1ユーザーが管理者になれる組織の上限
 
+// 禁止する符号位置の範囲 [from, to]。C0・DEL・C1、ALM(061C)、LRM/RLM(200E-200F)、
+// 行/段落区切り(2028-2029)、LRE〜RLO(202A-202E)、LRI〜PDI(2066-2069)。
+const FORBIDDEN_RANGES = [
+  [0x0000, 0x001f], [0x007f, 0x009f], [0x061c, 0x061c], [0x200e, 0x200f],
+  [0x2028, 0x2029], [0x202a, 0x202e], [0x2066, 0x2069],
+];
+const isForbiddenChar = (cp) => FORBIDDEN_RANGES.some(([a, b]) => cp >= a && cp <= b);
+
 // 戻り値: { ok:true, name } | { ok:false, message }
 export function validateOrgName(raw) {
   if (typeof raw !== 'string') return { ok: false, message: 'name は文字列で指定してください' };
@@ -12,6 +20,8 @@ export function validateOrgName(raw) {
   if ([...name].length > ORG_NAME_MAX) {
     return { ok: false, message: `組織名は ${ORG_NAME_MAX} 文字以内にしてください` };
   }
-  if (/[\u0000-\u001f\u007f]/.test(name)) return { ok: false, message: '組織名に制御文字は使えません' };
+  if ([...name].some((ch) => isForbiddenChar(ch.codePointAt(0)))) {
+    return { ok: false, message: '組織名に制御文字は使えません' };
+  }
   return { ok: true, name };
 }
