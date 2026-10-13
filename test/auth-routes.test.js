@@ -391,6 +391,27 @@ test('PATCH /api/me: メール変更は本人ごとに 1 時間 3 回まで(429�
   assert.equal((await patch('after@example.test')).status, 200);
 });
 
+test('PATCH /api/me: 登録済みアドレスへの変更(409)も回数に数える。上限を超えたら 429', { skip }, async () => {
+  const reg = await register();
+  await register({ email: 'other@example.test' });
+  const patch = (e) => call('PATCH', '/api/me', { email: e }, { token: reg.json.token });
+  for (let i = 0; i < LIMITS.emailChange.max; i++) {
+    const r = await patch('other@example.test');
+    assert.equal(r.status, 409); assert.equal(r.json.error.code, 'email_taken');
+  }
+  assert.equal((await patch('other@example.test')).status, 429); // 登録の有無を無制限に調べられない
+  assert.equal((await patch('free@example.test')).status, 429);
+});
+
+test('verify-email: new_email が NULL の verify トークンは 422', { skip }, async () => {
+  const reg = await register();
+  const raw = 'legacy-null-new-email-token';
+  accounts.createEmailToken({ userId: reg.json.user.id, purpose: 'verify', tokenHash: hashToken(raw), newEmail: null, expiresAt: clock.t + DAY });
+  const r = await call('POST', '/api/auth/verify-email', { verifyToken: raw });
+  assert.equal(r.status, 422); assert.equal(r.json.error.code, 'invalid_token');
+  assert.equal(accounts.getUser(reg.json.user.id).email_verified_at, null);
+});
+
 test('DELETE /api/me: パスワード必須(誤りは 403)。成功で全トークン失効・個人情報の匿名化・同じメールで再登録できる', { skip }, async () => {
   const reg = await register();
   const org = accounts.createOrg({ name: 'テスト部', adminUserIds: [], now: clock.t });

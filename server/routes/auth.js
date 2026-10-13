@@ -242,8 +242,9 @@ export function createAuthRoute({
       const emailChanged = patch.email !== undefined && patch.email !== id.user.email;
       if (!emailChanged) delete patch.email;
       if (emailChanged && limited(res, [limiters.emailChange, id.user.id])) return;
-      if (emailChanged && accounts.getUserByEmail(patch.email)) return err(res, 409, 'email_taken', 'このメールアドレスは既に使われています');
+      // 409 で終わる試行も数える(登録済みアドレスかどうかを無制限に調べられないように)。getUserByEmail より前に record する。
       if (emailChanged) limiters.emailChange.record(id.user.id, now());
+      if (emailChanged && accounts.getUserByEmail(patch.email)) return err(res, 409, 'email_taken', 'このメールアドレスは既に使われています');
       let verify = null;
       try {
         accounts.withTx(() => {

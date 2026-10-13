@@ -32,7 +32,7 @@ CREATE TABLE email_tokens (
   user_id TEXT NOT NULL,
   purpose TEXT NOT NULL,              -- verify | reset | change
   token_hash TEXT NOT NULL UNIQUE,
-  new_email TEXT,                     -- purpose = change のときだけ
+  new_email TEXT,                     -- verify・change で使う(reset は NULL)
   expires_at INTEGER,
   used_at INTEGER
 );
