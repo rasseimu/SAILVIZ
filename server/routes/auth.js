@@ -13,6 +13,7 @@ import { validateRegister, validateProfilePatch, isValidEmail, normalizeEmail } 
 import { createRateLimiter } from '../domain/rateLimit.js';
 import { validateOrgName, MAX_ORGS_PER_USER } from '../domain/orgCreate.js';
 import { buildLink } from '../mail.js';
+import { linkVerifiedUser } from '../rosterLink.js';
 
 const MIN = 60 * 1000;
 const MAX_BODY = 64 * 1024;
@@ -134,8 +135,12 @@ export function createAuthRoute({
       if (!user || user.deleted_at != null || !hit.newEmail || hit.newEmail !== user.email) {
         return err(res, 422, 'invalid_token', 'リンクが無効か、期限切れまたは使用済みです');
       }
-      if (user.email_verified_at == null) accounts.markEmailVerified(user.id, now());
-      // TODO(S2.6): ここで名簿照合(確認済みメール一致 → org_members へ紐付け。設計書 §4.4)を呼ぶ。
+      // 名簿照合(§4.4): 確認済みメールが名簿と一致すれば組織へ紐付け、legacy_* を本人に付け替える(冪等)。
+      // 確認済みの記録と紐付けは 1 つのトランザクションにまとめる(片方だけ反映されない)。
+      accounts.withTx(() => {
+        if (user.email_verified_at == null) accounts.markEmailVerified(user.id, now());
+        linkVerifiedUser(accounts, accounts.getUser(user.id), now());
+      });
       send(res, 200, { ok: true });
     },
 
@@ -340,7 +345,8 @@ export function createAuthRoute({
 
 // ctx 用の薄い入口。accounts が無ければ(STORAGE=file)この系統のパスだけ 503 を返す。
 export function unavailableRoute(req, res, ctx) {
-  if (!(ctx.path.startsWith('/api/auth/') || ctx.path === '/api/me' || ctx.path === '/api/orgs')) return false;
+  if (!(ctx.path.startsWith('/api/auth/') || ctx.path === '/api/me'
+    || ctx.path === '/api/orgs' || ctx.path.startsWith('/api/orgs/'))) return false;
   err(res, 503, 'accounts_unavailable', 'アカウント機能は STORAGE=db のときだけ使えます');
   return true;
 }
