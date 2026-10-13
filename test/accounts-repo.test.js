@@ -5,9 +5,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 
-const [major, minor] = process.versions.node.split('.').map(Number);
-const hasSqlite = major > 22 || (major === 22 && minor >= 5);
-const skipMsg = hasSqlite ? undefined : 'node:sqlite が要る(Node >=22.5 / 24)';
+// db.isTransaction を使うので Node 24 以上で十分。
+const [major] = process.versions.node.split('.').map(Number);
+const hasSqlite = major >= 24;
+const skipMsg = hasSqlite ? undefined : 'node:sqlite の isTransaction が要る(Node >=24)';
 
 let openDb, migrate, loadMigrations, createAccountsRepo;
 if (hasSqlite) {
@@ -131,7 +132,7 @@ test('orgs / org_admins: 作成者を管理者に・重複は無視', { skip: sk
 test('org_roster: 置き換え・メールの正規化と検索', { skip: skipMsg }, () => {
   const { db, repo } = setup();
   const o = repo.createOrg({ name: '合成部' });
-  const rows = repo.replaceRoster(o.id, [
+  const { rows } = repo.replaceRoster(o.id, [
     { name: 'テスト一', email: 'One@Example.test', legacyName: '旧一' },
     { name: 'テスト二', email: 'two@example.test' },
   ], 10);
@@ -141,7 +142,7 @@ test('org_roster: 置き換え・メールの正規化と検索', { skip: skipMs
   assert.equal(repo.findRosterByEmail(o.id, 'ONE@example.test').name, 'テスト一');
   assert.equal(repo.findRosterByEmail(o.id, 'nobody@example.test'), null);
   assert.equal(repo.findRosterRowsByEmail('two@example.test').length, 1);
-  const again = repo.replaceRoster(o.id, [{ name: 'テスト三', email: 'three@example.test' }], 20);
+  const again = repo.replaceRoster(o.id, [{ name: 'テスト三', email: 'three@example.test' }], 20).rows;
   assert.equal(again.length, 1);
   assert.equal(repo.findRosterByEmail(o.id, 'one@example.test'), null);
   db.close();
@@ -170,16 +171,19 @@ test('P2-1 replaceRoster: メール一致の行は ID を引き継ぎ、宙に�
   const [r1, r2] = repo.replaceRoster(o.id, [
     { name: 'テスト一', email: 'one@example.test' },
     { name: 'テスト二', email: 'two@example.test' },
-  ], 10);
+  ], 10).rows;
   const u1 = repo.createUser({ email: 'one@example.test' });
   const u2 = repo.createUser({ email: 'two@example.test' });
   repo.linkMember({ orgId: o.id, userId: u1.id, rosterId: r1.id });
   repo.linkMember({ orgId: o.id, userId: u2.id, rosterId: r2.id });
   // one は残し(名前変更)、two は消す、three を足す
-  const rows = repo.replaceRoster(o.id, [
+  const u3 = repo.createUser({ email: 'invited@example.test' });
+  repo.linkMember({ orgId: o.id, userId: u3.id, rosterId: null }); // 招待で入った会員(roster_id=NULL)
+  const { rows, detached } = repo.replaceRoster(o.id, [
     { name: 'テスト一改', email: ' ONE@example.test ' },
     { name: 'テスト三', email: 'three@example.test' },
   ], 20);
+  assert.deepEqual(detached, [{ userId: u2.id, rosterId: r2.id }]);
   const one = rows.find((r) => r.email === 'one@example.test');
   assert.equal(one.id, r1.id);
   assert.equal(one.name, 'テスト一改');
@@ -242,10 +246,66 @@ test('P2-4 replaceRoster: 正規化後にメールが重複したら弾く(何�
   );
   assert.deepEqual(repo.listRoster(o.id).map((r) => r.email), ['a@example.test']);
   // メール無しの複数行は可
-  assert.equal(repo.replaceRoster(o.id, [{ name: 'P' }, { name: 'Q' }]).length, 2);
+  assert.equal(repo.replaceRoster(o.id, [{ name: 'P' }, { name: 'Q' }]).rows.length, 2);
   // 別組織なら同じメールも可
   const o2 = repo.createOrg({ name: '別部' });
-  assert.equal(repo.replaceRoster(o2.id, [{ email: 'a@example.test' }]).length, 1);
+  assert.equal(repo.replaceRoster(o2.id, [{ email: 'a@example.test' }]).rows.length, 1);
+  db.close();
+});
+
+test('P3-2 replaceRoster: 既存の同メール重複行を指す会員は残る行へ付け替える', { skip: skipMsg }, () => {
+  const { db, repo } = setup();
+  const o = repo.createOrg({ name: '合成部' });
+  const ins = db.prepare('INSERT INTO org_roster (id, org_id, name, email, updated_at) VALUES (?, ?, ?, ?, ?)');
+  ins.run('r_first', o.id, 'A', 'dup@example.test', 1);
+  ins.run('r_second', o.id, 'A2', 'dup@example.test', 1);
+  const u = repo.createUser({ email: 'dup@example.test' });
+  repo.linkMember({ orgId: o.id, userId: u.id, rosterId: 'r_second' });
+  const { rows, detached } = repo.replaceRoster(o.id, [{ name: 'A', email: 'dup@example.test' }], 5);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, 'r_first');
+  assert.deepEqual(detached, []);
+  assert.equal(repo.listMembers(o.id)[0].roster_id, 'r_first');
+  db.close();
+});
+
+test('P2-1 withTx: COMMIT が失敗しても depth が戻り、元の例外が出て、次の withTx が動く', { skip: skipMsg }, () => {
+  const { db } = setup();
+  let failCommit = true;
+  const wrapped = {
+    exec(sql) {
+      if (sql === 'COMMIT' && failCommit) { failCommit = false; throw new Error('commit failed'); }
+      return db.exec(sql);
+    },
+    prepare: (s) => db.prepare(s),
+    get isTransaction() { return db.isTransaction; },
+  };
+  const repo = createAccountsRepo({ db: wrapped });
+  assert.throws(() => repo.withTx(() => { db.exec("INSERT INTO orgs (id, name, created_at) VALUES ('o_x', 'x', 1)"); }), /commit failed/);
+  assert.equal(db.isTransaction, false);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM orgs WHERE id = 'o_x'").get().n, 0);
+  // depth が -1 になっていると、ここで入れ子判定を誤って BEGIN が二重になる
+  repo.withTx(() => {
+    repo.withTx(() => { db.exec("INSERT INTO orgs (id, name, created_at) VALUES ('o_y', 'y', 1)"); });
+  });
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM orgs WHERE id = 'o_y'").get().n, 1);
+  assert.equal(db.isTransaction, false);
+  db.close();
+});
+
+test('P3-1 withTx: ROLLBACK が失敗しても元の例外を投げ直す', { skip: skipMsg }, () => {
+  const { db } = setup();
+  const wrapped = {
+    exec(sql) {
+      if (sql === 'ROLLBACK') throw new Error('rollback failed');
+      return db.exec(sql);
+    },
+    prepare: (s) => db.prepare(s),
+    get isTransaction() { return db.isTransaction; },
+  };
+  const repo = createAccountsRepo({ db: wrapped });
+  assert.throws(() => repo.withTx(() => { throw new Error('original'); }), /original/);
+  db.exec('ROLLBACK'); // 後始末(偽物が失敗させたため)
   db.close();
 });
 

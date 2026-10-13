@@ -11,6 +11,7 @@ const nul = (v) => (v === undefined ? null : v);
 export function createAccountsRepo({ db }) {
   // 入れ子可のトランザクション。最外は BEGIN/COMMIT、内側(または呼び出し側が既に BEGIN 済み)は SAVEPOINT。
   let depth = 0;
+  // 注意: fn は同期関数だけ(Promise を返す関数は不可。await をまたぐとトランザクションが崩れる)。
   const withTx = (fn) => {
     const nested = depth > 0 || db.isTransaction === true;
     const sp = `sp_${depth}`;
@@ -18,13 +19,17 @@ export function createAccountsRepo({ db }) {
     depth += 1;
     try {
       const out = fn();
-      depth -= 1;
       db.exec(nested ? `RELEASE ${sp}` : 'COMMIT');
       return out;
     } catch (e) {
-      depth -= 1;
-      db.exec(nested ? `ROLLBACK TO ${sp}; RELEASE ${sp}` : 'ROLLBACK');
+      // ROLLBACK 自体が失敗しても元の例外 e を投げ直す。
+      try {
+        if (nested) db.exec(`ROLLBACK TO ${sp}; RELEASE ${sp}`);
+        else if (db.isTransaction) db.exec('ROLLBACK');
+      } catch { /* 元の例外を優先 */ }
       throw e;
+    } finally {
+      depth -= 1;
     }
   };
 
@@ -150,6 +155,9 @@ export function createAccountsRepo({ db }) {
     // (会員資格そのものは残す。再照合・解除の判断は呼び出し側)。
     // 正規化(trim + 小文字)後にメールが重複する行があれば Error(code='ROSTER_DUPLICATE_EMAIL')。
     // API での 422 化は S2.6。メールの無い行は重複検査の対象外。
+    // 戻り値は { rows, detached }。detached は今回 roster_id を NULL にした会員 [{userId, rosterId}]
+    // (最初から roster_id=NULL の会員は含まない。S2.6 の {linked, unlinked} 用)。
+    // 既存に同じメールの重複行がある場合、2行目以降を指す会員は残る行へ付け替える。
     replaceRoster(orgId, rows, now = Date.now()) {
       const prepared = rows.map((r) => {
         const e = normEmail(nul(r.email));
@@ -165,10 +173,15 @@ export function createAccountsRepo({ db }) {
         }
         seen.add(email);
       }
+      const detached = [];
       withTx(() => {
         const existing = new Map();
+        // 既存 DB に同じメールの行が複数ある場合: 2行目以降 → 残す行(最初の行)への付け替え先
+        const dupTo = new Map();
         for (const row of this.listRoster(orgId)) {
-          if (row.email !== null && row.email !== undefined && !existing.has(row.email)) existing.set(row.email, row.id);
+          if (row.email === null || row.email === undefined) continue;
+          if (!existing.has(row.email)) existing.set(row.email, row.id);
+          else dupTo.set(row.id, existing.get(row.email));
         }
         const keep = new Set();
         const ins = db.prepare(
@@ -191,11 +204,21 @@ export function createAccountsRepo({ db }) {
         for (const row of this.listRoster(orgId)) {
           if (keep.has(row.id)) continue;
           db.prepare('DELETE FROM org_roster WHERE id = ?').run(row.id);
+          const target = dupTo.get(row.id);
+          if (target && keep.has(target)) {
+            // 同じメールの残る行へ付け替える(外れた扱いにしない)
+            db.prepare('UPDATE org_members SET roster_id = ? WHERE org_id = ? AND roster_id = ?')
+              .run(target, orgId, row.id);
+            continue;
+          }
+          const gone = db.prepare('SELECT user_id FROM org_members WHERE org_id = ? AND roster_id = ? ORDER BY user_id')
+            .all(orgId, row.id);
           db.prepare('UPDATE org_members SET roster_id = NULL WHERE org_id = ? AND roster_id = ?')
             .run(orgId, row.id);
+          for (const g of gone) detached.push({ userId: g.user_id, rosterId: row.id });
         }
       });
-      return this.listRoster(orgId);
+      return { rows: this.listRoster(orgId), detached };
     },
     listRoster(orgId) {
       return db.prepare('SELECT * FROM org_roster WHERE org_id = ? ORDER BY rowid').all(orgId);
