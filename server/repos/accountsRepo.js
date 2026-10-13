@@ -161,6 +161,8 @@ export function createAccountsRepo({ db }) {
     // API での 422 化は S2.6。メールの無い行は重複検査の対象外。
     // 戻り値は { rows, detached }。detached は今回 roster_id を NULL にした会員 [{userId, rosterId}]
     // (最初から roster_id=NULL の会員は含まない。S2.6 の {linked, unlinked} 用)。
+    // detached は roster_id を NULL にするだけ。会員の解除(unlinkMember)は S2.6 の責務で、ここでは行わない。
+    // メールの無い名簿行は照合キーが無いので、置き換えのたびに ID が変わる(会員の roster_id も NULL になる)。
     // 既存に同じメールの重複行がある場合、2行目以降を指す会員は残る行へ付け替える。
     replaceRoster(orgId, rows, now = Date.now()) {
       const prepared = rows.map((r) => {
@@ -224,6 +226,7 @@ export function createAccountsRepo({ db }) {
       });
       return { rows: this.listRoster(orgId), detached };
     },
+    // 並びは挿入順(rowid)。ID はランダムなので ID 順にはしない。
     listRoster(orgId) {
       return db.prepare('SELECT * FROM org_roster WHERE org_id = ? ORDER BY rowid').all(orgId);
     },
