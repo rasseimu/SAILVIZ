@@ -28,6 +28,10 @@ function deletePd(db, pdId) {
 export function importFromFiles({ db, dataDir, dryRun = false, now = Date.now(), orgId = null }) {
   const projDir = join(dataDir, 'projects');
   const report = { projects: 0, sessions: 0, tracks: 0, reflections: 0, progress: 0, comments: 0, roadmap: 0, warnings: [] };
+  // 実在しない組織 ID で取り込むと、孤児の org_id が入って名簿照合も効かない。何も書かずに止める。
+  if (orgId != null && !db.prepare('SELECT 1 FROM orgs WHERE id = ?').get(orgId)) {
+    throw new Error(`MIGRATION_ORG_ID の組織が存在しません: ${orgId}`);
+  }
   const files = existsSync(projDir) ? readdirSync(projDir).filter((f) => /\.sailviz\.json$/.test(f)).sort() : [];
   const reflIds = new Set();
 
@@ -94,8 +98,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const MIG_DIR = join(dirname(fileURLToPath(import.meta.url)), 'migrations');
   migrate(db, loadMigrations(MIG_DIR));
   const orgId = process.env.MIGRATION_ORG_ID || null;
-  if (!orgId) console.log('  warn: MIGRATION_ORG_ID 未設定 — org_id が NULL で入り、名簿照合による legacy_* の付け替えが効きません');
-  const report = importFromFiles({ db, dataDir, dryRun, orgId });
+  if (!orgId) console.warn('  warn: MIGRATION_ORG_ID 未設定 — org_id が NULL で入り、名簿照合による legacy_* の付け替えが効きません');
+  let report;
+  try {
+    report = importFromFiles({ db, dataDir, dryRun, orgId });
+  } catch (e) {
+    console.error(`import 失敗: ${e.message}`);
+    db.close();
+    process.exit(1);
+  }
   db.close();
   console.log(`${dryRun ? '[dry-run] ' : ''}import: ${JSON.stringify({ ...report, warnings: report.warnings.length })}`);
   for (const w of report.warnings) console.log('  warn:', w);
