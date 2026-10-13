@@ -13,7 +13,8 @@ export function buildLink(baseUrl, kind, token) {
 const maskEmail = (e) => String(e).replace(/^(.).*(@.*)$/, '$1***$2'); // ログに宛先の全文を残さない
 
 // 確認リンクをログに出すだけ(開発・ステージング用)。
-// redactToken=true(本番)ではリンクのトークンを伏せる(ログを読めた人がアカウントを乗っ取れないように)。
+// redactToken=true(本番: index.js が NODE_ENV=production で指定)ではリンクのトークンを伏せる
+// (ログを読めた人がアカウントを乗っ取れないように)。本番の log メーラーはリンクを使えない形でしか出さない。
 export function createLogMailer({ logger = console.log, redactToken = false } = {}) {
   return {
     async send({ to, kind, url }) {

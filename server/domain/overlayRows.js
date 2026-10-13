@@ -69,13 +69,13 @@ export function assembleProgress({ progress = [], comments = [] }) {
   return out;
 }
 
-export function decomposeRoadmap(roadmap, { now = 0 } = {}) {
+export function decomposeRoadmap(roadmap, { now = 0, orgId = null } = {}) {
   const rows = [];
   for (const [name, entry] of Object.entries(roadmap || {})) {
     rows.push({
       id: `rm_legacy_${rows.length}`,
       user_id: null,
-      org_id: null,
+      org_id: orgId,
       legacy_name: name,
       goal: 'goal' in entry ? entry.goal : null,
       milestones: col(entry, 'milestones'),
