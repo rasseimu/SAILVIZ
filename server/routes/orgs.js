@@ -1,7 +1,7 @@
 // server/routes/orgs.js
 // 組織の名簿・メンバー API(設計書 v2 §10.3): /api/orgs/:orgId/roster(GET/PUT)・/api/orgs/:orgId/members(GET)。
 // 組織の作成(POST /api/orgs)は routes/auth.js。処理したら true、対象外なら false。
-// 応答の形は設計書が配列としか書いていないので { roster } / { members } で包む(S2.6 の報告に記載)。
+// GET の応答は設計書 §10.3 どおり素の配列。PUT の本文は { roster:[...] }、応答は { linked, unlinked }。
 import { send } from './http.js';
 import { resolveIdentity } from '../accountAuth.js';
 import { validateRosterRows } from '../domain/rosterInput.js';
@@ -39,11 +39,9 @@ export function createOrgsRoute({ accounts, writeToken, now = () => Date.now() }
     'GET roster': async (req, res, orgId) => {
       if (!gate(req, res, orgId, 'admin')) return;
       const linked = new Map(accounts.listMembers(orgId).filter((m) => m.roster_id).map((m) => [m.roster_id, m.user_id]));
-      send(res, 200, {
-        roster: accounts.listRoster(orgId).map((r) => ({
-          name: r.name, email: r.email, legacyName: r.legacy_name, linkedUserId: linked.get(r.id) ?? null,
-        })),
-      });
+      send(res, 200, accounts.listRoster(orgId).map((r) => ({
+        name: r.name, email: r.email, legacyName: r.legacy_name, linkedUserId: linked.get(r.id) ?? null,
+      })));
     },
     'PUT roster': async (req, res, orgId) => {
       if (!gate(req, res, orgId, 'admin')) return;
@@ -65,9 +63,7 @@ export function createOrgsRoute({ accounts, writeToken, now = () => Date.now() }
     },
     'GET members': async (req, res, orgId) => {
       if (!gate(req, res, orgId, 'member')) return;
-      send(res, 200, {
-        members: accounts.listMembers(orgId).map((m) => ({ userId: m.user_id, name: accounts.getUser(m.user_id)?.name ?? null })),
-      });
+      send(res, 200, accounts.listMembers(orgId).map((m) => ({ userId: m.user_id, name: accounts.getUser(m.user_id)?.name ?? null })));
     },
   };
 
@@ -76,7 +72,9 @@ export function createOrgsRoute({ accounts, writeToken, now = () => Date.now() }
     if (!m) return false;
     const h = handlers[`${ctx.method} ${m[2]}`];
     if (!h) return false;
-    await h(req, res, decodeURIComponent(m[1]));
+    let orgId;
+    try { orgId = decodeURIComponent(m[1]); } catch { err(res, 404, 'not_found', '組織が見つかりません'); return true; }
+    await h(req, res, orgId);
     return true;
   };
 }

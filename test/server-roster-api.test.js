@@ -69,6 +69,7 @@ test('認可: 未認証 401・共有トークン 401・非管理者 403・存在
 test('PUT: 不正な入力は 422(roster が配列でない・氏名なし・メール不正・重複)', { skip }, async () => {
   for (const body of [{}, { roster: 'x' }, { roster: [{ email: 'a@example.test' }] },
     { roster: [{ name: 'A', email: 'bad' }] },
+    { roster: [{ name: 'A', legacyName: '旧' }, { name: 'B', legacyName: ' 旧 ' }] },
     { roster: [{ name: 'A', email: 'a@example.test' }, { name: 'B', email: 'A@example.test' }] }]) {
     const r = await call('PUT', R(), adminTok, body);
     assert.equal(r.status, 422, JSON.stringify(body));
@@ -90,13 +91,14 @@ test('PUT: 提出→確認済みユーザーが紐付く・未確認は紐付か
   assert.deepEqual(j.linked, [{ userId: member.id, name: '部員' }]);
   assert.deepEqual(j.unlinked, []);
   const g = await (await call('GET', R(), adminTok)).json();
-  assert.deepEqual(g.roster.map((x) => [x.name, x.email, x.legacyName, x.linkedUserId]), [
+  assert.ok(Array.isArray(g));
+  assert.deepEqual(g.map((x) => [x.name, x.email, x.legacyName, x.linkedUserId]), [
     ['部員', 'm@example.test', '旧部員', member.id],
     ['未確認', 'unv@example.test', null, null],
     ['未登録', 'nobody@example.test', null, null],
   ]);
   // 冪等: 同じ内容をもう一度 → 新規リンクなし
-  const again = await (await call('PUT', R(), adminTok, { roster: g.roster })).json();
+  const again = await (await call('PUT', R(), adminTok, { roster: g })).json();
   assert.deepEqual(again, { linked: [], unlinked: [] });
   // 未確認ユーザーがメール確認 → 自動で紐付く(verify-email 経路)
   const t = issueEmailToken(accounts, { userId: unv.u.id, purpose: 'verify', newEmail: unv.u.email, now: clock });
@@ -108,7 +110,9 @@ test('PUT: 提出→確認済みユーザーが紐付く・未確認は紐付か
 test('GET /members: 組織メンバーは見られる(紐付け済み・{userId,name})。非メンバーは 403', { skip }, async () => {
   const r = await call('GET', `/api/orgs/${org.id}/members`, memberTok);
   assert.equal(r.status, 200);
-  const ids = (await r.json()).members.map((x) => x.userId);
+  const list = await r.json();
+  assert.ok(Array.isArray(list));
+  const ids = list.map((x) => x.userId);
   assert.ok(ids.includes(member.id) && ids.includes(admin.id));
   assert.equal((await call('GET', `/api/orgs/${org.id}/members`, outsiderTok)).status, 403);
   assert.equal((await call('GET', `/api/orgs/${org.id}/members`, null)).status, 401);
@@ -127,6 +131,13 @@ test('名簿から外すと解除(unlinked)。作成者・管理者は残り、�
 test('メール確認後に名簿へ追加された場合も PUT で紐付く(名簿更新時の照合)', { skip }, async () => {
   const r = await (await call('PUT', R(), adminTok, { roster: [{ name: '部員', email: 'm@example.test' }] })).json();
   assert.deepEqual(r.linked, [{ userId: member.id, name: '部員' }]);
+});
+
+test('組織 ID の % 列が不正でも 500 にならず 404', { skip }, async () => {
+  for (const p of ['/api/orgs/%E0%A4%A/roster', '/api/orgs/%/members']) {
+    const r = await call('GET', p, adminTok);
+    assert.equal(r.status, 404, p);
+  }
 });
 
 test('名簿 GET/PUT・members に対応しないメソッドは 404', { skip }, async () => {

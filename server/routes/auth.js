@@ -135,9 +135,12 @@ export function createAuthRoute({
       if (!user || user.deleted_at != null || !hit.newEmail || hit.newEmail !== user.email) {
         return err(res, 422, 'invalid_token', 'リンクが無効か、期限切れまたは使用済みです');
       }
-      if (user.email_verified_at == null) accounts.markEmailVerified(user.id, now());
       // 名簿照合(§4.4): 確認済みメールが名簿と一致すれば組織へ紐付け、legacy_* を本人に付け替える(冪等)。
-      linkVerifiedUser(accounts, accounts.getUser(user.id), now());
+      // 確認済みの記録と紐付けは 1 つのトランザクションにまとめる(片方だけ反映されない)。
+      accounts.withTx(() => {
+        if (user.email_verified_at == null) accounts.markEmailVerified(user.id, now());
+        linkVerifiedUser(accounts, accounts.getUser(user.id), now());
+      });
       send(res, 200, { ok: true });
     },
 

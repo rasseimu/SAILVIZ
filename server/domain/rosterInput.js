@@ -13,6 +13,7 @@ export function validateRosterRows(raw) {
   if (raw.length > ROSTER_MAX_ROWS) return bad(`名簿は ${ROSTER_MAX_ROWS} 行までです`);
   const rows = [];
   const seen = new Map();
+  const seenLegacy = new Map();
   for (let i = 0; i < raw.length; i += 1) {
     const r = raw[i];
     const n = i + 1;
@@ -31,6 +32,10 @@ export function validateRosterRows(raw) {
         return bad(`${n} 行目: 旧名簿の氏名が正しくありません`);
       }
       legacyName = r.legacyName.trim() || null;
+    }
+    if (legacyName !== null) {
+      if (seenLegacy.has(legacyName)) return bad(`${n} 行目: 旧名簿の氏名が ${seenLegacy.get(legacyName)} 行目と重複しています`, 'duplicate_legacy_name');
+      seenLegacy.set(legacyName, n);
     }
     if (email !== null) {
       if (seen.has(email)) return bad(`${n} 行目: メールアドレスが ${seen.get(email)} 行目と重複しています`, 'duplicate_email');

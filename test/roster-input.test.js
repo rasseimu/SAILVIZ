@@ -57,3 +57,11 @@ test('メール重複(正規化後)は不正で、どの行かをメッセージ
   assert.equal(r.code, 'duplicate_email');
   assert.match(r.message, /2/);
 });
+
+test('正規化後の legacyName が重複したら不可(空は重複扱いにしない)', () => {
+  const r = validateRosterRows([{ name: 'A', legacyName: '旧' }, { name: 'B', legacyName: ' 旧 ' }]);
+  assert.equal(r.ok, false);
+  assert.equal(r.code, 'duplicate_legacy_name');
+  assert.match(r.message, /2/);
+  assert.equal(validateRosterRows([{ name: 'A', legacyName: ' ' }, { name: 'B', legacyName: '' }, { name: 'C' }]).ok, true);
+});
