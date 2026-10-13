@@ -21,8 +21,9 @@ if (hasSqlite) {
 
 test('001_data で Phase 1 の全データ表が作られる', { skip: skipMsg }, () => {
   const db = openDb(':memory:');
-  const n = migrate(db, loadMigrations(MIG_DIR), 1000);
-  assert.ok(n >= 1);
+  // 001 だけを適用する(002 以降の表は各マイグレーションのテストで確認する)
+  const n = migrate(db, loadMigrations(MIG_DIR).filter((m) => m.version === 1), 1000);
+  assert.equal(n, 1);
   const expected = [
     'practice_days', 'rec_sessions', 'session_crew', 'chunks', 'tracks',
     'reflections', 'reflection_progress', 'reflection_comments', 'roadmaps', 'race_records',
