@@ -11,6 +11,7 @@ import { hashPassword, verifyPassword, needsRehash, validatePassword, SCRYPT_PAR
 import { AUTH_TOKEN_TTL_MS } from '../domain/tokens.js';
 import { validateRegister, validateProfilePatch, isValidEmail, normalizeEmail } from '../domain/accountInput.js';
 import { createRateLimiter } from '../domain/rateLimit.js';
+import { validateOrgName, MAX_ORGS_PER_USER } from '../domain/orgCreate.js';
 import { buildLink } from '../mail.js';
 
 const MIN = 60 * 1000;
@@ -27,6 +28,7 @@ export const LIMITS = {
   resend: { max: 3, windowMs: 60 * MIN }, // 本人ごと
   emailChange: { max: 3, windowMs: 60 * MIN }, // PATCH /api/me のメール変更(確認メールの乱発防止)、本人ごと
   deletePassword: { max: 5, windowMs: 15 * MIN }, // 本人ごとの削除時パスワード失敗
+  orgCreate: { max: 10, windowMs: 60 * MIN }, // POST /api/orgs の試行(失敗も数える)、本人ごと
 };
 
 const err = (res, status, code, message, headers) => send(res, status, { error: { code, message } }, headers);
@@ -280,9 +282,31 @@ export function createAuthRoute({
       //   org_admins の行の削除も同様(accountsRepo に削除メソッドが無い。削除済みユーザーは認証できないので権限は使えない)。
       send(res, 200, { ok: true }, clearCookie());
     },
+
+    // ---- POST /api/orgs ----(組織の作成。メール確認済みなら誰でも。作成者が組織管理者かつメンバー)
+    async createOrg(req, res, body) {
+      const id = requireUser(req, res); if (!id) return;
+      const user = id.user;
+      if (user.email_verified_at == null) {
+        return err(res, 403, 'email_not_verified', 'メールアドレスを確認してから組織を作成してください');
+      }
+      if (limited(res, [limiters.orgCreate, user.id])) return;
+      limiters.orgCreate.record(user.id, now());
+      const v = validateOrgName(body.name);
+      if (!v.ok) return err(res, 422, 'invalid_name', v.message);
+      const org = accounts.withTx(() => {
+        if (accounts.countOrgsAdministeredBy(user.id) >= MAX_ORGS_PER_USER) return null;
+        const created = accounts.createOrg({ name: v.name, adminUserIds: [user.id], now: now() });
+        accounts.linkMember({ orgId: created.id, userId: user.id, rosterId: null, now: now() });
+        return created;
+      });
+      if (!org) return err(res, 409, 'org_limit_reached', `作成できる組織は 1 人あたり ${MAX_ORGS_PER_USER} 件までです`);
+      send(res, 201, { org: { id: org.id, name: org.name, createdAt: org.created_at } });
+    },
   };
 
   const routes = {
+    'POST /api/orgs': handlers.createOrg,
     'POST /api/auth/register': handlers.register,
     'POST /api/auth/verify-email': handlers.verifyEmail,
     'POST /api/auth/verify-email/resend': handlers.resend,
@@ -316,7 +340,7 @@ export function createAuthRoute({
 
 // ctx 用の薄い入口。accounts が無ければ(STORAGE=file)この系統のパスだけ 503 を返す。
 export function unavailableRoute(req, res, ctx) {
-  if (!(ctx.path.startsWith('/api/auth/') || ctx.path === '/api/me')) return false;
+  if (!(ctx.path.startsWith('/api/auth/') || ctx.path === '/api/me' || ctx.path === '/api/orgs')) return false;
   err(res, 503, 'accounts_unavailable', 'アカウント機能は STORAGE=db のときだけ使えます');
   return true;
 }
