@@ -23,7 +23,7 @@ export function createRateLimiter({ max, windowMs, maxKeys = 10_000 }) {
     record(key, now = Date.now()) {
       const arr = live(key, now);
       arr.push(now);
-      hits.set(key, arr);
+      hits.delete(key); hits.set(key, arr); // 末尾へ移す(溢れたとき、最近動いたキーを残し、古いものから捨てる)
       if (hits.size > maxKeys) { // 肥大化の防止: 期限切れのキーを掃除し、それでも多ければ古いものから捨てる
         for (const k of [...hits.keys()]) live(k, now);
         while (hits.size > maxKeys) hits.delete(hits.keys().next().value);
