@@ -279,6 +279,7 @@ export function createAuthRoute({
       const uid = id.user.id;
       accounts.withTx(() => {
         accounts.revokeAllAuthTokens(uid, now());
+        accounts.removeOrgAdminsOfUser(uid);
         for (const m of accounts.listMembershipsOfUser(uid)) accounts.unlinkMember(m.org_id, uid);
         // メール(UNIQUE)を空けるため匿名化し、個人情報を消す。同じメールで再登録できる。
         accounts.updateUser(uid, {
@@ -287,8 +288,8 @@ export function createAuthRoute({
         accounts.markUserDeleted(uid, now());
       });
       // TODO(S2.7 以降): §4.3 の「本人のセッション・反省・ロードマップ・声の反省の削除」「他人の乗員欄を（退会済み）に置換」
-      //   「議事録の本人の一言の削除」。それらを書き込む API(Phase 3〜5)ができた時点で、ここから呼ぶ。
-      //   org_admins の行の削除も同様(accountsRepo に削除メソッドが無い。削除済みユーザーは認証できないので権限は使えない)。
+      //   「議事録の本人の一言の削除」。それらを書き込む API(Phase 3〜5)ができた時点で、ここから呼ぶ(S3.1・S4.1・S4.2・S5.1・S5.5 で扱う)。
+      //   org_admins の行は上で削除済み。唯一の管理者の退会で管理者不在の組織が残る件は正本に定めが無い(未確認事項)。
       send(res, 200, { ok: true }, clearCookie());
     },
 

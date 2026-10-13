@@ -432,7 +432,21 @@ test('DELETE /api/me: パスワード必須(誤りは 403)。成功で全トー�
   assert.equal((await register()).status, 200); // 同じメールで再登録できる
 });
 
-test('DELETE /api/me: 誤パスワードの連続は 429(本人ごと)', { skip }, async () => {
+test('DELETE /api/me: org_admins の行が消える。他の管理者の行は残り、唯一の管理者でも組織は残る(管理者不在)', { skip }, async () => {
+  const reg = await register();
+  const uid = reg.json.user.id;
+  const other = accounts.createUser({ email: 'other@example.test' });
+  const shared = accounts.createOrg({ name: '共同部', adminUserIds: [uid, other.id], now: clock.t });
+  const solo = accounts.createOrg({ name: '単独部', adminUserIds: [uid], now: clock.t });
+  assert.equal((await call('DELETE', '/api/me', { password: REG.password }, { token: reg.json.token })).status, 200);
+  assert.equal(accounts.isOrgAdmin(shared.id, uid), false);
+  assert.equal(accounts.isOrgAdmin(solo.id, uid), false);
+  assert.deepEqual(accounts.listOrgAdmins(shared.id), [other.id]);
+  assert.deepEqual(accounts.listOrgAdmins(solo.id), []); // 正本に定めなし: 拒否も移譲もしない
+  assert.ok(accounts.getOrg(solo.id));
+});
+
+test('DELETE /api/me: 誤パスワードの連続は 429(本人ごと)',{ skip }, async () => {
   const reg = await register();
   let last;
   for (let i = 0; i < LIMITS.deletePassword.max + 1; i++) last = await call('DELETE', '/api/me', { password: 'wrong-pass-1' }, { token: reg.json.token });
