@@ -113,14 +113,17 @@ test('extractBearer / extractAuth: Bearer を優先し Cookie と共存、extrac
   assert.equal(extractBearer({ headers: { authorization: 'Bearer a b' } }), null);
   assert.equal(extractBearer({ headers: { cookie: 'sailviz_token=c' } }), null);
   assert.deepEqual(extractAuth({ headers: { authorization: 'Bearer abc', cookie: 'sailviz_token=c' } }), { token: 'abc', source: 'bearer' });
-  assert.deepEqual(extractAuth({ headers: { cookie: 'sailviz_token=c' } }), { token: 'c', source: 'cookie' });
+  assert.deepEqual(extractAuth({ headers: { cookie: 'sailviz_session=s' } }), { token: 's', source: 'cookie' });
+  // アカウントの Cookie は旧共有ログインの sailviz_token と別名(両方あれば session を優先)
+  assert.deepEqual(extractAuth({ headers: { cookie: 'sailviz_token=c; sailviz_session=s' } }), { token: 's', source: 'cookie' });
+  assert.deepEqual(extractAuth({ headers: { cookie: 'sailviz_token=c' } }), { token: 'c', source: 'legacy-cookie' });
   assert.deepEqual(extractAuth({ headers: {} }), { token: null, source: null });
   assert.equal(extractToken({ headers: { authorization: 'Bearer abc', cookie: 'sailviz_token=c' } }), 'abc');
 });
 
 test('extractAuth: 不正な Bearer と Cookie 併用は Cookie にフォールバック(extractToken は "a b")', () => {
   const req = { headers: { authorization: 'Bearer a b', cookie: 'sailviz_token=c' } };
-  assert.deepEqual(extractAuth(req), { token: 'c', source: 'cookie' });
+  assert.deepEqual(extractAuth(req), { token: 'c', source: 'legacy-cookie' });
   assert.equal(extractToken(req), 'a b');
   assert.deepEqual(extractAuth({ headers: { authorization: 'Bearer a b' } }), { token: null, source: null });
 });
@@ -216,6 +219,11 @@ test('resolveIdentity: 共有トークン・アカウントのトークン・ど
   const u = resolveIdentity({ headers: { authorization: `Bearer ${token}` } }, opts);
   assert.equal(u.kind, 'user');
   assert.equal(u.user.id, user.id);
+  // Web のアカウントは Cookie sailviz_session。旧共有の Cookie と同居しても両方判定できる
+  const w = resolveIdentity({ headers: { cookie: `sailviz_session=${token}` } }, opts);
+  assert.equal(w.kind, 'user');
+  assert.deepEqual(resolveIdentity({ headers: { cookie: `sailviz_session=${token}; sailviz_token=dummy-write` } }, opts), { kind: 'shared' });
+  assert.equal(resolveIdentity({ headers: { cookie: `sailviz_token=${token}` } }, opts), null); // アカウントのトークンを旧 Cookie 名では受けない
   assert.equal(resolveIdentity({ headers: { authorization: 'Bearer nope' } }, opts), null);
   assert.equal(resolveIdentity({ headers: {} }, opts), null);
   // 書込トークン未設定でも、空トークンが共有扱いにならない

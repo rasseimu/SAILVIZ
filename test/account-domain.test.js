@@ -1,0 +1,75 @@
+// test/account-domain.test.js
+// 回数制限・入力検証・メールアダプタの純関数テスト(S2.3)。合成データのみ。
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createRateLimiter } from '../server/domain/rateLimit.js';
+import { validateRegister, validateProfilePatch, isValidEmail, normalizeEmail } from '../server/domain/accountInput.js';
+import { buildLink, createLogMailer, createStubMailer, createMailer } from '../server/mail.js';
+
+test('rateLimit: 上限で limited、窓が過ぎれば解除、clear で解除', () => {
+  const rl = createRateLimiter({ max: 3, windowMs: 1000 });
+  assert.equal(rl.check('k', 0).limited, false);
+  rl.record('k', 0); rl.record('k', 100); rl.record('k', 200);
+  const r = rl.check('k', 300);
+  assert.equal(r.limited, true);
+  assert.equal(r.retryAfterMs, 700); // 最古(0)+1000-300
+  assert.equal(rl.check('other', 300).limited, false);
+  assert.equal(rl.check('k', 1001).limited, false); // 0 の分が窓から出る
+  rl.clear('k');
+  assert.equal(rl.check('k', 300).limited, false);
+});
+
+test('rateLimit: キー数が上限を超えたら古いものから捨てる', () => {
+  const rl = createRateLimiter({ max: 1, windowMs: 1000, maxKeys: 3 });
+  for (let i = 0; i < 10; i++) rl.record(`k${i}`, 0);
+  assert.ok(rl.size <= 3);
+});
+
+const okReg = { email: ' A@Example.test ', password: '12345678', name: ' テスト太郎 ', affiliationText: 'テスト部', agreedAt: 1_700_000_000_000 };
+
+test('validateRegister: 正常は正規化した値、欠落・不正は message', () => {
+  const v = validateRegister(okReg);
+  assert.equal(v.ok, true);
+  assert.equal(v.value.email, 'a@example.test');
+  assert.equal(v.value.name, 'テスト太郎');
+  for (const patch of [{ email: 'x' }, { password: '1234567' }, { name: ' ' }, { affiliationText: '' }, { agreedAt: undefined }, { agreedAt: 'now' }, { agreedAt: 0 }]) {
+    const r = validateRegister({ ...okReg, ...patch });
+    assert.equal(r.ok, false, JSON.stringify(patch));
+    assert.ok(r.message);
+  }
+  assert.equal(validateRegister(null).ok, false);
+});
+
+test('validateProfilePatch: 渡したキーだけ検証、空は不可', () => {
+  assert.deepEqual(validateProfilePatch({ name: ' 新 ', defaultVisibility: 'org' }).value, { name: '新', defaultVisibility: 'org' });
+  assert.equal(validateProfilePatch({ defaultVisibility: 'everyone' }).ok, false);
+  assert.equal(validateProfilePatch({ email: 'bad' }).ok, false);
+  assert.equal(validateProfilePatch({}).ok, false);
+  assert.equal(validateProfilePatch({ email: 'B@Example.test' }).value.email, 'b@example.test');
+});
+
+test('isValidEmail / normalizeEmail', () => {
+  assert.equal(isValidEmail('a@example.test'), true);
+  assert.equal(isValidEmail('a@b'), false);
+  assert.equal(isValidEmail('a b@example.test'), false);
+  assert.equal(isValidEmail(`${'a'.repeat(250)}@example.test`), false);
+  assert.equal(normalizeEmail(undefined), '');
+});
+
+test('mail: リンクは Web のページ、トークンは URL エンコード', () => {
+  assert.equal(buildLink('https://app.example.test/', 'verify', 'a_b-c'), 'https://app.example.test/verify-email?token=a_b-c');
+  assert.equal(buildLink('http://localhost:8000', 'reset', 'x y'), 'http://localhost:8000/reset-password?token=x%20y');
+});
+
+test('mail: log アダプタはリンクを出し、宛先はマスクする。stub は溜める。未実装 provider は例外', async () => {
+  const lines = [];
+  await createLogMailer({ logger: (l) => lines.push(l) }).send({ to: 'taro@example.test', kind: 'verify', url: 'http://x/verify-email?token=t' });
+  assert.match(lines[0], /url=http:\/\/x\/verify-email\?token=t/);
+  assert.ok(!lines[0].includes('taro@'));
+  const stub = createStubMailer();
+  await stub.send({ to: 'a@example.test', kind: 'reset', url: 'u' });
+  assert.equal(stub.last('reset').url, 'u');
+  assert.equal(stub.last('verify'), null);
+  assert.ok(createMailer({}).send); // 既定は log
+  assert.throws(() => createMailer({ provider: 'brevo' }), /未実装/);
+});
