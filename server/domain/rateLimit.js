@@ -1,7 +1,8 @@
 // server/domain/rateLimit.js
 // メモリ上のスライディングウィンドウ回数制限(設計書 v2 §4.3「ログインに回数制限をかける」)。
 // マシンは1台(Fly 1台構成)なので共有ストアは要らない。再起動で数え直しになる(許容)。
-// 時刻は引数で受ける(テストしやすさ)。失敗だけを record し、成功したら clear する使い方を想定。
+// 時刻は引数で受ける(テストしやすさ)。使い方は2通り: ログインのように失敗だけを record し成功したら clear する用途と、
+// emailChange・register・orgCreate のように試行そのものを record して数える用途。
 export function createRateLimiter({ max, windowMs, maxKeys = 10_000 }) {
   const hits = new Map(); // key -> 昇順の epoch ms 配列
 
@@ -23,7 +24,8 @@ export function createRateLimiter({ max, windowMs, maxKeys = 10_000 }) {
     record(key, now = Date.now()) {
       const arr = live(key, now);
       arr.push(now);
-      hits.delete(key); hits.set(key, arr); // 末尾へ移す(溢れたとき、最近動いたキーを残し、古いものから捨てる)
+      hits.delete(key);
+      hits.set(key, arr); // 末尾へ移す(溢れたとき、最近動いたキーを残し、古いものから捨てる)
       if (hits.size > maxKeys) { // 肥大化の防止: 期限切れのキーを掃除し、それでも多ければ古いものから捨てる
         for (const k of [...hits.keys()]) live(k, now);
         while (hits.size > maxKeys) hits.delete(hits.keys().next().value);

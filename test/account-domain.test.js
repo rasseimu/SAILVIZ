@@ -62,16 +62,20 @@ test('mail: リンクは Web のページ、トークンは URL エンコード'
 });
 
 test('rateLimit: maxKeys 溢れでは期限切れを先に掃除し、残りは最近動いていないキーから捨てる', () => {
-  const rl = createRateLimiter({ max: 3, windowMs: 1000, maxKeys: 3 });
-  rl.record('old', 0); rl.record('a', 5000); rl.record('b', 5001);
+  const rl = createRateLimiter({ max: 2, windowMs: 1000, maxKeys: 3 });
+  rl.record('old', 0); rl.record('a', 5000);
+  rl.record('b', 5001); rl.record('b', 5001);
   rl.record('c', 5002); // 溢れ: 期限切れの old だけが消え、a・b・c は残る
+  rl.record('c', 5002);
   assert.equal(rl.size, 3);
-  rl.record('a', 5003); rl.record('a', 5004); // a は最近動いた
-  rl.record('d', 5005); // 溢れ: 期限切れは無い → 最近動いていない b から捨てる
+  assert.equal(rl.check('old', 5002).limited, false);
+  rl.record('a', 5003); // a は最近動いた(古い順: b, c, a)
+  rl.record('d', 5005); rl.record('d', 5005); // 溢れ: 期限切れは無い → 最近動いていない b から捨てる
   assert.equal(rl.size, 3);
-  assert.equal(rl.check('a', 5006).limited, true);
-  rl.record('a', 5006);
-  assert.equal(rl.check('a', 5006).limited, true); // a の回数は残っている
+  assert.equal(rl.check('b', 5006).limited, false); // b は捨てられた(残っていれば2回で limited)
+  assert.equal(rl.check('c', 5006).limited, true); // c の回数は残っている
+  assert.equal(rl.check('d', 5006).limited, true); // d の回数は残っている
+  assert.equal(rl.check('a', 5006).limited, true); // a も残っている(5000, 5003 の2回)
 });
 
 test('mail: redactToken(本番)ではリンクのトークンを伏せる。既定は出す', async () => {
