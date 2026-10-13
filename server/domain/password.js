@@ -46,6 +46,8 @@ function parse(stored) {
   const salt = Buffer.from(parts[4], 'base64url');
   const hash = Buffer.from(parts[5], 'base64url');
   if (128 * N * r * p > MAX_COST_BYTES) return null;
+  // OpenSSL の scrypt は N < 2^(16r) を要求する(r=1 なら N<65536)。満たさない値は照合不能なので不正扱い。
+  if (16 * r < 53 && N >= 2 ** (16 * r)) return null;
   if (!salt.length || !hash.length || hash.length > MAX_HASH_BYTES) return null;
   return { N, r, p, salt, hash };
 }
