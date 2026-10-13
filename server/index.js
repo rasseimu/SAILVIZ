@@ -7,6 +7,7 @@ import { createApi } from './api.js';
 import { serveStatic } from './static.js';
 import { resolveViewGate } from './config.js';
 import { openRepo } from './repos/openRepo.js';
+import { createAccountsRepo } from './repos/accountsRepo.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT) || 8000;
@@ -21,8 +22,9 @@ const { viewUser: VIEW_USER, viewPassword: VIEW_PASSWORD } = resolveViewGate(pro
 // 保存先(ファイル／DB)を STORAGE で切替。db なら sqlite を開いてマイグレーションを当てる。
 const { repo, db } = openRepo({ storage: STORAGE, dataDir: DATA_DIR });
 
+const accounts = db ? createAccountsRepo({ db }) : null;
 const api = createApi({
-  dataDir: DATA_DIR, repo, token: TOKEN, geminiKey: GEMINI_KEY,
+  dataDir: DATA_DIR, repo, accounts, token: TOKEN, geminiKey: GEMINI_KEY,
   viewUser: VIEW_USER, viewPassword: VIEW_PASSWORD,
 });
 

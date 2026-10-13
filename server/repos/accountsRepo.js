@@ -143,6 +143,10 @@ export function createAccountsRepo({ db }) {
     isOrgAdmin(orgId, userId) {
       return !!db.prepare('SELECT 1 FROM org_admins WHERE org_id = ? AND user_id = ?').get(orgId, userId);
     },
+    // そのユーザーが管理者になっている組織の数(組織作成の上限判定用)。
+    countOrgsAdministeredBy(userId) {
+      return Number(db.prepare('SELECT COUNT(*) AS n FROM org_admins WHERE user_id = ?').get(userId).n);
+    },
     listOrgAdmins(orgId) {
       return db.prepare('SELECT user_id FROM org_admins WHERE org_id = ? ORDER BY user_id').all(orgId)
         .map((r) => r.user_id);
