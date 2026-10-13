@@ -39,6 +39,30 @@ test('verifyPassword: 現行パラメータ(本番値)で往復できる', async
   assert.equal(needsRehash(h), false);
 });
 
+test('verifyPassword: 1024 文字を超える入力は false', async () => {
+  const h = await hashPassword('pass-word-1', FAST);
+  assert.equal(await verifyPassword('x'.repeat(1025), h), false);
+});
+
+test('verifyPassword: NFKC で同じになる入力(全角/半角 ASCII)は一致する', async () => {
+  const h = await hashPassword('pass-word-1', FAST);
+  assert.equal(await verifyPassword('ｐａｓｓ－ｗｏｒｄ－１', h), true);
+});
+
+test('verifyPassword: 保存値のパラメータ・hash 長が上限を超えれば例外でなく false', async () => {
+  const salt = 'AAAAAAAAAAAAAAAAAAAAAA';
+  const hash = 'A'.repeat(43);
+  for (const bad of [
+    `scrypt$1024$64$1$${salt}$${hash}`, // r 上限超
+    `scrypt$1024$8$32$${salt}$${hash}`, // p 上限超
+    `scrypt$1048576$8$1$${salt}$${hash}`, // N 上限超
+    `scrypt$32768$8$4$${salt}$${hash}`, // 128*N*r*p = 128MiB > 64MiB
+    `scrypt$1024$8$1$${salt}$${'A'.repeat(100)}`, // hash 長 75 バイト > 64
+  ]) {
+    assert.equal(await verifyPassword('pass-word-1', bad), false, bad);
+  }
+});
+
 test('needsRehash: パラメータが古い・壊れていれば true(強度を後から上げられる)', async () => {
   const old = await hashPassword('pass-word-1', FAST);
   assert.equal(needsRehash(old), true);
@@ -75,6 +99,13 @@ test('extractBearer / extractAuth: Bearer を優先し Cookie と共存、extrac
   assert.deepEqual(extractAuth({ headers: { cookie: 'sailviz_token=c' } }), { token: 'c', source: 'cookie' });
   assert.deepEqual(extractAuth({ headers: {} }), { token: null, source: null });
   assert.equal(extractToken({ headers: { authorization: 'Bearer abc', cookie: 'sailviz_token=c' } }), 'abc');
+});
+
+test('extractAuth: 不正な Bearer と Cookie 併用は Cookie にフォールバック(extractToken は "a b")', () => {
+  const req = { headers: { authorization: 'Bearer a b', cookie: 'sailviz_token=c' } };
+  assert.deepEqual(extractAuth(req), { token: 'c', source: 'cookie' });
+  assert.equal(extractToken(req), 'a b');
+  assert.deepEqual(extractAuth({ headers: { authorization: 'Bearer a b' } }), { token: null, source: null });
 });
 
 // ---- DB を使う部分(Node 24) ----

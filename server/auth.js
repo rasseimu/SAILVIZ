@@ -26,7 +26,9 @@ export function extractBearer(req) {
   return m ? m[1] : null;
 }
 
-// extractToken と同じ優先順位(Bearer → Cookie sailviz_token)で、取得元も返す。
+// 優先順位は Bearer → Cookie sailviz_token で、取得元も返す。
+// extractToken との違い: Authorization が不正な形(例 "Bearer a b")のとき、extractToken は "a b" を返すが、
+// extractAuth は Bearer を無いものとして Cookie にフォールバックする。
 // TODO(S2.3): Web のアカウント用 Cookie の名前は設計書に無い。今は sailviz_token を共用する。
 export function extractAuth(req) {
   const bearer = extractBearer(req);

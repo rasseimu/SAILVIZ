@@ -9,15 +9,19 @@ export const MAX_PASSWORD_LENGTH = 1024; // scrypt への過大入力を避け�
 
 // 現在のパラメータ(設計書は「scrypt」としか定めていない。選定理由は S2.2 の報告に記載)。
 export const SCRYPT_PARAMS = Object.freeze({ N: 32768, r: 8, p: 1, keyLen: 32, saltLen: 16 });
-const MAXMEM = 128 * 1024 * 1024; // 128*N*r = 32MiB に余裕を持たせる
-// 保存値から読んだパラメータの上限(壊れた/悪意ある値でメモリを食わないため)
+// maxmem は固定。保存値の見積り(128*N*r*p)は MAX_COST_BYTES 以下に限るので、scrypt 内部の作業領域の余裕を足した値にする。
+const MAXMEM = 80 * 1024 * 1024;
+// 保存値から読んだパラメータの上限(壊れた/悪意ある値でメモリ・CPU を食わないため。本番 VM が 256MB の可能性がある)
+const MAX_COST_BYTES = 64 * 1024 * 1024; // 128*N*r*p の上限。現行(N=32768・r=8・p=1)は 32MiB
+const MAX_HASH_BYTES = 64; // 保存値の hash 長(= keyLen)の上限
 const LIMITS = { N: 1 << 20, r: 32, p: 16 };
 
 const derive = (password, salt, { N, r, p }, keyLen) => new Promise((resolve, reject) => {
-  scrypt(password.normalize('NFKC'), salt, keyLen, { N, r, p, maxmem: Math.max(MAXMEM, 256 * N * r) },
+  scrypt(password.normalize('NFKC'), salt, keyLen, { N, r, p, maxmem: MAXMEM },
     (err, key) => (err ? reject(err) : resolve(key)));
 });
 
+// 注意: 下限はコードポイント数、上限は UTF-16 の長さ(String#length)で、どちらも NFKC 正規化の前に数える。
 export function validatePassword(password) {
   if (typeof password !== 'string') return { ok: false, reason: 'not_string' };
   if ([...password].length < MIN_PASSWORD_LENGTH) return { ok: false, reason: 'too_short' };
@@ -41,7 +45,8 @@ function parse(stored) {
   if (r < 1 || p < 1 || N > LIMITS.N || r > LIMITS.r || p > LIMITS.p) return null;
   const salt = Buffer.from(parts[4], 'base64url');
   const hash = Buffer.from(parts[5], 'base64url');
-  if (!salt.length || !hash.length) return null;
+  if (128 * N * r * p > MAX_COST_BYTES) return null;
+  if (!salt.length || !hash.length || hash.length > MAX_HASH_BYTES) return null;
   return { N, r, p, salt, hash };
 }
 
