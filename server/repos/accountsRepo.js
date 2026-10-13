@@ -254,6 +254,33 @@ export function createAccountsRepo({ db }) {
     listMembers(orgId) {
       return db.prepare('SELECT * FROM org_members WHERE org_id = ? ORDER BY linked_at, user_id').all(orgId);
     },
+    // ---- legacy_* の本人への付け替え(§4.4・移行計画 Phase 2)----
+    // 旧名簿の氏名(legacyName)と一致する、その組織の練習日の器に属する legacy データを userId に付け替える。
+    //  - 反省: legacy_author_name 一致 かつ author_user_id が NULL
+    //  - 軌跡: legacy_owner_name 一致 かつ owner_user_id が NULL
+    //  - ロードマップ: legacy_name 一致 かつ org_id がその組織 かつ user_id が NULL。
+    //    roadmaps.user_id は UNIQUE なので、本人が既にロードマップを持っていれば付け替えない。
+    // 他組織の器・既に所有者がいる行は触らない(奪わない)。legacy_* 列は来歴として残す。冪等。
+    // 戻り値は付け替えた件数。
+    reattachLegacy({ orgId, userId, legacyName }) {
+      const name = typeof legacyName === 'string' ? legacyName.trim() : '';
+      if (!name) return { reflections: 0, sessions: 0, roadmaps: 0 };
+      const n = (r) => Number(r.changes);
+      return withTx(() => ({
+        reflections: n(db.prepare(
+          `UPDATE reflections SET author_user_id = ? WHERE legacy_author_name = ? AND author_user_id IS NULL
+             AND practice_day_id IN (SELECT id FROM practice_days WHERE org_id = ?)`,
+        ).run(userId, name, orgId)),
+        sessions: n(db.prepare(
+          `UPDATE rec_sessions SET owner_user_id = ? WHERE legacy_owner_name = ? AND owner_user_id IS NULL
+             AND practice_day_id IN (SELECT id FROM practice_days WHERE org_id = ?)`,
+        ).run(userId, name, orgId)),
+        roadmaps: n(db.prepare(
+          `UPDATE roadmaps SET user_id = ? WHERE legacy_name = ? AND org_id = ? AND user_id IS NULL
+             AND NOT EXISTS (SELECT 1 FROM roadmaps WHERE user_id = ?)`,
+        ).run(userId, name, orgId, userId)),
+      }));
+    },
     listMembershipsOfUser(userId) {
       return db.prepare('SELECT * FROM org_members WHERE user_id = ? ORDER BY linked_at').all(userId);
     },
