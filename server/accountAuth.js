@@ -3,7 +3,7 @@
 // 平文トークンは発行時に一度だけ返し、DB にはハッシュだけ保存する。HTTP は扱わない(ルートは S2.3)。
 import { timingSafeEqual } from 'node:crypto';
 import { generateToken, hashToken, AUTH_TOKEN_TTL_MS, EMAIL_TOKEN_TTL_MS } from './domain/tokens.js';
-import { extractAuth } from './auth.js';
+import { extractCredentials } from './auth.js';
 
 export function issueAuthToken(repo, userId, now = Date.now()) {
   const token = generateToken();
@@ -65,11 +65,16 @@ function sameSecret(a, b) {
 //   { kind: 'user', user, tokenId } … DB のアカウントトークンが有効
 //   null                          … どちらでもない
 // 共有トークンを先に判定するので、旧経路の挙動は変わらない。repo が無ければアカウント照合はしない。
+// 共有トークンの候補は Bearer と旧 Cookie sailviz_token、アカウントの候補は Bearer と Cookie sailviz_session
+// (Cookie 名を分けたので、両方のログインが同じブラウザにあっても互いに隠れない)。
 export function resolveIdentity(req, { writeToken, repo, now = Date.now() } = {}) {
-  const { token } = extractAuth(req);
-  if (!token) return null;
-  if (sameSecret(token, writeToken)) return { kind: 'shared' };
+  const { bearer, session, legacy } = extractCredentials(req);
+  if (sameSecret(bearer, writeToken) || sameSecret(legacy, writeToken)) return { kind: 'shared' };
   if (!repo) return null;
-  const hit = authenticateToken(repo, token, now);
-  return hit ? { kind: 'user', user: hit.user, tokenId: hit.tokenId } : null;
+  for (const token of [bearer, session]) {
+    if (!token) continue;
+    const hit = authenticateToken(repo, token, now);
+    if (hit) return { kind: 'user', user: hit.user, tokenId: hit.tokenId };
+  }
+  return null;
 }

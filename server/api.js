@@ -8,17 +8,23 @@ import { createFileRepo } from './repos/fileRepo.js';
 import { basemapRoute } from './routes/basemap.js';
 import { aiRoute } from './routes/ai.js';
 import { compatRoute } from './routes/compat.js';
-import { orgsRoute } from './routes/orgs.js';
-import { createRateLimiter, ORG_CREATE_RATE } from './domain/orgCreate.js';
+import { createAuthRoute, unavailableRoute } from './routes/auth.js';
+import { createMailer } from './mail.js';
 import { randomBytes } from 'node:crypto';
 
-// accounts: accountsRepo(STORAGE=db のときだけ。無ければアカウント系ルートは 503)。now: テスト用の時計。
+// accounts(accountsRepo)があればアカウント API(§10.2)が有効。無い(STORAGE=file)ときは該当パスが 503。
+// mailer / baseUrl は確認・再設定メール用(MAIL_PROVIDER 未設定なら log)。authOptions はテスト用の差し替え。
 export function createApi({
-  dataDir, repo, token, geminiKey, viewUser, viewPassword, accounts = null, now = Date.now,
+  dataDir, repo, token, geminiKey, viewUser, viewPassword, accounts, mailer, baseUrl, authOptions = {},
 }) {
-  const orgCreateLimiter = createRateLimiter(ORG_CREATE_RATE);
   // 保存の窓口。明示 repo が無ければ dataDir からファイル実装を組み立てる(既存挙動のまま)。
   const store = repo || createFileRepo(dataDir);
+  const authRoute = accounts
+    ? createAuthRoute({
+      accounts, mailer: mailer || createMailer({ redactToken: process.env.NODE_ENV === 'production' }), baseUrl: baseUrl || 'http://localhost:8000', writeToken: token,
+      secureCookie: process.env.NODE_ENV === 'production' ? '; Secure' : '', ...authOptions,
+    })
+    : unavailableRoute;
   // 閲覧ゲート: user/password が両方設定されている時のみ有効。
   // 有効時はランダム秘密を発行し、ログイン成功で Cookie に載せる(パスワードは載せない)。
   const viewEnabled = Boolean(viewUser && viewPassword);
@@ -48,7 +54,6 @@ export function createApi({
     const ctx = {
       store, token, geminiKey, viewEnabled, viewSecret, viewUser, viewPassword,
       secureCookie, path, method, requireViewer, requireWrite,
-      accounts, orgCreateLimiter, now,
     };
 
     try {
@@ -56,7 +61,7 @@ export function createApi({
 
       if (await basemapRoute(req, res, ctx)) return true;
       if (await aiRoute(req, res, ctx)) return true;
-      if (await orgsRoute(req, res, ctx)) return true;
+      if (await authRoute(req, res, ctx)) return true;
       if (await compatRoute(req, res, ctx)) return true;
       send(res, 404, { error: 'no route' });
       return true;

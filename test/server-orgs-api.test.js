@@ -34,7 +34,7 @@ before(async () => {
   unverified = accounts.createUser({ email: 'u@example.test', name: 'U', passwordHash: 'x', now: clock });
   vTok = issueAuthToken(accounts, verified.id, clock).token;
   uTok = issueAuthToken(accounts, unverified.id, clock).token;
-  const api = createApi({ repo: {}, token: 'shared-secret', accounts, now: () => clock });
+  const api = createApi({ repo: {}, token: 'shared-secret', accounts, authOptions: { now: () => clock } });
   server = createServer(async (req, res) => { if (await api(req, res)) return; res.writeHead(404).end(); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -52,8 +52,8 @@ test('未認証は 401、不正なトークンも 401', { skip }, async () => {
   assert.equal((await post({ name: 'A' }, 'bogus')).status, 401);
 });
 
-test('共有トークンはアカウントではないので 403', { skip }, async () => {
-  assert.equal((await post({ name: 'A' }, 'shared-secret')).status, 403);
+test('共有トークンはアカウントではないので 401(S2.3 の requireUser と同じ)', { skip }, async () => {
+  assert.equal((await post({ name: 'A' }, 'shared-secret')).status, 401);
 });
 
 test('メール未確認は 403', { skip }, async () => {
@@ -107,9 +107,9 @@ test('上限 5 件を超えると 409、回数制限を超えると 429、窓が
   assert.equal((await post({ name: 'x' }, vTok)).status, 409); // 窓が過ぎて制限は解け、上限だけが残る
 });
 
-test('GET は 405', { skip }, async () => {
+test('GET /api/orgs は未対応(404)', { skip }, async () => {
   const r = await fetch(`${base}/api/orgs`, { headers: { authorization: `Bearer ${vTok}` } });
-  assert.equal(r.status, 405);
+  assert.equal(r.status, 404);
 });
 
 test('accounts 無し(STORAGE=file)は 503', async () => {
