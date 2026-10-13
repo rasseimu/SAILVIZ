@@ -18,6 +18,23 @@ export function extractToken(req) {
   return cookies.sailviz_token || null;
 }
 
+// Authorization: Bearer だけを見る(アプリ向け。Cookie は見ない)。無ければ null。
+export function extractBearer(req) {
+  const auth = req.headers.authorization || req.headers.Authorization;
+  if (typeof auth !== 'string') return null;
+  const m = /^Bearer\s+(\S+)\s*$/i.exec(auth.trim());
+  return m ? m[1] : null;
+}
+
+// extractToken と同じ優先順位(Bearer → Cookie sailviz_token)で、取得元も返す。
+// TODO(S2.3): Web のアカウント用 Cookie の名前は設計書に無い。今は sailviz_token を共用する。
+export function extractAuth(req) {
+  const bearer = extractBearer(req);
+  if (bearer) return { token: bearer, source: 'bearer' };
+  const cookie = parseCookies(req.headers.cookie).sailviz_token;
+  return cookie ? { token: cookie, source: 'cookie' } : { token: null, source: null };
+}
+
 export function isAuthorized(req, token) {
   if (!token) return false;
   return extractToken(req) === token;
