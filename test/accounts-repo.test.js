@@ -163,3 +163,95 @@ test('org_members: 紐付け・再紐付け(上書き)・解除・一意', { ski
   assert.equal(repo.isMember(o.id, u.id), false);
   db.close();
 });
+
+test('P2-1 replaceRoster: メール一致の行は ID を引き継ぎ、宙に浮いた roster_id が 0 件', { skip: skipMsg }, () => {
+  const { db, repo } = setup();
+  const o = repo.createOrg({ name: '合成部' });
+  const [r1, r2] = repo.replaceRoster(o.id, [
+    { name: 'テスト一', email: 'one@example.test' },
+    { name: 'テスト二', email: 'two@example.test' },
+  ], 10);
+  const u1 = repo.createUser({ email: 'one@example.test' });
+  const u2 = repo.createUser({ email: 'two@example.test' });
+  repo.linkMember({ orgId: o.id, userId: u1.id, rosterId: r1.id });
+  repo.linkMember({ orgId: o.id, userId: u2.id, rosterId: r2.id });
+  // one は残し(名前変更)、two は消す、three を足す
+  const rows = repo.replaceRoster(o.id, [
+    { name: 'テスト一改', email: ' ONE@example.test ' },
+    { name: 'テスト三', email: 'three@example.test' },
+  ], 20);
+  const one = rows.find((r) => r.email === 'one@example.test');
+  assert.equal(one.id, r1.id);
+  assert.equal(one.name, 'テスト一改');
+  assert.equal(one.updated_at, 20);
+  const dangling = db.prepare(
+    'SELECT COUNT(*) AS n FROM org_members m WHERE m.roster_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM org_roster r WHERE r.id = m.roster_id)',
+  ).get().n;
+  assert.equal(dangling, 0);
+  const members = repo.listMembers(o.id);
+  assert.equal(members.find((m) => m.user_id === u1.id).roster_id, r1.id);
+  assert.equal(members.find((m) => m.user_id === u2.id).roster_id, null);
+  assert.equal(repo.isMember(o.id, u2.id), true);
+  db.close();
+});
+
+test('P2-2 createOrg/replaceRoster は外側のトランザクションに入れられる(SAVEPOINT)', { skip: skipMsg }, () => {
+  const { db, repo } = setup();
+  db.exec('BEGIN');
+  const o = repo.createOrg({ name: '合成部' });
+  repo.replaceRoster(o.id, [{ name: 'A', email: 'a@example.test' }]);
+  db.exec('ROLLBACK');
+  assert.equal(repo.getOrg(o.id), null);
+  assert.equal(repo.listRoster(o.id).length, 0);
+  // withTx の入れ子: 内側の失敗は内側だけ巻き戻す
+  repo.withTx(() => {
+    const a = repo.createOrg({ name: 'keep' });
+    assert.throws(() => repo.withTx(() => { repo.createOrg({ name: 'drop' }); throw new Error('x'); }), /x/);
+    assert.ok(repo.getOrg(a.id));
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM orgs WHERE name = 'drop'").get().n, 0);
+  });
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM orgs WHERE name = 'keep'").get().n, 1);
+  assert.equal(db.isTransaction, false);
+  db.close();
+});
+
+test('P2-3 markEmailTokenUsed / revokeAuthToken は変更の有無を返す(二重使用の判別)', { skip: skipMsg }, () => {
+  const { db, repo } = setup();
+  const u = repo.createUser({ email: 'a@example.test' });
+  const et = repo.createEmailToken({ userId: u.id, purpose: 'verify', tokenHash: 'e1' });
+  assert.equal(repo.markEmailTokenUsed(et, 1), true);
+  assert.equal(repo.markEmailTokenUsed(et, 2), false);
+  assert.equal(repo.markEmailTokenUsed('et_none', 3), false);
+  const at = repo.createAuthToken({ userId: u.id, tokenHash: 'h1' });
+  assert.equal(repo.revokeAuthToken(at, 1), true);
+  assert.equal(repo.revokeAuthToken(at, 2), false);
+  assert.equal(repo.getAuthTokenByHash('h1').revoked_at, 1);
+  db.close();
+});
+
+test('P2-4 replaceRoster: 正規化後にメールが重複したら弾く(何も変更しない)', { skip: skipMsg }, () => {
+  const { db, repo } = setup();
+  const o = repo.createOrg({ name: '合成部' });
+  repo.replaceRoster(o.id, [{ name: 'A', email: 'a@example.test' }]);
+  assert.throws(
+    () => repo.replaceRoster(o.id, [
+      { name: 'X', email: 'dup@example.test' },
+      { name: 'Y', email: '  DUP@Example.test ' },
+    ]),
+    (e) => e.code === 'ROSTER_DUPLICATE_EMAIL',
+  );
+  assert.deepEqual(repo.listRoster(o.id).map((r) => r.email), ['a@example.test']);
+  // メール無しの複数行は可
+  assert.equal(repo.replaceRoster(o.id, [{ name: 'P' }, { name: 'Q' }]).length, 2);
+  // 別組織なら同じメールも可
+  const o2 = repo.createOrg({ name: '別部' });
+  assert.equal(repo.replaceRoster(o2.id, [{ email: 'a@example.test' }]).length, 1);
+  db.close();
+});
+
+test('P3 email_tokens(user_id) の索引がある', { skip: skipMsg }, () => {
+  const { db } = setup();
+  const idx = db.prepare("PRAGMA index_list('email_tokens')").all().map((i) => i.name);
+  assert.ok(idx.includes('email_tokens_user'));
+  db.close();
+});

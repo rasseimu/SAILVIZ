@@ -36,6 +36,9 @@ CREATE TABLE email_tokens (
   expires_at INTEGER,
   used_at INTEGER
 );
+-- 索引の追加のみ。002 は develop にマージ直後で本番未適用のため直接編集する
+-- (適用済みの DB が既にある場合は別途 003 で足すこと)。
+CREATE INDEX email_tokens_user ON email_tokens (user_id);
 
 CREATE TABLE orgs (
   id TEXT PRIMARY KEY,                -- 'o_' + ランダム

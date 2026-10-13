@@ -9,7 +9,27 @@ const normEmail = (e) => (typeof e === 'string' ? e.trim().toLowerCase() : e);
 const nul = (v) => (v === undefined ? null : v);
 
 export function createAccountsRepo({ db }) {
+  // 入れ子可のトランザクション。最外は BEGIN/COMMIT、内側(または呼び出し側が既に BEGIN 済み)は SAVEPOINT。
+  let depth = 0;
+  const withTx = (fn) => {
+    const nested = depth > 0 || db.isTransaction === true;
+    const sp = `sp_${depth}`;
+    db.exec(nested ? `SAVEPOINT ${sp}` : 'BEGIN');
+    depth += 1;
+    try {
+      const out = fn();
+      depth -= 1;
+      db.exec(nested ? `RELEASE ${sp}` : 'COMMIT');
+      return out;
+    } catch (e) {
+      depth -= 1;
+      db.exec(nested ? `ROLLBACK TO ${sp}; RELEASE ${sp}` : 'ROLLBACK');
+      throw e;
+    }
+  };
+
   return {
+    withTx,
     // ---- users ----
     createUser({
       email, name, affiliationText, passwordHash, defaultVisibility, agreedAt, now = Date.now(),
@@ -32,6 +52,7 @@ export function createAccountsRepo({ db }) {
       db.prepare('UPDATE users SET email_verified_at = ? WHERE id = ?').run(now, userId);
     },
     // 指定した列だけ更新する(許可列のみ)。email を変えたら確認済みを外す(§4.2)。
+    // 注意: メール変更時の org_members の解除・再照合は呼び出し側の責務(ここでは触らない)。
     updateUser(userId, patch) {
       const map = {
         name: 'name', affiliationText: 'affiliation_text', defaultVisibility: 'default_visibility',
@@ -69,7 +90,8 @@ export function createAccountsRepo({ db }) {
         .run(lastUsedAt, nul(expiresAt), id);
     },
     revokeAuthToken(id, now = Date.now()) {
-      db.prepare('UPDATE auth_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').run(now, id);
+      return Number(db.prepare('UPDATE auth_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL')
+        .run(now, id).changes) > 0;
     },
     // 全端末ログアウト/パスワード変更時。失効させた件数を返す。
     revokeAllAuthTokens(userId, now = Date.now()) {
@@ -91,23 +113,20 @@ export function createAccountsRepo({ db }) {
       return db.prepare('SELECT * FROM email_tokens WHERE token_hash = ?').get(tokenHash) || null;
     },
     markEmailTokenUsed(id, now = Date.now()) {
-      db.prepare('UPDATE email_tokens SET used_at = ? WHERE id = ? AND used_at IS NULL').run(now, id);
+      // 初回だけ true。2回目(使用済み)・存在しない id は false(ワンタイムリンクの二重使用の判別用)。
+      return Number(db.prepare('UPDATE email_tokens SET used_at = ? WHERE id = ? AND used_at IS NULL')
+        .run(now, id).changes) > 0;
     },
 
     // ---- orgs / org_admins ----
     createOrg({ name, adminUserIds = [], now = Date.now() }) {
       const id = genId('o_');
-      db.exec('BEGIN');
-      try {
+      withTx(() => {
         db.prepare('INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)').run(id, name, now);
         for (const uid of adminUserIds) {
           db.prepare('INSERT OR IGNORE INTO org_admins (org_id, user_id) VALUES (?, ?)').run(id, uid);
         }
-        db.exec('COMMIT');
-      } catch (e) {
-        db.exec('ROLLBACK');
-        throw e;
-      }
+      });
       return this.getOrg(id);
     },
     getOrg(id) {
@@ -126,21 +145,56 @@ export function createAccountsRepo({ db }) {
 
     // ---- org_roster ----
     // 名簿全体を置き換える(§10.3 PUT roster)。rows: [{name,email,legacyName}]。
+    // 同じ組織でメールが一致する行は ID を引き継ぐ(org_members.roster_id を宙に浮かせない)。
+    // 消えた行を指していた org_members.roster_id は同じトランザクションで NULL にする
+    // (会員資格そのものは残す。再照合・解除の判断は呼び出し側)。
+    // 正規化(trim + 小文字)後にメールが重複する行があれば Error(code='ROSTER_DUPLICATE_EMAIL')。
+    // API での 422 化は S2.6。メールの無い行は重複検査の対象外。
     replaceRoster(orgId, rows, now = Date.now()) {
-      db.exec('BEGIN');
-      try {
-        db.prepare('DELETE FROM org_roster WHERE org_id = ?').run(orgId);
+      const prepared = rows.map((r) => {
+        const e = normEmail(nul(r.email));
+        return { r, email: e === '' ? null : e };
+      });
+      const seen = new Set();
+      for (const { email } of prepared) {
+        if (email === null) continue;
+        if (seen.has(email)) {
+          const err = new Error(`duplicate roster email: ${email}`);
+          err.code = 'ROSTER_DUPLICATE_EMAIL';
+          throw err;
+        }
+        seen.add(email);
+      }
+      withTx(() => {
+        const existing = new Map();
+        for (const row of this.listRoster(orgId)) {
+          if (row.email !== null && row.email !== undefined && !existing.has(row.email)) existing.set(row.email, row.id);
+        }
+        const keep = new Set();
         const ins = db.prepare(
           'INSERT INTO org_roster (id, org_id, name, email, legacy_name, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
         );
-        for (const r of rows) {
-          ins.run(genId('r_'), orgId, nul(r.name), normEmail(nul(r.email)), nul(r.legacyName), now);
+        const upd = db.prepare(
+          'UPDATE org_roster SET name = ?, legacy_name = ?, updated_at = ? WHERE id = ?',
+        );
+        for (const { r, email } of prepared) {
+          const id = email !== null ? existing.get(email) : undefined;
+          if (id) {
+            upd.run(nul(r.name), nul(r.legacyName), now, id);
+            keep.add(id);
+          } else {
+            const nid = genId('r_');
+            ins.run(nid, orgId, nul(r.name), email, nul(r.legacyName), now);
+            keep.add(nid);
+          }
         }
-        db.exec('COMMIT');
-      } catch (e) {
-        db.exec('ROLLBACK');
-        throw e;
-      }
+        for (const row of this.listRoster(orgId)) {
+          if (keep.has(row.id)) continue;
+          db.prepare('DELETE FROM org_roster WHERE id = ?').run(row.id);
+          db.prepare('UPDATE org_members SET roster_id = NULL WHERE org_id = ? AND roster_id = ?')
+            .run(orgId, row.id);
+        }
+      });
       return this.listRoster(orgId);
     },
     listRoster(orgId) {
