@@ -249,8 +249,11 @@ export function createAuthRoute({
         accounts.withTx(() => {
           if (Object.keys(patch).length) accounts.updateUser(id.user.id, patch);
           if (emailChanged) {
-            // §4.2: 変更後は再確認が済むまで組織への紐付けを外す(updateUser は確認済みを外す)
-            for (const m of accounts.listMembershipsOfUser(id.user.id)) accounts.unlinkMember(m.org_id, id.user.id);
+            // §4.2: 変更後は再確認が済むまで、名簿照合で入った紐付けを外す(updateUser は確認済みを外す)。
+            // roster_id が NULL の紐付け(組織の作成者・将来の招待)は名簿照合で入ったのではないので外さない。
+            for (const m of accounts.listMembershipsOfUser(id.user.id)) {
+              if (m.roster_id != null) accounts.unlinkMember(m.org_id, id.user.id);
+            }
             verify = issueEmailToken(accounts, { userId: id.user.id, purpose: 'change', newEmail: patch.email, now: now() });
           }
         });

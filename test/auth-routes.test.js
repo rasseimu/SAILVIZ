@@ -327,7 +327,9 @@ test('PATCH /api/me: メール変更は再確認が必要で、組織の紐付�
   await register({ email: 'other@example.test' });
   await call('POST', '/api/auth/verify-email', { verifyToken: tokenFrom(mailer.sent.find((m) => m.to === 'taro@example.test').url) });
   const org = accounts.createOrg({ name: 'テスト部', adminUserIds: [], now: clock.t });
-  accounts.linkMember({ orgId: org.id, userId: reg.json.user.id, now: clock.t });
+  accounts.replaceRoster(org.id, [{ email: 'taro@example.test', name: 'テスト太郎' }, { email: 'taro2@example.test', name: 'テスト太郎' }], clock.t);
+  const rosterId = accounts.listRoster(org.id).find((r) => r.email === 'taro@example.test').id;
+  accounts.linkMember({ orgId: org.id, userId: reg.json.user.id, rosterId, now: clock.t });
 
   assert.equal((await call('PATCH', '/api/me', { email: 'OTHER@example.test' }, { token: reg.json.token })).status, 409);
   const r = await call('PATCH', '/api/me', { email: 'Taro2@Example.test' }, { token: reg.json.token });
@@ -340,9 +342,21 @@ test('PATCH /api/me: メール変更は再確認が必要で、組織の紐付�
   assert.equal(mail.to, 'taro2@example.test');
   assert.equal((await call('POST', '/api/auth/verify-email', { verifyToken: tokenFrom(mail.url) })).status, 200);
   assert.equal((await call('GET', '/api/me', undefined, { token: reg.json.token })).json.emailVerified, true);
+  assert.equal(accounts.isMember(org.id, reg.json.user.id), true); // 新メールで名簿に再照合される
   // 同じアドレスへの変更は何もしない(再確認も要らない)
   const same = await call('PATCH', '/api/me', { email: 'taro2@example.test' }, { token: reg.json.token });
   assert.equal(same.status, 200); assert.equal(same.json.user.emailVerified, true);
+});
+
+test('PATCH /api/me: roster_id が NULL のメンバー(組織の作成者)はメールを変えても組織に残る', { skip }, async () => {
+  const reg = await register();
+  const org = accounts.createOrg({ name: 'テスト部', adminUserIds: [reg.json.user.id], now: clock.t });
+  accounts.linkMember({ orgId: org.id, userId: reg.json.user.id, rosterId: null, now: clock.t });
+  const r = await call('PATCH', '/api/me', { email: 'creator2@example.test' }, { token: reg.json.token });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.user.emailVerified, false);
+  assert.equal(accounts.isMember(org.id, reg.json.user.id), true);
+  assert.equal((await call('GET', '/api/me', undefined, { token: reg.json.token })).json.org.id, org.id);
 });
 
 test('PATCH /api/me: メールを再変更したら古い確認リンクは無効', { skip }, async () => {
