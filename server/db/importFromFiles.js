@@ -69,7 +69,7 @@ export function importFromFiles({ db, dataDir, dryRun = false, now = Date.now(),
 
     const roadFile = join(dataDir, 'roadmap.json');
     if (existsSync(roadFile)) {
-      const { roadmaps } = decomposeRoadmap(JSON.parse(readFileSync(roadFile, 'utf8')), { now });
+      const { roadmaps } = decomposeRoadmap(JSON.parse(readFileSync(roadFile, 'utf8')), { now, orgId });
       report.roadmap = roadmaps.length;
       if (!dryRun) {
         db.exec('DELETE FROM roadmaps;');
@@ -93,7 +93,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const db = openDb(join(dataDir, 'sailviz.db'));
   const MIG_DIR = join(dirname(fileURLToPath(import.meta.url)), 'migrations');
   migrate(db, loadMigrations(MIG_DIR));
-  const report = importFromFiles({ db, dataDir, dryRun, orgId: process.env.MIGRATION_ORG_ID || null });
+  const orgId = process.env.MIGRATION_ORG_ID || null;
+  if (!orgId) console.log('  warn: MIGRATION_ORG_ID 未設定 — org_id が NULL で入り、名簿照合による legacy_* の付け替えが効きません');
+  const report = importFromFiles({ db, dataDir, dryRun, orgId });
   db.close();
   console.log(`${dryRun ? '[dry-run] ' : ''}import: ${JSON.stringify({ ...report, warnings: report.warnings.length })}`);
   for (const w of report.warnings) console.log('  warn:', w);

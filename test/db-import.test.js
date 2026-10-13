@@ -70,6 +70,34 @@ test('実行で行が入り、2回流しても件数が変わらない(冪等)',
   await rm(dataDir, { recursive: true, force: true });
 });
 
+test('orgId 指定の取込: practice_days・roadmaps に組織 ID が入り、名簿照合で legacy_* が本人に付け替わる', { skip: skipMsg }, async () => {
+  const { dataDir, db } = await fixture();
+  const { createAccountsRepo } = await import('../server/repos/accountsRepo.js');
+  const { applyRoster } = await import('../server/rosterLink.js');
+  const accounts = createAccountsRepo({ db });
+  const org = accounts.createOrg({ name: 'テスト部', now: 1 });
+  importFromFiles({ db, dataDir, now: 1, orgId: org.id });
+  assert.equal(db.prepare('SELECT count(*) c FROM practice_days WHERE org_id = ?').get(org.id).c, 2);
+  assert.equal(db.prepare('SELECT count(*) c FROM roadmaps WHERE org_id = ?').get(org.id).c, 1);
+  const u = accounts.createUser({ email: 'a@example.test', name: 'A', passwordHash: 'x', now: 1 });
+  accounts.markEmailVerified(u.id, 1);
+  const r = applyRoster(accounts, org.id, [{ name: 'A', email: 'a@example.test', legacyName: '村瀬 礼' }], 10);
+  assert.equal(r.reattached.reflections, 1);
+  assert.equal(r.reattached.roadmaps, 1);
+  assert.equal(db.prepare("SELECT user_id AS u FROM roadmaps WHERE legacy_name = '村瀬 礼'").get().u, u.id);
+  db.close();
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test('orgId 未指定の取込は org_id が NULL のまま(付け替えは効かない)', { skip: skipMsg }, async () => {
+  const { dataDir, db } = await fixture();
+  importFromFiles({ db, dataDir, now: 1 });
+  assert.equal(db.prepare('SELECT count(*) c FROM practice_days WHERE org_id IS NOT NULL').get().c, 0);
+  assert.equal(db.prepare('SELECT count(*) c FROM roadmaps WHERE org_id IS NOT NULL').get().c, 0);
+  db.close();
+  await rm(dataDir, { recursive: true, force: true });
+});
+
 test('取込後の往復: readProject が元ファイルと一致(_rev 除く)', { skip: skipMsg }, async () => {
   const { dataDir, db } = await fixture();
   importFromFiles({ db, dataDir, now: 1 });
