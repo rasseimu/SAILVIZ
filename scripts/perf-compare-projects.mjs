@@ -71,10 +71,11 @@ function freePort() {
   });
 }
 
+const children = new Set(); // 起動中の子サーバ(SIGINT 時の後片付け用)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitUp(port, exited) {
   for (let i = 0; i < 100; i++) {
-    try { await fetch(`http://127.0.0.1:${port}/api/session`); return; } catch { /* 起動待ち */ }
+    try { await fetch(`http://127.0.0.1:${port}/api/session`, { signal: AbortSignal.timeout(1000) }); return; } catch { /* 起動待ち */ }
     // 子が先に終了していたら待たずに失敗させる
     if (await Promise.race([exited.then(() => true), sleep(100).then(() => false)])) {
       throw new Error('server exited before it was ready');
@@ -97,6 +98,7 @@ async function measure(storage, dataDir, name) {
   delete env.SAILVIZ_WRITE_TOKEN; delete env.GEMINI_API_KEY;
   // stderr は継承して、子の失敗理由が見えるようにする
   const child = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { env, stdio: ['ignore', 'ignore', 'inherit'] });
+  children.add(child);
   // 起動直後に exited を用意する(後から once('exit') すると、先に終わった子では永久に待つ)
   const exited = new Promise((r) => { child.once('exit', r); child.once('error', r); });
   try {
@@ -113,8 +115,13 @@ async function measure(storage, dataDir, name) {
     }
     return { storage, status, bytes: Buffer.byteLength(body), body, ...stats(times) };
   } finally {
-    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
-    await exited;
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM');
+      // SIGTERM で終わらない子は 5 秒待って SIGKILL(待ち続けない)
+      const done = await Promise.race([exited.then(() => true), sleep(5000).then(() => false)]);
+      if (!done) { child.kill('SIGKILL'); await exited; }
+    }
+    children.delete(child);
   }
 }
 
@@ -183,6 +190,12 @@ async function runTarget(label, src, tmp) {
 const strip = ({ body, ...r }) => r;
 
 const tmp = mkdtempSync(join(tmpdir(), 'sailviz-perf-'));
+// Ctrl-C: 子サーバを止め、一時フォルダを消してから終了する
+process.once('SIGINT', () => {
+  for (const c of children) c.kill('SIGKILL');
+  rmSync(tmp, { recursive: true, force: true });
+  process.exit(130);
+});
 try {
   const synPath = join(tmp, 'sailviz-20260101-0900.sailviz.json'); // 取込が日付をファイル名から読むため、この形式にする
   writeSyntheticProject(synPath, SYN_TRACKS, SYN_POINTS);
