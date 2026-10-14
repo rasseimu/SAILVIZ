@@ -352,7 +352,7 @@ export function createAuthRoute({
 // ctx 用の薄い入口。accounts が無ければ(STORAGE=file)この系統のパスだけ 503 を返す。
 export function unavailableRoute(req, res, ctx) {
   if (!(ctx.path.startsWith('/api/auth/') || ctx.path === '/api/me'
-    || ctx.path === '/api/orgs' || ctx.path.startsWith('/api/orgs/'))) return false;
+    || ctx.path === '/api/orgs' || ctx.path.startsWith('/api/orgs/') || ctx.path.startsWith('/api/invites/'))) return false;
   err(res, 503, 'accounts_unavailable', 'アカウント機能は STORAGE=db のときだけ使えます');
   return true;
 }

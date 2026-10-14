@@ -27,7 +27,9 @@ export function createApi({
     })
     : unavailableRoute;
   const orgsRoute = accounts
-    ? createOrgsRoute({ accounts, writeToken: token, now: authOptions.now })
+    ? createOrgsRoute({
+      accounts, writeToken: token, now: authOptions.now, baseUrl: baseUrl || 'http://localhost:8000',
+    })
     : async () => false;
   // 閲覧ゲート: user/password が両方設定されている時のみ有効。
   // 有効時はランダム秘密を発行し、ログイン成功で Cookie に載せる(パスワードは載せない)。
