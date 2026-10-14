@@ -357,6 +357,35 @@ test('PATCH /api/me: roster_id が NULL のメンバー(組織の作成者)は�
   assert.equal(r.json.user.emailVerified, false);
   assert.equal(accounts.isMember(org.id, reg.json.user.id), true);
   assert.equal((await call('GET', '/api/me', undefined, { token: reg.json.token })).json.org.id, org.id);
+  assert.equal(accounts.isOrgAdmin(org.id, reg.json.user.id), true); // 管理者のまま
+});
+
+test('PATCH /api/me: 組織 A の作成者(roster_id NULL)かつ組織 B の名簿メンバーは、メール変更で A に残り B から外れる', { skip }, async () => {
+  const reg = await register();
+  const orgA = accounts.createOrg({ name: 'テスト部A', adminUserIds: [reg.json.user.id], now: clock.t });
+  accounts.linkMember({ orgId: orgA.id, userId: reg.json.user.id, rosterId: null, now: clock.t });
+  const orgB = accounts.createOrg({ name: 'テスト部B', adminUserIds: [], now: clock.t });
+  accounts.replaceRoster(orgB.id, [{ email: 'taro@example.test', name: 'テスト太郎' }], clock.t);
+  const rosterId = accounts.listRoster(orgB.id)[0].id;
+  accounts.linkMember({ orgId: orgB.id, userId: reg.json.user.id, rosterId, now: clock.t });
+  const r = await call('PATCH', '/api/me', { email: 'creator3@example.test' }, { token: reg.json.token });
+  assert.equal(r.status, 200);
+  assert.equal(accounts.isMember(orgA.id, reg.json.user.id), true);
+  assert.equal(accounts.isOrgAdmin(orgA.id, reg.json.user.id), true);
+  assert.equal(accounts.isMember(orgB.id, reg.json.user.id), false);
+});
+
+test('POST /api/auth/verify-email: 名簿照合が失敗したら、確認済みの記録も巻き戻る', { skip }, async () => {
+  const reg = await register();
+  const tok = tokenFrom(mailer.last('verify').url);
+  const findOrig = accounts.findRosterRowsByEmail;
+  // 確認済みの記録の後、名簿照合の段で失敗させる
+  accounts.findRosterRowsByEmail = () => { throw new Error('boom'); };
+  let status;
+  try { status = (await call('POST', '/api/auth/verify-email', { verifyToken: tok })).status; }
+  finally { accounts.findRosterRowsByEmail = findOrig; }
+  assert.notEqual(status, 200);
+  assert.equal(accounts.getUser(reg.json.user.id).email_verified_at, null);
 });
 
 test('PATCH /api/me: メールを再変更したら古い確認リンクは無効', { skip }, async () => {
