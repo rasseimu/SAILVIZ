@@ -1,7 +1,8 @@
 // server/db/importFromFiles.js
 // 既存ファイル(data/projects/*.json, progress.json, roadmap.json)→ DB の取込。
 // --dry-run で件数と警告(対応する反省が無い progress キー)を出し、書き込まない。
-// 冪等: 同じ legacy_name の器は子ごと消してから入れ直すので、2回流しても結果は同じ。
+// 同じ legacy_name の器は子ごと消してから入れ直す。ただし成功すると meta に「取込み済み」の印を書き、
+// 印があれば再実行を拒否する(S2.6-P8)。やり直しは forceReimport(CLI は --force-reimport)だけ。
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -26,9 +27,63 @@ function deletePd(db, pdId) {
   db.prepare('DELETE FROM practice_days WHERE id = ?').run(pdId);
 }
 
-export function importFromFiles({ db, dataDir, dryRun = false, now = Date.now(), orgId = null }) {
+const MARKER_KEY = 'import_completed';
+
+// 取込み済みの印(meta.import_completed)。無ければ null。
+export function readImportMarker(db) {
+  const row = db.prepare('SELECT value FROM meta WHERE key = ?').get(MARKER_KEY);
+  return row ? JSON.parse(row.value) : null;
+}
+
+function writeImportMarker(db, { at, orgId }) {
+  db.prepare(
+    `INSERT INTO meta (key, value, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+  ).run(MARKER_KEY, JSON.stringify({ at, orgId: orgId ?? null }), at);
+}
+
+// 取込みの再実行で置き換わる(消える)既存データの件数。
+export function countReimportLoss(db) {
+  const c = (t) => db.prepare(`SELECT count(*) c FROM ${t}`).get().c;
+  return { practiceDays: c('practice_days'), progress: c('reflection_progress'), comments: c('reflection_comments'), roadmaps: c('roadmaps') };
+}
+
+// 組織 ID を後から直す専用手順(再実行はしない)。
+// org_id IS NULL かつ legacy_name のある行だけを orgId にする。他組織の行・legacy_name の無い行は触らない。
+// practice_days は org_id / owner_user_id の排他(001)を守るため owner_user_id が空の行だけ。
+export function fixLegacyOrgId({ db, orgId, now = Date.now() }) {
+  if (!orgId) throw new Error('組織 ID が必要です(MIGRATION_ORG_ID)');
+  if (!db.prepare('SELECT 1 FROM orgs WHERE id = ?').get(orgId)) {
+    throw new Error(`MIGRATION_ORG_ID の組織が存在しません: ${orgId}`);
+  }
+  db.exec('BEGIN');
+  try {
+    const pd = db.prepare(
+      'UPDATE practice_days SET org_id = ? WHERE org_id IS NULL AND owner_user_id IS NULL AND legacy_name IS NOT NULL',
+    ).run(orgId).changes;
+    const rm = db.prepare('UPDATE roadmaps SET org_id = ? WHERE org_id IS NULL AND legacy_name IS NOT NULL').run(orgId).changes;
+    const marker = readImportMarker(db);
+    if (marker) writeImportMarker(db, { at: marker.at, orgId });
+    db.exec('COMMIT');
+    return { practiceDays: Number(pd), roadmaps: Number(rm) };
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+}
+
+export function importFromFiles({ db, dataDir, dryRun = false, now = Date.now(), orgId = null, forceReimport = false }) {
   const projDir = join(dataDir, 'projects');
   const report = { projects: 0, sessions: 0, tracks: 0, reflections: 0, progress: 0, comments: 0, roadmap: 0, warnings: [] };
+  // 取込み済みの印があれば、DB 運用開始後の再実行は消える(進捗・コメント等)ので拒否する。dry-run は書かないので通す。
+  if (!dryRun && !forceReimport) {
+    const marker = readImportMarker(db);
+    if (marker) {
+      const err = new Error(`取込み済みです(${new Date(marker.at).toISOString()}、組織 ${marker.orgId ?? '未設定'})。再実行は DB の進捗・コメント・ロードマップ・練習日を置き換えます。必要なら --force-reimport`);
+      err.code = 'IMPORT_ALREADY_DONE';
+      throw err;
+    }
+  }
   // 実在しない組織 ID で取り込むと、孤児の org_id が入って名簿照合も効かない。何も書かずに止める。
   if (orgId != null && !db.prepare('SELECT 1 FROM orgs WHERE id = ?').get(orgId)) {
     throw new Error(`MIGRATION_ORG_ID の組織が存在しません: ${orgId}`);
@@ -82,7 +137,10 @@ export function importFromFiles({ db, dataDir, dryRun = false, now = Date.now(),
       }
     }
 
-    if (!dryRun) db.exec('COMMIT');
+    if (!dryRun) {
+      writeImportMarker(db, { at: now, orgId });
+      db.exec('COMMIT');
+    }
   } catch (e) {
     if (!dryRun) db.exec('ROLLBACK');
     throw e;
@@ -90,19 +148,45 @@ export function importFromFiles({ db, dataDir, dryRun = false, now = Date.now(),
   return report;
 }
 
-// CLI: node server/db/importFromFiles.js <dataDir> [--dry-run]
+// CLI: node server/db/importFromFiles.js <dataDir> [--dry-run] [--force-reimport]
+//      MIGRATION_ORG_ID=<組織ID> node server/db/importFromFiles.js <dataDir> --fix-org-id
 if (import.meta.url === `file://${process.argv[1]}`) {
   const args = process.argv.slice(2);
   const dryRun = args.includes('--dry-run');
+  const force = args.includes('--force-reimport');
   const dataDir = args.find((a) => !a.startsWith('--')) || './data';
   const db = openDb(join(dataDir, 'sailviz.db'));
   const MIG_DIR = join(dirname(fileURLToPath(import.meta.url)), 'migrations');
   migrate(db, loadMigrations(MIG_DIR));
   const orgId = process.env.MIGRATION_ORG_ID || null;
+  if (args.includes('--fix-org-id')) {
+    try {
+      const r = fixLegacyOrgId({ db, orgId });
+      console.log(`fix-org-id: ${JSON.stringify(r)}(org_id=${orgId})`);
+      db.close();
+      process.exit(0);
+    } catch (e) {
+      console.error(`fix-org-id 失敗: ${e.message}`);
+      db.close();
+      process.exit(1);
+    }
+  }
+  if (force && !dryRun && readImportMarker(db)) {
+    // 先に dry-run と消える件数を出してから進む。
+    try {
+      const pre = importFromFiles({ db, dataDir, dryRun: true, orgId });
+      console.log(`[force-reimport] 取込み予定: ${JSON.stringify({ ...pre, warnings: pre.warnings.length })}`);
+      console.log(`[force-reimport] 消える件数(置き換わる既存データ): ${JSON.stringify(countReimportLoss(db))}`);
+    } catch (e) {
+      console.error(`import 失敗: ${e.message}`);
+      db.close();
+      process.exit(1);
+    }
+  }
   if (!orgId) console.warn('  warn: MIGRATION_ORG_ID 未設定 — org_id が NULL で入り、名簿照合による legacy_* の付け替えが効きません');
   let report;
   try {
-    report = importFromFiles({ db, dataDir, dryRun, orgId });
+    report = importFromFiles({ db, dataDir, dryRun, orgId, forceReimport: force });
   } catch (e) {
     console.error(`import 失敗: ${e.message}`);
     db.close();
