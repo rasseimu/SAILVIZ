@@ -30,8 +30,15 @@ export function migrate(db, migrations, now = Date.now()) {
 
 // server/db/migrations/ の *.sql を {version, sql} に読む。ファイル名先頭の数字が version。
 export function loadMigrations(dir) {
-  return readdirSync(dir)
+  const list = readdirSync(dir)
     .filter((f) => /^\d+.*\.sql$/.test(f))
     .map((f) => ({ version: Number(f.match(/^(\d+)/)[1]), sql: readFileSync(join(dir, f), 'utf8'), file: f }))
-    .sort((a, b) => a.version - b.version);
+    .sort((a, b) => a.version - b.version || a.file.localeCompare(b.file));
+  // 同じ version が2つあると、新しい DB では起動失敗、適用済み DB では片方が黙ってスキップされる。
+  for (let i = 1; i < list.length; i += 1) {
+    if (list[i].version === list[i - 1].version) {
+      throw new Error(`マイグレーションの version が重複: ${list[i - 1].file} と ${list[i].file}`);
+    }
+  }
+  return list;
 }
