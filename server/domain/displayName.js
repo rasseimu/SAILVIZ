@@ -4,7 +4,7 @@
 // メールの @ 前は使わない(学籍番号が同じ組織の人に見えるため)。
 import { createHash } from 'node:crypto';
 
-export const DEFAULT_VISIBILITY = 'self';
+export const DEFAULT_VISIBILITY = 'private'; // C3 の「self」＝自分のみ＝private(§5.1 の3値に self は無い)
 
 export function displayNameFor(user) {
   const name = typeof user?.name === 'string' ? user.name.trim() : '';

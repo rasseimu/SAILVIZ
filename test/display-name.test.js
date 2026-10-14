@@ -25,8 +25,8 @@ test('メールの @ 前を含まない', () => {
   assert.ok(!n.includes('abcd1234') && !n.includes('@'));
 });
 
-test('defaultVisibility: null・未設定は self、設定済みはそのまま', () => {
-  assert.equal(visibilityFor({ default_visibility: null }), 'self');
-  assert.equal(visibilityFor({}), 'self');
+test('defaultVisibility: null・未設定は private、設定済みはそのまま', () => {
+  assert.equal(visibilityFor({ default_visibility: null }), 'private');
+  assert.equal(visibilityFor({}), 'private');
   assert.equal(visibilityFor({ default_visibility: 'org' }), 'org');
 });
