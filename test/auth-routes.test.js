@@ -453,13 +453,13 @@ test('verify-email: new_email が NULL の verify トークンは 422', { skip }
   assert.equal(accounts.getUser(reg.json.user.id).email_verified_at, null);
 });
 
-test('DELETE /api/me: パスワード必須(誤りは 403)。成功で全トークン失効・個人情報の匿名化・同じメールで再登録できる', { skip }, async () => {
+test('DELETE /api/me: パスワード必須(誤りは 422)。成功で全トークン失効・個人情報の匿名化・同じメールで再登録できる', { skip }, async () => {
   const reg = await register();
   const org = accounts.createOrg({ name: 'テスト部', adminUserIds: [], now: clock.t });
   accounts.linkMember({ orgId: org.id, userId: reg.json.user.id, now: clock.t });
   assert.equal((await call('DELETE', '/api/me', { password: REG.password })).status, 401);
   const wrong = await call('DELETE', '/api/me', { password: 'wrong-pass-1' }, { token: reg.json.token });
-  assert.equal(wrong.status, 403); assert.equal(wrong.json.error.code, 'invalid_password');
+  assert.equal(wrong.status, 422); assert.equal(wrong.json.error.code, 'invalid_password');
   assert.equal((await call('GET', '/api/me', undefined, { token: reg.json.token })).status, 200); // 消えていない
   const ok = await call('DELETE', '/api/me', { password: REG.password }, { token: reg.json.token });
   assert.deepEqual(ok.json, { ok: true });
