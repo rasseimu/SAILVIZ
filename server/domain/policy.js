@@ -18,14 +18,27 @@ export const anonymous = () => ({ kind: 'anonymous' });
 export const user = (userId, orgIds = []) => ({ kind: 'user', userId, orgIds: [...orgIds] });
 export const legacy = () => ({ kind: 'legacy' });
 
+// 旧共有ログイン(閲覧ゲート + 書込トークン)の主体。S2.5。
+//   orgId    芝浦の組織 ID(取込みと同じ MIGRATION_ORG_ID。未設定なら null)。
+//            null のときは組織で絞らず「今の挙動」(全部読める・書込トークンで書ける)を保つ安全側。
+//   canWrite 共有の書込トークンを持っているか。
+// legacy() との違い: canWrite を持ち、トークンがあれば自組織のセッション・反省・レース・
+// ロードマップ・議事録を書ける(現行の互換 API の書き込みを壊さない)。
+// 声の反省(voice)は互換 API に無く private なので、作成者だけのまま。
+export const legacySharedPrincipal = ({ orgId = null, canWrite = false } = {}) => ({
+  kind: 'legacy', shared: true, orgId: orgId || null, canWrite: !!canWrite,
+});
+
 const isLoggedIn = (s) => !!s && (s.kind === 'user' || s.kind === 'legacy');
 const orgIdsOf = (s) => {
   if (!s) return [];
-  if (s.kind === 'legacy') return [LEGACY_ORG_ID];
+  if (s.kind === 'legacy') return s.shared ? (s.orgId != null ? [s.orgId] : []) : [LEGACY_ORG_ID];
   if (s.kind === 'user') return s.orgIds || [];
   return [];
 };
-const isOrgMember = (s, t) => !!t && t.orgId != null && orgIdsOf(s).includes(t.orgId);
+const isSharedLegacy = (s) => !!s && s.kind === 'legacy' && s.shared === true;
+const isUnscopedLegacy = (s) => isSharedLegacy(s) && s.orgId == null;
+const isOrgMember = (s, t) => !!t && (isUnscopedLegacy(s) || (t.orgId != null && orgIdsOf(s).includes(t.orgId)));
 const isOwner = (s, t) => !!s && s.kind === 'user' && s.userId != null && t.ownerId != null && s.userId === t.ownerId;
 const isCrew = (s, t) => !!s && s.kind === 'user' && s.userId != null && Array.isArray(t.crewIds) && t.crewIds.includes(s.userId);
 
@@ -60,6 +73,14 @@ export function canRead(subject, target) {
 // 書き込みは作成者だけ。例外: 練習日の議事録は組織メンバーなら誰でも作り直せる。
 export function canWrite(subject, target) {
   if (!target) return false;
+  if (isSharedLegacy(subject)) {
+    switch (target.kind) {
+      case 'session': case 'reflection': case 'race': case 'roadmap': case 'minutes':
+        return subject.canWrite && isOrgMember(subject, target);
+      default:
+        return false;
+    }
+  }
   switch (target.kind) {
     case 'session':
     case 'reflection':
@@ -81,11 +102,13 @@ export function canReadReflectionExtras(subject, reflection) {
 
 // コメントは、見られるログインユーザーが書ける。
 export function canComment(subject, reflection) {
+  if (isSharedLegacy(subject) && !subject.canWrite) return false;
   return isLoggedIn(subject) && canReadReflectionExtras(subject, reflection);
 }
 
 // 進捗の更新は作成者と組織メンバー(現行どおり)。
 export function canUpdateProgress(subject, reflection) {
+  if (isSharedLegacy(subject) && !subject.canWrite) return false;
   return !!reflection && reflection.kind === 'reflection'
     && (isOwner(subject, reflection) || isOrgMember(subject, reflection));
 }
