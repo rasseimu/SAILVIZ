@@ -13,6 +13,7 @@ import { decomposeProject, assembleProject } from '../domain/projectRows.js';
 import {
   decomposeProgress, assembleProgress, decomposeRoadmap, assembleRoadmap,
 } from '../domain/overlayRows.js';
+import { syncRoadmaps } from '../db/roadmapSync.js';
 import { projectLabel } from '../../src/projectfs.js';
 import { jstMidnightMs } from '../sensorimport.js';
 import {
@@ -182,9 +183,9 @@ export function createDbRepo({ db, dataDir }) {
           for (const r of progress) insertRow(db, 'reflection_progress', r);
           for (const c of comments) insertRow(db, 'reflection_comments', c);
         } else if (name === 'roadmap') {
-          db.exec('DELETE FROM roadmaps;');
+          // 全消しにしない: 名簿照合で付け替え済みの user_id・org_id を保つ(S2.6-P5)。
           const { roadmaps } = decomposeRoadmap(obj, { now });
-          for (const r of roadmaps) insertRow(db, 'roadmaps', r);
+          syncRoadmaps(db, roadmaps);
         }
         db.exec('COMMIT');
       } catch (e) {

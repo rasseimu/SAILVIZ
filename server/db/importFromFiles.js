@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { decomposeProject } from '../domain/projectRows.js';
 import { decomposeProgress, decomposeRoadmap } from '../domain/overlayRows.js';
+import { syncRoadmaps } from './roadmapSync.js';
 import { openDb } from './connection.js';
 import { migrate, loadMigrations } from './migrate.js';
 
@@ -72,8 +73,8 @@ export function importFromFiles({ db, dataDir, dryRun = false, now = Date.now(),
       const { roadmaps } = decomposeRoadmap(JSON.parse(readFileSync(roadFile, 'utf8')), { now, orgId });
       report.roadmap = roadmaps.length;
       if (!dryRun) {
-        db.exec('DELETE FROM roadmaps;');
-        for (const r of roadmaps) insertRow(db, 'roadmaps', r);
+        // 全消しにしない: 付け替え済みの user_id・org_id を保つ(S2.6-P5)。
+        syncRoadmaps(db, roadmaps, { orgId });
       }
     }
 
