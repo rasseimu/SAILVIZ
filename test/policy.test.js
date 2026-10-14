@@ -181,11 +181,15 @@ test('共有ログインの読み取り: §5.8 の表 (private は読めない�
   }
 });
 
-test('共有ログインの書き込み: トークンがあれば自組織の対象を書ける', () => {
+test('共有ログインの書き込み: トークンがあれば自組織の見える対象を書ける (private は不可)', () => {
   for (const kind of ['session', 'reflection', 'race', 'roadmap', 'minutes']) {
-    assert.equal(canWrite(W, mkS(kind, { visibility: 'private' })), true, `${kind} トークンあり`);
-    assert.equal(canWrite(R, mkS(kind, { visibility: 'private' })), false, `${kind} トークンなし`);
-    assert.equal(canWrite(W, mkS(kind, { orgId: 'other' })), false, `${kind} 他組織`);
+    assert.equal(canWrite(W, mkS(kind, { visibility: 'org' })), true, `${kind} トークンあり`);
+    assert.equal(canWrite(R, mkS(kind, { visibility: 'org' })), false, `${kind} トークンなし`);
+    assert.equal(canWrite(W, mkS(kind, { orgId: 'other', visibility: 'org' })), false, `${kind} 他組織`);
+  }
+  for (const kind of ['session', 'reflection']) {
+    assert.equal(canWrite(W, mkS(kind, { visibility: 'private' })), false, `${kind} private は書けない`);
+    assert.equal(canWrite(W, mkS(kind, { visibility: 'public' })), true, `${kind} public`);
   }
   assert.equal(canWrite(W, mkS('voice')), false);
   assert.equal(canWrite(W, { kind: 'unknown', orgId: SH }), false);
@@ -209,6 +213,24 @@ test('組織未設定(null)の共有ログインは今の挙動: 全部読める
   assert.equal(canWrite(U, t), true);
   assert.equal(canWrite(UR, t), false);
   assert.equal(canRead(UR, mkS('session', { visibility: 'private', orgId: null })), false);
+});
+
+test('組織未設定の共有ログインは org 付きの他組織の対象を読めない・書けない', () => {
+  for (const orgId of [null, '']) {
+    const U = legacySharedPrincipal({ orgId, canWrite: true });
+    for (const kind of ['session', 'reflection']) {
+      const t = mkS(kind, { visibility: 'org', orgId: 'other' });
+      assert.equal(canRead(U, t), false, `${kind} read orgId=${JSON.stringify(orgId)}`);
+      assert.equal(canWrite(U, t), false, `${kind} write orgId=${JSON.stringify(orgId)}`);
+    }
+    const m = mkS('minutes', { orgId: 'other' });
+    assert.equal(canRead(U, m), false);
+    assert.equal(canWrite(U, m), false);
+    assert.equal(canUpdateProgress(U, mkS('reflection', { visibility: 'org', orgId: 'other' })), false);
+    // 組織なしの対象には一致する
+    assert.equal(canRead(U, mkS('minutes', { orgId: null })), true);
+    assert.equal(canWrite(U, mkS('session', { visibility: 'org', orgId: null })), true);
+  }
 });
 
 test('userId なしの user は作成者に一致しない', () => {

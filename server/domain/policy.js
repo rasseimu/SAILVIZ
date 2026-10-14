@@ -16,11 +16,13 @@ export const LEGACY_ORG_ID = 'shibaura';
 
 export const anonymous = () => ({ kind: 'anonymous' });
 export const user = (userId, orgIds = []) => ({ kind: 'user', userId, orgIds: [...orgIds] });
+// 旧版。ルートへの組み込み時に legacySharedPrincipal に寄せる予定(固定 'shibaura' は使わなくなる)。
 export const legacy = () => ({ kind: 'legacy' });
 
 // 旧共有ログイン(閲覧ゲート + 書込トークン)の主体。S2.5。
 //   orgId    芝浦の組織 ID(取込みと同じ MIGRATION_ORG_ID。未設定なら null)。
-//            null のときは組織で絞らず「今の挙動」(全部読める・書込トークンで書ける)を保つ安全側。
+//            空文字も null 扱い。null のときは「組織未所属(orgId が null)の旧データ」にだけ
+//            組織メンバーとして一致し、他組織(orgId あり)の対象は読めない・書けない。
 //   canWrite 共有の書込トークンを持っているか。
 // legacy() との違い: canWrite を持ち、トークンがあれば自組織のセッション・反省・レース・
 // ロードマップ・議事録を書ける(現行の互換 API の書き込みを壊さない)。
@@ -38,7 +40,10 @@ const orgIdsOf = (s) => {
 };
 const isSharedLegacy = (s) => !!s && s.kind === 'legacy' && s.shared === true;
 const isUnscopedLegacy = (s) => isSharedLegacy(s) && s.orgId == null;
-const isOrgMember = (s, t) => !!t && (isUnscopedLegacy(s) || (t.orgId != null && orgIdsOf(s).includes(t.orgId)));
+// 組織未設定の共有ログインは、組織未所属(orgId が null)の旧データにだけ一致する。他組織の対象には一致しない。
+const isOrgMember = (s, t) => !!t && (isUnscopedLegacy(s)
+  ? t.orgId == null
+  : (t.orgId != null && orgIdsOf(s).includes(t.orgId)));
 const isOwner = (s, t) => !!s && s.kind === 'user' && s.userId != null && t.ownerId != null && s.userId === t.ownerId;
 const isCrew = (s, t) => !!s && s.kind === 'user' && s.userId != null && Array.isArray(t.crewIds) && t.crewIds.includes(s.userId);
 
@@ -75,7 +80,11 @@ export function canWrite(subject, target) {
   if (!target) return false;
   if (isSharedLegacy(subject)) {
     switch (target.kind) {
-      case 'session': case 'reflection': case 'race': case 'roadmap': case 'minutes':
+      case 'session': case 'reflection':
+        // 読めない対象(private)は書けない。書き込みの範囲を読み取りより広げない。
+        return subject.canWrite && canRead(subject, target);
+      case 'race': case 'roadmap': case 'minutes':
+        // TODO(未確認): roadmap は canRead に case が無い(S2.5-P2 のルート組み込み時に決める)
         return subject.canWrite && isOrgMember(subject, target);
       default:
         return false;
