@@ -129,7 +129,21 @@ test('orgs / org_admins: 作成者を管理者に・重複は無視', { skip: sk
   db.close();
 });
 
-test('org_roster: 置き換え・メールの正規化と検索', { skip: skipMsg }, () => {
+test('removeOrgAdminsOfUser: そのユーザーの管理者行だけを全組織から消す(他人の行は残る)', { skip: skipMsg }, () => {
+  const { db, repo } = setup();
+  const a = repo.createUser({ email: 'a@example.test' });
+  const b = repo.createUser({ email: 'b@example.test' });
+  const o1 = repo.createOrg({ name: '合成部1', adminUserIds: [a.id, b.id] });
+  const o2 = repo.createOrg({ name: '合成部2', adminUserIds: [a.id] });
+  assert.equal(repo.removeOrgAdminsOfUser(a.id), 2);
+  assert.deepEqual(repo.listOrgAdmins(o1.id), [b.id]);
+  assert.deepEqual(repo.listOrgAdmins(o2.id), []); // 唯一の管理者でも組織は残る(管理者不在)
+  assert.ok(repo.getOrg(o2.id));
+  assert.equal(repo.removeOrgAdminsOfUser(a.id), 0);
+  db.close();
+});
+
+test('org_roster: 置き換え・メールの正規化と検索',{ skip: skipMsg }, () => {
   const { db, repo } = setup();
   const o = repo.createOrg({ name: '合成部' });
   const { rows } = repo.replaceRoster(o.id, [

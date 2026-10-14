@@ -147,6 +147,11 @@ export function createAccountsRepo({ db }) {
     countOrgsAdministeredBy(userId) {
       return Number(db.prepare('SELECT COUNT(*) AS n FROM org_admins WHERE user_id = ?').get(userId).n);
     },
+    // そのユーザーの org_admins 行を全組織ぶん消す(§4.3 退会)。消した行数を返す。
+    // 唯一の管理者でも組織は残る(管理者不在になる)。正本に定めが無いため拒否・移譲はしない。
+    removeOrgAdminsOfUser(userId) {
+      return Number(db.prepare('DELETE FROM org_admins WHERE user_id = ?').run(userId).changes);
+    },
     listOrgAdmins(orgId) {
       return db.prepare('SELECT user_id FROM org_admins WHERE org_id = ? ORDER BY user_id').all(orgId)
         .map((r) => r.user_id);
