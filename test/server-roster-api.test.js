@@ -126,7 +126,17 @@ test('GET /members: name 未設定のメンバーは「ユーザー」+ID由来4
   const row = list.find((x) => x.userId === nn.u.id);
   assert.match(row.name, /^ユーザー[0-9a-f]{4}$/);
   assert.ok(list.every((x) => typeof x.name === 'string'));
-  accounts.unlinkMember?.(org.id, nn.u.id);
+  accounts.unlinkMember(org.id, nn.u.id);
+});
+
+test('PUT roster の応答 {linked}: name 未設定の人は「ユーザー」+ID由来4文字(S2.3-P9)', { skip }, async () => {
+  const nn = mk('nn2@example.test', null);
+  const cur = await (await call('GET', R(), adminTok)).json();
+  const r = await (await call('PUT', R(), adminTok, { roster: [...cur, { name: '無名', email: 'nn2@example.test' }] })).json();
+  const row = r.linked.find((x) => x.userId === nn.u.id);
+  assert.match(row.name, /^ユーザー[0-9a-f]{4}$/);
+  assert.ok(r.linked.every((x) => typeof x.name === 'string') && r.unlinked.every((x) => typeof x.name === 'string'));
+  await call('PUT', R(), adminTok, { roster: cur }); // 後続のテストのために名簿を元に戻す
 });
 
 test('名簿から外すと解除(unlinked)。作成者・管理者は残り、旧メンバーは members から消える', { skip }, async () => {
