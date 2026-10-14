@@ -81,8 +81,8 @@ export function canWrite(subject, target) {
   if (isSharedLegacy(subject)) {
     switch (target.kind) {
       case 'session': case 'reflection':
-        // 読めない対象(private)は書けない。書き込みの範囲を読み取りより広げない。
-        return subject.canWrite && canRead(subject, target);
+        // 自組織の対象で、かつ読めるもの(org・public)だけ。他組織の public は読めても書けない。
+        return subject.canWrite && isOrgMember(subject, target) && canRead(subject, target);
       case 'race': case 'roadmap': case 'minutes':
         // TODO(未確認): roadmap は canRead に case が無い(S2.5-P2 のルート組み込み時に決める)
         return subject.canWrite && isOrgMember(subject, target);

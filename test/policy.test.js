@@ -233,6 +233,21 @@ test('組織未設定の共有ログインは org 付きの他組織の対象を
   }
 });
 
+test('共有ログインは他組織の public セッション・反省を書けない (読めても書けない)', () => {
+  const U = legacySharedPrincipal({ orgId: null, canWrite: true });
+  for (const P of [W, U]) {
+    for (const kind of ['session', 'reflection']) {
+      const other = mkS(kind, { visibility: 'public', orgId: 'other' });
+      assert.equal(canRead(P, other), true);
+      assert.equal(canWrite(P, other), false, `${kind} 他組織 public`);
+    }
+  }
+  for (const kind of ['session', 'reflection']) {
+    assert.equal(canWrite(W, mkS(kind, { visibility: 'public' })), true);
+    assert.equal(canWrite(W, mkS(kind, { visibility: 'org' })), true);
+  }
+});
+
 test('userId なしの user は作成者に一致しない', () => {
   const s = user(undefined, [ORG]);
   assert.equal(canRead(s, { kind: 'voice', ownerId: undefined, orgId: ORG }), false);
