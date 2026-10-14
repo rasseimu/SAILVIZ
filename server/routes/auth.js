@@ -275,7 +275,7 @@ export function createAuthRoute({
       const ok = await verifyPassword(typeof body.password === 'string' ? body.password : '', stored);
       if (!ok || !id.user.password_hash) {
         limiters.deletePassword.record(id.user.id, now());
-        return err(res, 403, 'invalid_password', 'パスワードが違います');
+        return err(res, 422, 'invalid_password', 'パスワードが違います');
       }
       const uid = id.user.id;
       accounts.withTx(() => {
