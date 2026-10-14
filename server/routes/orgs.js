@@ -6,6 +6,7 @@ import { send } from './http.js';
 import { resolveIdentity } from '../accountAuth.js';
 import { validateRosterRows } from '../domain/rosterInput.js';
 import { applyRoster } from '../rosterLink.js';
+import { displayNameFor } from '../domain/displayName.js';
 
 const MAX_BODY = 512 * 1024; // 1000 行の名簿が収まる大きさ
 const err = (res, status, code, message) => send(res, status, { error: { code, message } });
@@ -63,7 +64,7 @@ export function createOrgsRoute({ accounts, writeToken, now = () => Date.now() }
     },
     'GET members': async (req, res, orgId) => {
       if (!gate(req, res, orgId, 'member')) return;
-      send(res, 200, accounts.listMembers(orgId).map((m) => ({ userId: m.user_id, name: accounts.getUser(m.user_id)?.name ?? null })));
+      send(res, 200, accounts.listMembers(orgId).map((m) => ({ userId: m.user_id, name: displayNameFor(accounts.getUser(m.user_id) ?? { id: m.user_id }) })));
     },
   };
 
