@@ -94,5 +94,5 @@ test('mail: log アダプタはリンクを出し、宛先はマスクする。s
   assert.equal(stub.last('reset').url, 'u');
   assert.equal(stub.last('verify'), null);
   assert.ok(createMailer({}).send); // 既定は log
-  assert.throws(() => createMailer({ provider: 'brevo' }), /未実装/);
+  assert.throws(() => createMailer({ provider: 'nope' }), /未実装/);
 });

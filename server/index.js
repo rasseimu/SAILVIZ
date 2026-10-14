@@ -27,7 +27,10 @@ const { repo, db } = openRepo({ storage: STORAGE, dataDir: DATA_DIR });
 const accounts = db ? createAccountsRepo({ db }) : null;
 // メール送信のアダプタ。MAIL_PROVIDER 未設定は log(確認リンクをログに出すだけ)。Brevo は S2.8。
 const MAIL_PROVIDER = process.env.MAIL_PROVIDER || 'log';
-const mailer = createMailer({ provider: MAIL_PROVIDER, redactToken: process.env.NODE_ENV === 'production' });
+const mailer = createMailer({
+  provider: MAIL_PROVIDER, redactToken: process.env.NODE_ENV === 'production',
+  apiKey: process.env.BREVO_API_KEY, from: process.env.MAIL_FROM,
+});
 // メールのリンク先(Web の URL)。未設定ならローカル。本番の値の設定は S2.8 のデプロイ手順で扱う。
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
 
