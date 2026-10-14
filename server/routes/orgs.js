@@ -7,6 +7,7 @@ import { resolveIdentity } from '../accountAuth.js';
 import { validateRosterRows } from '../domain/rosterInput.js';
 import { applyRoster } from '../rosterLink.js';
 import { displayNameFor } from '../domain/displayName.js';
+import { inviteStatus, validateInviteInput, expiresAtFromDays } from '../domain/invites.js';
 
 const MAX_BODY = 512 * 1024; // 1000 行の名簿が収まる大きさ
 const err = (res, status, code, message) => send(res, status, { error: { code, message } });
@@ -22,7 +23,9 @@ async function readJson(req) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-export function createOrgsRoute({ accounts, writeToken, now = () => Date.now() }) {
+export function createOrgsRoute({
+  accounts, writeToken, now = () => Date.now(), baseUrl = 'http://localhost:8000',
+}) {
   // 認証→組織の存在→権限。失敗したら応答を送って null。
   const gate = (req, res, orgId, need) => {
     const id = resolveIdentity(req, { writeToken, repo: accounts, now: now() });
@@ -68,13 +71,101 @@ export function createOrgsRoute({ accounts, writeToken, now = () => Date.now() }
     },
   };
 
+  // ---- 招待コード(S2.9 / H13)----
+  const inviteUrl = (code) => `${String(baseUrl).replace(/\/+$/, '')}/?invite=${encodeURIComponent(code)}`;
+  const dto = (i) => ({ id: i.id, code: i.code, url: inviteUrl(i.code), expiresAt: i.expires_at, maxUses: i.max_uses });
+  const REASON_MESSAGE = {
+    revoked: '招待は失効しています', expired: '招待の有効期限が切れています', exhausted: '招待の利用上限に達しています',
+  };
+  // 要ログイン+メール確認済み。失敗したら応答を送って null。
+  const verifiedUser = (req, res) => {
+    const id = resolveIdentity(req, { writeToken, repo: accounts, now: now() });
+    if (id?.kind !== 'user') { err(res, 401, 'unauthorized', 'ログインが必要です'); return null; }
+    if (id.user.email_verified_at == null) {
+      err(res, 403, 'email_not_verified', 'メールアドレスを確認してから招待を使ってください'); return null;
+    }
+    return id;
+  };
+
+  const inviteHandlers = {
+    'POST invites': async (req, res, orgId) => {
+      const id = gate(req, res, orgId, 'admin'); if (!id) return;
+      let body;
+      try { body = await readJson(req); } catch (e) {
+        return err(res, 422, 'invalid_input', e && e.code === 'too_large' ? '本文が大きすぎます' : 'JSON を読めません');
+      }
+      if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+        return err(res, 422, 'invalid_input', '本文は JSON オブジェクトにしてください');
+      }
+      const v = validateInviteInput(body);
+      if (!v.ok) return err(res, 422, 'invalid_input', v.message);
+      const t = now();
+      const inv = accounts.createInvite({
+        orgId, createdByUserId: id.user.id, expiresAt: expiresAtFromDays(v.expiresInDays, t), maxUses: v.maxUses, now: t,
+      });
+      send(res, 201, dto(inv));
+    },
+    'GET invites': async (req, res, orgId) => {
+      if (!gate(req, res, orgId, 'admin')) return;
+      send(res, 200, accounts.listActiveInvites(orgId, now()).map((i) => ({ ...dto(i), useCount: i.use_count })));
+    },
+  };
+
+  async function handleInviteRevoke(req, res, orgId, inviteId) {
+    if (!gate(req, res, orgId, 'admin')) return;
+    const inv = accounts.getInvite(inviteId);
+    if (!inv || inv.org_id !== orgId) return err(res, 404, 'not_found', '招待が見つかりません');
+    accounts.revokeInvite(orgId, inviteId, now()); // 既に失効済みでも ok(冪等)
+    send(res, 200, { ok: true });
+  }
+
+  async function handleInvitePreview(req, res, code) {
+    if (!verifiedUser(req, res)) return;
+    const inv = accounts.getInviteByCode(code);
+    const org = inv && accounts.getOrg(inv.org_id);
+    if (!inv || !org) return err(res, 404, 'not_found', '招待が見つかりません');
+    const status = inviteStatus(inv, now());
+    send(res, 200, status === 'valid'
+      ? { orgId: org.id, orgName: org.name, valid: true }
+      : { orgId: org.id, orgName: org.name, valid: false, reason: status });
+  }
+
+  async function handleInviteAccept(req, res, code) {
+    const id = verifiedUser(req, res); if (!id) return;
+    const inv = accounts.getInviteByCode(code);
+    if (!inv || !accounts.getOrg(inv.org_id)) return err(res, 404, 'not_found', '招待が見つかりません');
+    const r = accounts.acceptInvite({ code, userId: id.user.id, now: now() });
+    if (r.status === 'joined' || r.status === 'already') return send(res, 200, { orgId: r.orgId });
+    if (r.status === 'not_found') return err(res, 404, 'not_found', '招待が見つかりません');
+    return err(res, 410, `invite_${r.status}`, REASON_MESSAGE[r.status]);
+  }
+
+  const dec = (s) => { try { return decodeURIComponent(s); } catch { return null; } };
+
   return async function orgsRoute(req, res, ctx) {
-    const m = /^\/api\/orgs\/([^/]+)\/(roster|members)$/.exec(ctx.path);
+    let m = /^\/api\/invites\/([^/]+)(\/accept)?$/.exec(ctx.path);
+    if (m) {
+      const code = dec(m[1]);
+      const accept = !!m[2];
+      if (!((accept && ctx.method === 'POST') || (!accept && ctx.method === 'GET'))) return false;
+      if (code === null) { err(res, 404, 'not_found', '招待が見つかりません'); return true; }
+      await (accept ? handleInviteAccept : handleInvitePreview)(req, res, code);
+      return true;
+    }
+    m = /^\/api\/orgs\/([^/]+)\/invites\/([^/]+)\/revoke$/.exec(ctx.path);
+    if (m) {
+      if (ctx.method !== 'POST') return false;
+      const orgId = dec(m[1]); const inviteId = dec(m[2]);
+      if (orgId === null || inviteId === null) { err(res, 404, 'not_found', '組織が見つかりません'); return true; }
+      await handleInviteRevoke(req, res, orgId, inviteId);
+      return true;
+    }
+    m = /^\/api\/orgs\/([^/]+)\/(roster|members|invites)$/.exec(ctx.path);
     if (!m) return false;
-    const h = handlers[`${ctx.method} ${m[2]}`];
+    const h = handlers[`${ctx.method} ${m[2]}`] || inviteHandlers[`${ctx.method} ${m[2]}`];
     if (!h) return false;
-    let orgId;
-    try { orgId = decodeURIComponent(m[1]); } catch { err(res, 404, 'not_found', '組織が見つかりません'); return true; }
+    const orgId = dec(m[1]);
+    if (orgId === null) { err(res, 404, 'not_found', '組織が見つかりません'); return true; }
     await h(req, res, orgId);
     return true;
   };
