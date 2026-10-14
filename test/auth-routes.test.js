@@ -179,6 +179,18 @@ test('login: 未確認でも使える(§4.2)。古いパラメータのハッシ
   assert.equal((await call('POST', '/api/auth/login', { email: 'old@example.test', password: 'pass-word-1' })).status, 200);
 });
 
+test('GET /api/me・login: name 未設定のユーザーは「ユーザー」+ID由来4文字、defaultVisibility は private(S2.3-P9)。DB は変えない', { skip }, async () => {
+  const u = accounts.createUser({ email: 'noname@example.test', name: null, passwordHash: await hashPassword('pass-word-1', FAST) });
+  const login = await call('POST', '/api/auth/login', { email: 'noname@example.test', password: 'pass-word-1' });
+  assert.match(login.json.user.name, /^ユーザー[0-9a-f]{4}$/);
+  const me = await call('GET', '/api/me', undefined, { token: login.json.token });
+  assert.equal(me.json.user.name, login.json.user.name);
+  assert.equal(me.json.user.defaultVisibility, 'private');
+  assert.ok(!me.json.user.name.includes('noname'));
+  assert.equal(accounts.getUser(u.id).name, null);
+  assert.equal(accounts.getUser(u.id).default_visibility, null);
+});
+
 test('login: 不在・パスワード未設定のユーザーは、ダミーと同じ文字列でも通らず同じ 401', { skip }, async () => {
   // ダミーのハッシュで照合する実装(時間をそろえる)の副作用で通ってしまわないことの確認。
   // 時間そのものの測定は不安定なのでテストしない(実装はコメントとレビューで担保)。

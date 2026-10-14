@@ -3,6 +3,7 @@
 // 名簿の「旧名簿の氏名」と一致する legacy_* のデータを本人に付け替える。
 // 照合はメール確認時(linkVerifiedUser)と名簿更新時(applyRoster)の両方で行う。どちらも冪等。
 // 同期関数だけ(accountsRepo.withTx の制約)。HTTP には触れない。
+import { displayNameFor } from './domain/displayName.js';
 
 const emptyCounts = () => ({ reflections: 0, sessions: 0, roadmaps: 0 });
 const addCounts = (a, b) => ({
@@ -40,7 +41,7 @@ export function linkVerifiedUser(accounts, user, now = Date.now()) {
 // 名簿全体の置き換え→照合し直し。{ linked:[{userId,name}], unlinked:[{userId,name}], reattached }
 // 重複メールは accountsRepo.replaceRoster が code='ROSTER_DUPLICATE_EMAIL' で投げる(何も変えない)。
 export function applyRoster(accounts, orgId, rows, now = Date.now()) {
-  const brief = (id) => ({ userId: id, name: accounts.getUser(id)?.name ?? null });
+  const brief = (id) => ({ userId: id, name: displayNameFor(accounts.getUser(id) ?? { id }) });
   return accounts.withTx(() => {
     const { rows: saved, detached } = accounts.replaceRoster(orgId, rows, now);
     const unlinked = [];

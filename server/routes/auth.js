@@ -14,6 +14,7 @@ import { createRateLimiter } from '../domain/rateLimit.js';
 import { validateOrgName, MAX_ORGS_PER_USER } from '../domain/orgCreate.js';
 import { buildLink } from '../mail.js';
 import { linkVerifiedUser } from '../rosterLink.js';
+import { displayNameFor, visibilityFor } from '../domain/displayName.js';
 
 const MIN = 60 * 1000;
 const MAX_BODY = 64 * 1024;
@@ -48,9 +49,9 @@ async function readJson(req) {
 export const publicUser = (u) => ({
   id: u.id,
   email: u.email,
-  name: u.name ?? null,
+  name: displayNameFor(u),
   affiliationText: u.affiliation_text ?? null,
-  defaultVisibility: u.default_visibility ?? null,
+  defaultVisibility: visibilityFor(u),
   emailVerified: u.email_verified_at != null,
 });
 

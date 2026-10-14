@@ -119,6 +119,26 @@ test('GET /members: 組織メンバーは見られる(紐付け済み・{userId,
   assert.equal((await call('GET', '/api/orgs/o_nope/members', memberTok)).status, 404);
 });
 
+test('GET /members: name 未設定のメンバーは「ユーザー」+ID由来4文字(S2.3-P9)', { skip }, async () => {
+  const nn = mk('nn@example.test', null);
+  accounts.linkMember({ orgId: org.id, userId: nn.u.id, rosterId: null, now: clock });
+  const list = await (await call('GET', `/api/orgs/${org.id}/members`, memberTok)).json();
+  const row = list.find((x) => x.userId === nn.u.id);
+  assert.match(row.name, /^ユーザー[0-9a-f]{4}$/);
+  assert.ok(list.every((x) => typeof x.name === 'string'));
+  accounts.unlinkMember(org.id, nn.u.id);
+});
+
+test('PUT roster の応答 {linked}: name 未設定の人は「ユーザー」+ID由来4文字(S2.3-P9)', { skip }, async () => {
+  const nn = mk('nn2@example.test', null);
+  const cur = await (await call('GET', R(), adminTok)).json();
+  const r = await (await call('PUT', R(), adminTok, { roster: [...cur, { name: '無名', email: 'nn2@example.test' }] })).json();
+  const row = r.linked.find((x) => x.userId === nn.u.id);
+  assert.match(row.name, /^ユーザー[0-9a-f]{4}$/);
+  assert.ok(r.linked.every((x) => typeof x.name === 'string') && r.unlinked.every((x) => typeof x.name === 'string'));
+  await call('PUT', R(), adminTok, { roster: cur }); // 後続のテストのために名簿を元に戻す
+});
+
 test('名簿から外すと解除(unlinked)。作成者・管理者は残り、旧メンバーは members から消える', { skip }, async () => {
   const r = await call('PUT', R(), adminTok, { roster: [{ name: '未登録', email: 'nobody@example.test' }] });
   const j = await r.json();
