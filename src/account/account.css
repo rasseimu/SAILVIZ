@@ -45,6 +45,11 @@
 .ac-table { border-collapse: collapse; width: 100%; font-size: 14px; }
 .ac-table th, .ac-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--ac-border); overflow-wrap: anywhere; }
 .ac-list { margin: 0; padding-left: 20px; font-size: 14px; }
+#ac-invites { list-style: none; padding-left: 0; display: grid; gap: 12px; }
+.ac-invite-row { border: 1px solid var(--ac-border); border-radius: 8px; padding: 10px; display: grid; gap: 6px; }
+.ac-invite-row .ac-note, #ac-invite-created .ac-note { margin: 0; }
+#ac-invite-created { display: grid; gap: 8px; margin: 12px 0; }
+.ac-invite-url { font: 13px ui-monospace, Menlo, Consolas, monospace; width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--ac-border); border-radius: 8px; background: #f7f8fa; color: var(--ac-text); }
 @media (max-width: 480px) {
   .ac-main { padding: 16px 12px 48px; }
   .ac-card { padding: 16px; }

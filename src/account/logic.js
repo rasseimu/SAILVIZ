@@ -6,7 +6,55 @@ export function pageModeForPath(pathname) {
   const p = String(pathname || '').replace(/\/+$/, '');
   if (p === '/verify-email') return 'verify';
   if (p === '/reset-password') return 'reset';
+  if (/^\/join\/[^/]+$/.test(p)) return 'join';
   return 'account';
+}
+
+// /join/:code のコード。無い・不正なら null。(`/?invite=<code>` はサーバが /join/<code> へ 302 で寄せる: server/static.js)
+export function inviteCodeFromPath(pathname) {
+  const m = /^\/join\/([^/]+)$/.exec(String(pathname || '').replace(/\/+$/, ''));
+  if (!m) return null;
+  try { return decodeURIComponent(m[1]) || null; } catch { return null; }
+}
+
+const intOrNull = (s, min, max) => {
+  const t = String(s ?? '').trim();
+  if (t === '') return { ok: true, value: null };
+  if (!/^\d+$/.test(t)) return { ok: false };
+  const n = Number(t);
+  return n >= min && n <= max ? { ok: true, value: n } : { ok: false };
+};
+
+// 招待発行フォームの入力 → POST /api/orgs/:orgId/invites の本文。範囲はサーバ(domain/invites.js)と同じ。
+export function parseInviteForm(days, maxUses) {
+  const d = intOrNull(days, 1, 365);
+  if (!d.ok) return { ok: false, message: '有効日数は 1〜365 の整数にしてください(空なら無期限)' };
+  const m = intOrNull(maxUses, 1, 1000);
+  if (!m.ok) return { ok: false, message: '使用回数の上限は 1〜1000 の整数にしてください(空なら無制限)' };
+  const body = {};
+  if (d.value != null) body.expiresInDays = d.value;
+  if (m.value != null) body.maxUses = m.value;
+  return { ok: true, body };
+}
+
+// 招待一覧の「期限・使用回数」表示。
+export function inviteLimitLabel(inv, now) {
+  const exp = inv.expiresAt == null ? '無期限' : `あと${Math.max(0, Math.ceil((inv.expiresAt - now) / 86400000))}日`;
+  const uses = inv.maxUses == null ? `${inv.useCount ?? 0} 回使用(無制限)` : `${inv.useCount ?? 0} / ${inv.maxUses} 回使用`;
+  return `${exp}・${uses}`;
+}
+
+// 招待の参加(プレビュー・accept)に失敗したときの表示の種類と文言。
+export function joinFailureView(status, json) {
+  const code = json && json.error && json.error.code;
+  if (status === 404) return { kind: 'notfound', message: 'この招待リンクは見つかりません。リンクが正しいか、招待した人に確認してください。' };
+  if (status === 401) return { kind: 'login', message: 'ログインが必要です。' };
+  if (status === 403) return { kind: 'unverified', message: '招待を使うには、先にメールアドレスの確認が必要です。確認メールのリンクを開いてから、このページを開き直してください。' };
+  if (status === 410) {
+    const why = code === 'invite_expired' ? '有効期限が切れています' : code === 'invite_exhausted' ? '利用上限に達しています' : '失効しています';
+    return { kind: 'gone', message: `この招待リンクは${why}。招待した人に新しいリンクを頼んでください。` };
+  }
+  return { kind: 'error', message: apiErrorMessage(status, json) };
 }
 
 // ?token=… を取り出す。無い・空なら null。
