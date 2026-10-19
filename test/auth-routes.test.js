@@ -483,8 +483,119 @@ test('DELETE /api/me: org_admins の行が消える。他の管理者の行は�
   assert.equal(accounts.isOrgAdmin(shared.id, uid), false);
   assert.equal(accounts.isOrgAdmin(solo.id, uid), false);
   assert.deepEqual(accounts.listOrgAdmins(shared.id), [other.id]);
-  assert.deepEqual(accounts.listOrgAdmins(solo.id), []); // 正本に定めなし: 拒否も移譲もしない
+  assert.deepEqual(accounts.listOrgAdmins(solo.id), []); // メンバーが本人以外にいないので引き継ぎ先なし(H25)
   assert.ok(accounts.getOrg(solo.id));
+});
+
+// ---- S2.3-P8 / H25: 唯一の管理者の退会と後任 ----
+async function soloAdminSetup() {
+  const reg = await register();
+  const uid = reg.json.user.id;
+  const a = accounts.createUser({ email: 'a@example.test' });
+  const b = accounts.createUser({ email: 'b@example.test' });
+  const org = accounts.createOrg({ name: '単独部', adminUserIds: [uid], now: clock.t });
+  accounts.linkMember({ orgId: org.id, userId: uid, now: clock.t });
+  accounts.linkMember({ orgId: org.id, userId: b.id, now: clock.t + 10 });
+  accounts.linkMember({ orgId: org.id, userId: a.id, now: clock.t + 20 });
+  return { reg, uid, a, b, org };
+}
+const del = (reg, body) => call('DELETE', '/api/me', { password: REG.password, ...body }, { token: reg.json.token });
+
+test('DELETE /api/me: successors の指定で、指定した人が管理者になる', { skip }, async () => {
+  const { reg, uid, a, org } = await soloAdminSetup();
+  assert.equal((await del(reg, { successors: { [org.id]: a.id } })).status, 200);
+  assert.deepEqual(accounts.listOrgAdmins(org.id), [a.id]);
+  assert.ok(accounts.getUser(uid).deleted_at != null);
+});
+
+test('DELETE /api/me: 指定なしは linked_at 最古のメンバーへ自動(同時刻は user_id 昇順)', { skip }, async () => {
+  const { reg, b, org } = await soloAdminSetup();
+  assert.equal((await del(reg)).status, 200);
+  assert.deepEqual(accounts.listOrgAdmins(org.id), [b.id]);
+  // 同時刻: user_id 昇順
+  const r2 = await register({ email: 'two@example.test' });
+  const c = accounts.createUser({ email: 'c@example.test' });
+  const d = accounts.createUser({ email: 'd@example.test' });
+  const org2 = accounts.createOrg({ name: '二部', adminUserIds: [r2.json.user.id], now: clock.t });
+  accounts.linkMember({ orgId: org2.id, userId: r2.json.user.id, now: clock.t - 5 });
+  accounts.linkMember({ orgId: org2.id, userId: c.id, now: clock.t });
+  accounts.linkMember({ orgId: org2.id, userId: d.id, now: clock.t });
+  assert.equal((await del(r2)).status, 200);
+  assert.deepEqual(accounts.listOrgAdmins(org2.id), [[c.id, d.id].sort()[0]]);
+});
+
+test('DELETE /api/me: メンバーが本人だけなら管理者不在のまま組織は残る', { skip }, async () => {
+  const reg = await register();
+  const org = accounts.createOrg({ name: '独り部', adminUserIds: [reg.json.user.id], now: clock.t });
+  accounts.linkMember({ orgId: org.id, userId: reg.json.user.id, now: clock.t });
+  assert.equal((await del(reg)).status, 200);
+  assert.deepEqual(accounts.listOrgAdmins(org.id), []);
+  assert.ok(accounts.getOrg(org.id));
+});
+
+test('DELETE /api/me: 他にも管理者がいる組織では successors を無視する', { skip }, async () => {
+  const reg = await register();
+  const uid = reg.json.user.id;
+  const other = accounts.createUser({ email: 'other@example.test' });
+  const m = accounts.createUser({ email: 'm@example.test' });
+  const org = accounts.createOrg({ name: '共同部', adminUserIds: [uid, other.id], now: clock.t });
+  for (const u of [uid, other.id, m.id]) accounts.linkMember({ orgId: org.id, userId: u, now: clock.t });
+  assert.equal((await del(reg, { successors: { [org.id]: m.id } })).status, 200);
+  assert.deepEqual(accounts.listOrgAdmins(org.id), [other.id]);
+  // 無指定でも勝手に足さない
+  const r2 = await register({ email: 'two@example.test' });
+  const org2 = accounts.createOrg({ name: '共同2', adminUserIds: [r2.json.user.id, other.id], now: clock.t });
+  accounts.linkMember({ orgId: org2.id, userId: m.id, now: clock.t });
+  assert.equal((await del(r2)).status, 200);
+  assert.deepEqual(accounts.listOrgAdmins(org2.id), [other.id]);
+});
+
+test('DELETE /api/me: successors が不正なら 422 で何も変わらない', { skip }, async () => {
+  const { reg, uid, a, org } = await soloAdminSetup();
+  const stranger = accounts.createUser({ email: 's@example.test' });
+  const foreign = accounts.createOrg({ name: '他部', adminUserIds: [stranger.id], now: clock.t });
+  const bads = [
+    { [org.id]: stranger.id }, // メンバーでない
+    { [org.id]: uid }, // 本人
+    { [foreign.id]: a.id }, // 管理していない組織
+    { nope: a.id }, // 存在しない組織
+    { [org.id]: 5 }, { [org.id]: '' }, [a.id], 'x', null, // 形が不正
+  ];
+  for (const bad of bads) {
+    const r = await del(reg, { successors: bad });
+    assert.equal(r.status, 422, JSON.stringify(bad));
+    assert.equal(r.json.error.code, 'invalid_input');
+  }
+  assert.equal(accounts.getUser(uid).deleted_at, null);
+  assert.deepEqual(accounts.listOrgAdmins(org.id), [uid]);
+  assert.equal((await call('GET', '/api/me', undefined, { token: reg.json.token })).status, 200);
+});
+
+test('DELETE /api/me: 途中で例外なら引き継ぎも退会も巻き戻る', { skip }, async () => {
+  const { reg, uid, org } = await soloAdminSetup();
+  const orig = accounts.markUserDeleted;
+  accounts.markUserDeleted = () => { throw new Error('boom'); };
+  try {
+    const r = await del(reg);
+    assert.ok(r.status >= 500);
+  } finally { accounts.markUserDeleted = orig; }
+  assert.deepEqual(accounts.listOrgAdmins(org.id), [uid]);
+  assert.equal(accounts.getUser(uid).deleted_at, null);
+  assert.ok(accounts.isMember(org.id, uid));
+  assert.equal((await call('GET', '/api/me', undefined, { token: reg.json.token })).status, 200);
+});
+
+test('DELETE /api/me: パスワード違い(422)・回数制限(429)のとき引き継ぎは起きない', { skip }, async () => {
+  const { reg, uid, a, org } = await soloAdminSetup();
+  const wrong = await call('DELETE', '/api/me', { password: 'wrong-pass-1', successors: { [org.id]: a.id } }, { token: reg.json.token });
+  assert.equal(wrong.status, 422); assert.equal(wrong.json.error.code, 'invalid_password');
+  assert.deepEqual(accounts.listOrgAdmins(org.id), [uid]);
+  let last;
+  for (let i = 0; i < LIMITS.deletePassword.max + 1; i++) last = await call('DELETE', '/api/me', { password: 'wrong-pass-1', successors: { [org.id]: a.id } }, { token: reg.json.token });
+  assert.equal(last.status, 429);
+  const good = await del(reg, { successors: { [org.id]: a.id } });
+  assert.equal(good.status, 429);
+  assert.deepEqual(accounts.listOrgAdmins(org.id), [uid]);
 });
 
 test('DELETE /api/me: 誤パスワードの連続は 429(本人ごと)',{ skip }, async () => {
