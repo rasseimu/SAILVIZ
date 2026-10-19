@@ -5,7 +5,7 @@
 import { send } from './http.js';
 import { SESSION_COOKIE } from '../auth.js';
 import {
-  issueAuthToken, issueEmailToken, consumeEmailToken, revokeToken, resolveIdentity,
+  issueAuthToken, issueEmailToken, consumeEmailToken, peekEmailToken, revokeToken, resolveIdentity,
 } from '../accountAuth.js';
 import { hashPassword, verifyPassword, needsRehash, validatePassword, SCRYPT_PARAMS } from '../domain/password.js';
 import { AUTH_TOKEN_TTL_MS } from '../domain/tokens.js';
@@ -207,18 +207,25 @@ export function createAuthRoute({
       if (limited(res, [limiters.resetConfirmIp, ipKey])) return;
       const pw = validatePassword(body.newPassword);
       if (!pw.ok) return err(res, 422, 'invalid_input', 'パスワードは8文字以上にしてください'); // トークンを消費しない
-      const hit = consumeEmailToken(accounts, body.resetToken, 'reset', now());
-      const user = hit && accounts.getUser(hit.userId);
-      // 削除済み、またはメール未確認(§4.2: 再設定は確認後のみ)は無効
-      if (!user || user.deleted_at != null || user.email_verified_at == null) {
+      const invalid = () => {
         limiters.resetConfirmIp.record(ipKey, now());
         return err(res, 422, 'invalid_token', 'リンクが無効か、期限切れまたは使用済みです');
-      }
+      };
+      // まず消費せずに検証する(ハッシュ計算や更新が失敗してもトークンが使用済みにならないように)
+      const peek = peekEmailToken(accounts, body.resetToken, 'reset', now());
+      const peeked = peek && accounts.getUser(peek.userId);
+      // 削除済み、またはメール未確認(§4.2: 再設定は確認後のみ)は無効
+      if (!peeked || peeked.deleted_at != null || peeked.email_verified_at == null) return invalid();
       const passwordHash = await hashPassword(body.newPassword, hashParams);
-      accounts.withTx(() => {
-        accounts.updateUser(user.id, { passwordHash });
-        accounts.revokeAllAuthTokens(user.id, now()); // §4.3: パスワード変更で全トークン失効
+      // 消費・パスワード更新・全トークン失効を 1 つのトランザクションに。並行して先に使われていたら無効と同じ。
+      const done = accounts.withTx(() => {
+        const hit = consumeEmailToken(accounts, body.resetToken, 'reset', now());
+        if (!hit) return false;
+        accounts.updateUser(hit.userId, { passwordHash });
+        accounts.revokeAllAuthTokens(hit.userId, now()); // §4.3: パスワード変更で全トークン失効
+        return true;
       });
+      if (!done) return invalid();
       send(res, 200, { ok: true });
     },
 
