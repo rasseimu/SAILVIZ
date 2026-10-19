@@ -48,7 +48,7 @@ export function inviteLimitLabel(inv, now) {
 export function joinFailureView(status, json) {
   const code = json && json.error && json.error.code;
   if (status === 404) return { kind: 'notfound', message: 'この招待リンクは見つかりません。リンクが正しいか、招待した人に確認してください。' };
-  if (status === 401) return { kind: 'login', message: 'ログインが必要です。' };
+  if (status === 401) return { kind: 'login', needsLogin: true, message: 'ログインが必要です。' };
   if (status === 403) return { kind: 'unverified', message: '招待を使うには、先にメールアドレスの確認が必要です。確認メールのリンクを開いてから、このページを開き直してください。' };
   if (status === 410) {
     const why = code === 'invite_expired' ? '有効期限が切れています' : code === 'invite_exhausted' ? '利用上限に達しています' : '失効しています';

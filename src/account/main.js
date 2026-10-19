@@ -393,6 +393,7 @@ async function renderRoster() {
 // ---- 招待の管理(組織管理者。S2.10) ----
 // API: POST/GET /api/orgs/:orgId/invites、POST …/invites/:inviteId/revoke(設計書 v2 §10.3)。
 // 配るリンクは参加ページの正規の形 `<このサイトの origin>/join/<code>`(サーバが返す `/?invite=` 形も同じページに着く)。
+// 意図: 管理者が今開いているサイトの origin をそのまま使う(サーバの PUBLIC_BASE_URL は使わない。API の url とは別物で、契約は変えない)。
 const joinUrlFor = (code) => `${location.origin}/join/${encodeURIComponent(code)}`;
 
 async function copyText(text, inputEl) {
@@ -467,6 +468,12 @@ function invitesCard(orgId) {
 // ---- 参加ページ /join/:code(`/?invite=<code>` はサーバが 302 でここへ寄せる。S2.10) ----
 function joinCard(...kids) { return h('section', { class: 'ac-card' }, h('h1', {}, '組織への招待'), ...kids); }
 
+// ログイン切れ(401)のとき: 未ログイン表示に落として、ログインを促す(ログイン後は URL のまま参加ページを描き直す)。
+function dropToJoinLogin() {
+  me = null; renderNav(); renderJoinLoggedOut('login');
+  setMsg('ログインの有効期限が切れました。もう一度ログインしてください。', 'error');
+}
+
 function renderJoinLoggedOut(tab) {
   const tabs = h('div', { class: 'ac-tabs', role: 'tablist' },
     ...[['login', 'ログイン'], ['register', '新規登録']].map(([id, label]) =>
@@ -492,6 +499,7 @@ async function renderJoin() {
   const pv = await api('GET', `/api/invites/${encodeURIComponent(code)}`);
   if (pv.status !== 200) {
     const v = joinFailureView(pv.status, pv.json);
+    if (v.needsLogin) return dropToJoinLogin();
     const kids = [h('p', { id: 'ac-join-result', 'data-state': 'error', 'data-kind': v.kind }, v.message)];
     if (v.kind === 'unverified') {
       const resend = h('button', { id: 'ac-resend', class: 'ac-btn', type: 'button' }, '確認メールを再送');
@@ -520,6 +528,7 @@ async function renderJoin() {
       return;
     }
     const v = joinFailureView(a.status, a.json);
+    if (v.needsLogin) return dropToJoinLogin();
     setMsg(v.message, 'error');
   }));
   mount(joinCard(h('p', { id: 'ac-join-org' }, orgName), h('p', { class: 'ac-note' }, `「${orgName}」に招待されています。参加すると、この組織のメンバーとして名簿・共有の対象になります。`), btn));
