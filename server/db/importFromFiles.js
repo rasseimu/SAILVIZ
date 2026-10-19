@@ -1,6 +1,7 @@
 // server/db/importFromFiles.js
 // 既存ファイル(data/projects/*.json, progress.json, roadmap.json)→ DB の取込。
 // --dry-run で件数と警告(対応する反省が無い progress キー)を出し、書き込まない。
+// roadmaps は消さずに legacy_name で突き合わせて同期する(roadmapSync.js。付け替え済みの user_id・org_id を保つ)。
 // 同じ legacy_name の器は子ごと消してから入れ直す。ただし成功すると meta に「取込み済み」の印を書き、
 // 印があれば再実行を拒否する(S2.6-P8)。やり直しは forceReimport(CLI は --force-reimport)だけ。
 import { readdirSync, readFileSync, existsSync } from 'node:fs';

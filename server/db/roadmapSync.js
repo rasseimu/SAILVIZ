@@ -10,8 +10,9 @@ import { randomBytes } from 'node:crypto';
 
 export function syncRoadmaps(db, rows, { orgId = null } = {}) {
   const names = new Set(rows.map((r) => r.legacy_name));
+  const del = db.prepare('DELETE FROM roadmaps WHERE id = ?');
   for (const ex of db.prepare('SELECT id, legacy_name, user_id FROM roadmaps').all()) {
-    if (ex.user_id === null && !names.has(ex.legacy_name)) db.prepare('DELETE FROM roadmaps WHERE id = ?').run(ex.id);
+    if (ex.user_id === null && !names.has(ex.legacy_name)) del.run(ex.id);
   }
   const find = db.prepare('SELECT id FROM roadmaps WHERE legacy_name = ? ORDER BY (user_id IS NULL), id LIMIT 1');
   const idTaken = db.prepare('SELECT 1 FROM roadmaps WHERE id = ?');
