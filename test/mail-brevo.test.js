@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createBrevoMailer, createMailer } from '../server/mail.js';
+import { createBrevoMailer, createMailer, mailProviderWarning, DEFAULT_BREVO_TIMEOUT_MS } from '../server/mail.js';
 
 const KEY = 'dummy-brevo-key-123';
 const mk = (fetchImpl, extra = {}) =>
@@ -70,4 +70,50 @@ test('createMailer: brevo は API キー・MAIL_FROM が無いと起動時に例
 test('createMailer: 未知の provider は例外、log が既定', () => {
   assert.throws(() => createMailer({ provider: 'nope' }), /MAIL_PROVIDER=nope/);
   assert.equal(typeof createMailer({}).send, 'function');
+});
+
+test('brevo: タイムアウト(signal の abort)で reject する(API キーを含まない)', async () => {
+  const f = (url, init) => new Promise((_, reject) => {
+    init.signal.addEventListener('abort', () => {
+      const e = new Error(`aborted ${KEY}`);
+      e.name = 'TimeoutError';
+      reject(e);
+    });
+  });
+  await assert.rejects(
+    mk(f, { timeoutMs: 20 }).send({ to: 'u@example.com', kind: 'verify', url: 'https://a.example.com/x?token=t' }),
+    (e) => /接続に失敗/.test(e.message) && /TimeoutError/.test(e.message) && !e.message.includes(KEY));
+});
+
+test('brevo: 既定のタイムアウトは 5 秒', () => {
+  assert.equal(DEFAULT_BREVO_TIMEOUT_MS, 5000);
+});
+
+test('brevo: 非 2xx の応答本文は body.cancel() で捨てる', async () => {
+  let cancelled = 0;
+  const f = async () => ({ ok: false, status: 500, body: { cancel: async () => { cancelled++; } } });
+  await assert.rejects(mk(f).send({ to: 'u@example.com', kind: 'verify', url: 'https://a.example.com/x?token=t' }), /500/);
+  assert.equal(cancelled, 1);
+});
+
+test('brevo: body が無い応答でも非 2xx は status の例外', async () => {
+  const f = async () => ({ ok: false, status: 503 });
+  await assert.rejects(mk(f).send({ to: 'u@example.com', kind: 'verify', url: 'https://a.example.com/x?token=t' }), /503/);
+});
+
+test('createMailer: brevo の MAIL_FROM に @ が無ければ起動時に例外', () => {
+  assert.throws(() => createMailer({ provider: 'brevo', apiKey: KEY, from: 'noreply' }), /MAIL_FROM/);
+  assert.throws(() => createMailer({ provider: 'brevo', apiKey: KEY, from: '@' }), /MAIL_FROM/);
+  assert.equal(typeof createMailer({ provider: 'brevo', apiKey: KEY, from: 'a@example.com' }).send, 'function');
+});
+
+test('mailProviderWarning: 本番で未設定・log のときだけ WARN 文字列', () => {
+  for (const provider of [undefined, '', 'log']) {
+    const w = mailProviderWarning({ nodeEnv: 'production', provider });
+    assert.match(w, /^WARN:/);
+    assert.match(w, /MAIL_PROVIDER/);
+  }
+  assert.equal(mailProviderWarning({ nodeEnv: 'production', provider: 'brevo' }), null);
+  assert.equal(mailProviderWarning({ nodeEnv: 'development', provider: 'log' }), null);
+  assert.equal(mailProviderWarning({ nodeEnv: undefined, provider: undefined }), null);
 });

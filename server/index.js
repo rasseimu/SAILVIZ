@@ -8,7 +8,7 @@ import { serveStatic } from './static.js';
 import { resolveViewGate } from './config.js';
 import { openRepo } from './repos/openRepo.js';
 import { createAccountsRepo } from './repos/accountsRepo.js';
-import { createMailer } from './mail.js';
+import { createMailer, mailProviderWarning } from './mail.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT) || 8000;
@@ -25,8 +25,11 @@ const { repo, db } = openRepo({ storage: STORAGE, dataDir: DATA_DIR });
 
 // アカウント(§10.2)は SQLite の表を使うので STORAGE=db のときだけ有効。
 const accounts = db ? createAccountsRepo({ db }) : null;
-// メール送信のアダプタ。MAIL_PROVIDER 未設定は log(確認リンクをログに出すだけ)。Brevo は S2.8。
+// メール送信のアダプタ。MAIL_PROVIDER 未設定は log(確認リンクをログに出すだけ)。brevo は 2026-10-19 に実キーで送受信確認済み。
 const MAIL_PROVIDER = process.env.MAIL_PROVIDER || 'log';
+// 本番で log のままだとメールが届かない。起動は止めず WARN を1行出す(スモークが拾う)。
+const mailWarn = mailProviderWarning({ nodeEnv: process.env.NODE_ENV, provider: process.env.MAIL_PROVIDER });
+if (mailWarn) console.warn(mailWarn);
 const mailer = createMailer({
   provider: MAIL_PROVIDER, redactToken: process.env.NODE_ENV === 'production',
   apiKey: process.env.BREVO_API_KEY, from: process.env.MAIL_FROM,
