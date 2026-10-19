@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  anonymous, user, legacy, LEGACY_ORG_ID,
+  anonymous, user, legacy, legacySharedPrincipal, LEGACY_ORG_ID,
   canRead, canWrite, canReadReflectionExtras, canComment, canUpdateProgress,
   visibleDayItems, canSeeDayContainer,
 } from '../server/domain/policy.js';
@@ -153,6 +153,99 @@ test('旧共有ログインは userId を持たず、作成者としては扱わ
   assert.equal(canWrite(L, mk('session', { visibility: 'org', orgId: LEGACY_ORG_ID })), false);
   assert.equal(canRead(L, mk('voice', { orgId: LEGACY_ORG_ID })), false);
   assert.equal(canWrite(L, { kind: 'session', visibility: 'org', ownerId: undefined, orgId: LEGACY_ORG_ID }), false);
+});
+
+// ---- S2.5: 旧共有ログインの主体 (MIGRATION_ORG_ID の組織メンバー + 書込トークン) ----
+
+const SH = 'org-shibaura';
+const W = legacySharedPrincipal({ orgId: SH, canWrite: true });
+const R = legacySharedPrincipal({ orgId: SH, canWrite: false });
+const mkS = (kind, extra = {}) => ({ kind, ownerId: 'u-x', crewIds: [], orgId: SH, ...extra });
+
+test('legacySharedPrincipal: 既定は書込トークン無し・組織未設定', () => {
+  assert.deepEqual(legacySharedPrincipal(), { kind: 'legacy', shared: true, orgId: null, canWrite: false });
+});
+
+test('共有ログインの読み取り: §5.8 の表 (private は読めない・org/public は読める)', () => {
+  for (const P of [W, R]) {
+    assert.equal(canRead(P, mkS('session', { visibility: 'private' })), false);
+    assert.equal(canRead(P, mkS('session', { visibility: 'org' })), true);
+    assert.equal(canRead(P, mkS('session', { visibility: 'public' })), true);
+    assert.equal(canRead(P, mkS('reflection', { visibility: 'private' })), false);
+    assert.equal(canRead(P, mkS('reflection', { visibility: 'org' })), true);
+    assert.equal(canRead(P, mkS('reflection', { visibility: 'public' })), true);
+    assert.equal(canRead(P, mkS('race')), true);
+    assert.equal(canRead(P, mkS('voice')), false);
+    assert.equal(canRead(P, mkS('minutes')), true);
+    assert.equal(canRead(P, mkS('session', { visibility: 'org', orgId: 'other' })), false);
+  }
+});
+
+test('共有ログインの書き込み: トークンがあれば自組織の見える対象を書ける (private は不可)', () => {
+  for (const kind of ['session', 'reflection', 'race', 'roadmap', 'minutes']) {
+    assert.equal(canWrite(W, mkS(kind, { visibility: 'org' })), true, `${kind} トークンあり`);
+    assert.equal(canWrite(R, mkS(kind, { visibility: 'org' })), false, `${kind} トークンなし`);
+    assert.equal(canWrite(W, mkS(kind, { orgId: 'other', visibility: 'org' })), false, `${kind} 他組織`);
+  }
+  for (const kind of ['session', 'reflection']) {
+    assert.equal(canWrite(W, mkS(kind, { visibility: 'private' })), false, `${kind} private は書けない`);
+    assert.equal(canWrite(W, mkS(kind, { visibility: 'public' })), true, `${kind} public`);
+  }
+  assert.equal(canWrite(W, mkS('voice')), false);
+  assert.equal(canWrite(W, { kind: 'unknown', orgId: SH }), false);
+});
+
+test('共有ログイン: トークンなしはコメント・進捗更新もできない', () => {
+  const refl = mkS('reflection', { visibility: 'org' });
+  assert.equal(canComment(W, refl), true);
+  assert.equal(canUpdateProgress(W, refl), true);
+  assert.equal(canComment(R, refl), false);
+  assert.equal(canUpdateProgress(R, refl), false);
+});
+
+test('組織未設定(null)の共有ログインは今の挙動: 全部読める(voice 除く)・トークンで書ける', () => {
+  const U = legacySharedPrincipal({ orgId: null, canWrite: true });
+  const UR = legacySharedPrincipal({ orgId: null, canWrite: false });
+  const t = mkS('session', { visibility: 'org', orgId: null });
+  assert.equal(canRead(U, t), true);
+  assert.equal(canRead(U, mkS('minutes', { orgId: null })), true);
+  assert.equal(canRead(U, mkS('voice', { orgId: null })), false);
+  assert.equal(canWrite(U, t), true);
+  assert.equal(canWrite(UR, t), false);
+  assert.equal(canRead(UR, mkS('session', { visibility: 'private', orgId: null })), false);
+});
+
+test('組織未設定の共有ログインは org 付きの他組織の対象を読めない・書けない', () => {
+  for (const orgId of [null, '']) {
+    const U = legacySharedPrincipal({ orgId, canWrite: true });
+    for (const kind of ['session', 'reflection']) {
+      const t = mkS(kind, { visibility: 'org', orgId: 'other' });
+      assert.equal(canRead(U, t), false, `${kind} read orgId=${JSON.stringify(orgId)}`);
+      assert.equal(canWrite(U, t), false, `${kind} write orgId=${JSON.stringify(orgId)}`);
+    }
+    const m = mkS('minutes', { orgId: 'other' });
+    assert.equal(canRead(U, m), false);
+    assert.equal(canWrite(U, m), false);
+    assert.equal(canUpdateProgress(U, mkS('reflection', { visibility: 'org', orgId: 'other' })), false);
+    // 組織なしの対象には一致する
+    assert.equal(canRead(U, mkS('minutes', { orgId: null })), true);
+    assert.equal(canWrite(U, mkS('session', { visibility: 'org', orgId: null })), true);
+  }
+});
+
+test('共有ログインは他組織の public セッション・反省を書けない (読めても書けない)', () => {
+  const U = legacySharedPrincipal({ orgId: null, canWrite: true });
+  for (const P of [W, U]) {
+    for (const kind of ['session', 'reflection']) {
+      const other = mkS(kind, { visibility: 'public', orgId: 'other' });
+      assert.equal(canRead(P, other), true);
+      assert.equal(canWrite(P, other), false, `${kind} 他組織 public`);
+    }
+  }
+  for (const kind of ['session', 'reflection']) {
+    assert.equal(canWrite(W, mkS(kind, { visibility: 'public' })), true);
+    assert.equal(canWrite(W, mkS(kind, { visibility: 'org' })), true);
+  }
 });
 
 test('userId なしの user は作成者に一致しない', () => {

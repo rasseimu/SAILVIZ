@@ -148,6 +148,10 @@ export function createAccountsRepo({ db }) {
     countOrgsAdministeredBy(userId) {
       return Number(db.prepare('SELECT COUNT(*) AS n FROM org_admins WHERE user_id = ?').get(userId).n);
     },
+    // そのユーザーが管理者になっている組織の ID(退会時の後任引き継ぎ用)。
+    listOrgIdsAdministeredBy(userId) {
+      return db.prepare('SELECT org_id FROM org_admins WHERE user_id = ? ORDER BY org_id').all(userId).map((r) => r.org_id);
+    },
     // そのユーザーの org_admins 行を全組織ぶん消す(§4.3 退会)。消した行数を返す。
     // 唯一の管理者でも組織は残る(管理者不在になる)。正本に定めが無いため拒否・移譲はしない。
     removeOrgAdminsOfUser(userId) {
@@ -329,13 +333,17 @@ export function createAccountsRepo({ db }) {
         const inv = this.getInviteByCode(code);
         if (!inv) return { status: 'not_found' };
         if (this.isMember(inv.org_id, userId)) return { status: 'already', orgId: inv.org_id };
-        const r = db.prepare(
+        const bump = () => Number(db.prepare(
           `UPDATE org_invites SET use_count = use_count + 1
              WHERE id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
                AND (max_uses IS NULL OR use_count < max_uses)`,
-        ).run(inv.id, now);
-        if (Number(r.changes) === 0) {
-          return { status: inviteStatus(this.getInvite(inv.id), now), orgId: inv.org_id };
+        ).run(inv.id, now).changes) > 0;
+        if (!bump()) {
+          const st = inviteStatus(this.getInvite(inv.id), now);
+          // 通常は到達しない(UPDATE の条件と inviteStatus は同じ判定で、トランザクション内)。
+          // 'valid' なら 410 invite_valid にせず、もう一度だけ加算を試す。それでも失敗なら例外(500)。
+          if (st !== 'valid') return { status: st, orgId: inv.org_id };
+          if (!bump()) throw new Error('acceptInvite: 招待は有効なのに use_count を加算できません');
         }
         db.prepare('INSERT OR IGNORE INTO org_members (org_id, user_id, roster_id, linked_at) VALUES (?, ?, NULL, ?)')
           .run(inv.org_id, userId, now);

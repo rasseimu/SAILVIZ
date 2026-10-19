@@ -70,7 +70,7 @@ test('実行で行が入り、2回流しても件数が変わらない(冪等)',
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('orgId 指定の取込: practice_days・roadmaps に組織 ID が入り、名簿照合で反省とロードマップの legacy_* が本人に付け替わる',{ skip: skipMsg }, async () => {
+test('orgId 指定の取込: practice_days・roadmaps に組織 ID が入り、名簿照合で反省とロードマップの legacy_* が本人に付け替わる', { skip: skipMsg }, async () => {
   const { dataDir, db } = await fixture();
   const { createAccountsRepo } = await import('../server/repos/accountsRepo.js');
   const { applyRoster } = await import('../server/rosterLink.js');
@@ -92,6 +92,7 @@ test('orgId 指定の取込: practice_days・roadmaps に組織 ID が入り、�
 test('orgId が実在する組織でなければ、何も書かずにエラーを投げる', { skip: skipMsg }, async () => {
   const { dataDir, db } = await fixture();
   assert.throws(() => importFromFiles({ db, dataDir, now: 1, orgId: 'org_nonexistent' }), /org_nonexistent/);
+  assert.throws(() => importFromFiles({ db, dataDir, now: 1, orgId: 'org_nonexistent', dryRun: true }), /org_nonexistent/);
   assert.equal(count(db, 'practice_days'), 0);
   assert.equal(count(db, 'roadmaps'), 0);
   db.close();

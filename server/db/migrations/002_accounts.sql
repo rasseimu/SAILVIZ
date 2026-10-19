@@ -1,7 +1,7 @@
 -- 002_accounts.sql — Phase 2「アカウント・組織」の表(設計書 v2 §5.1「アカウント・組織」)。
 -- 時刻は epoch ms(INTEGER)。トークンは平文を保存せず token_hash(SHA-256 の hex 等)だけを持つ。
 -- 001 と同じく外部キー制約は付けない(設計書の DDL に無い)。
--- 招待(org_invites)は S2.9 の 004、用語集(org_glossary)は声の反省の Phase で足す。
+-- 招待(org_invites)は S2.9 の 003、用語集(org_glossary)は声の反省の Phase で足す。
 
 CREATE TABLE users (
   id TEXT PRIMARY KEY,                -- 'u_' + ランダム
