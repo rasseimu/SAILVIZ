@@ -100,6 +100,18 @@ test('verifyPassword: 保存値のパラメータ・hash 長が上限を超え�
   }
 });
 
+test('verifyPassword: 上限ちょうどのパラメータは受け付ける(作業量 128MiB・メモリ 64MiB)', async () => {
+  for (const params of [
+    { N: 32768, r: 8, p: 4, keyLen: 32, saltLen: 16 }, // 128*N*r*p = 128MiB(MAX_COST_BYTES ちょうど)
+    { N: 65536, r: 8, p: 1, keyLen: 32, saltLen: 16 }, // 128*N*r = 64MiB(MAX_MEM_BYTES ちょうど)
+  ]) {
+    const h = await hashPassword('pass-word-1', params);
+    assert.ok(h.startsWith(`scrypt$${params.N}$${params.r}$${params.p}$`), h);
+    assert.equal(await verifyPassword('pass-word-1', h), true, h);
+    assert.equal(await verifyPassword('wrong-pass-1', h), false, h);
+  }
+});
+
 test('needsRehash: パラメータが古い・壊れていれば true(強度を後から上げられる)', async () => {
   const old = await hashPassword('pass-word-1', FAST);
   assert.equal(needsRehash(old), true);
