@@ -310,6 +310,54 @@ test('取込み: minutes-imports commit は自組織の器に書き、他組織�
   assert.equal(r2.json.created, false);
 });
 
+test('P1: 閲覧 Cookie とアカウントの sailviz_session Cookie が両方あっても旧共有ログイン(書込可)として扱う。Bearer は user', { skip }, async () => {
+  const both = `${cookie}; sailviz_session=${ownerTok}`;
+  assert.equal((await call(baseA, 'PUT', `/api/projects/${D4}`, { ck: both, body: proj({ reflections: [refl('rAll', '全部見える')] }) })).status, 200);
+  // セッション Cookie だけなら user(読み取り専用)
+  assert.equal((await call(baseA, 'PUT', `/api/projects/${D4}`, { ck: `sailviz_session=${ownerTok}`, body: proj() })).status, 403);
+  // Bearer は閲覧 Cookie があっても user
+  assert.equal((await call(baseA, 'PUT', `/api/projects/${D4}`, { ck: cookie, auth: ownerTok, body: proj() })).status, 403);
+  // 新 API の /api/me は Cookie のアカウントのまま
+  const me = await call(baseA, 'GET', '/api/me', { ck: both });
+  assert.equal(me.status, 200);
+});
+
+test('P2-1: minutes-imports commit は id の無い見えない反省を組織に見える行として複製しない', { skip }, async () => {
+  const DAY = 'sailviz-20260201-0900.sailviz.json';
+  const base = Date.UTC(2026, 1, 1, 3, 0, 0);
+  repo.writeProject(DAY, proj({ practiceDate: base, reflections: [{ people: ['テスト部員A'], createdAt: 1, notes: { goal: '無id秘密' } }] }), { orgId: ORG });
+  db.prepare("UPDATE reflections SET visibility = 'private', author_user_id = 'u_x' WHERE practice_day_id = (SELECT id FROM practice_days WHERE legacy_name = ?)").run(DAY);
+  const { memberList } = await import('../src/members.js');
+  const r = await call(baseA, 'POST', '/api/minutes-imports/commit', { ck: cookie, body: { practiceDate: base, rows: [{ fullName: memberList()[0].fullName, goal: '議事録2' }] } });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.equal(r.json.name, DAY);
+  const secret = rows("SELECT visibility, author_user_id FROM reflections WHERE body LIKE '%無id秘密%'");
+  assert.equal(secret.length, 1, '見えない反省が複製されない');
+  assert.deepEqual({ ...secret[0] }, { visibility: 'private', author_user_id: 'u_x' });
+  const visible = (await call(baseA, 'GET', `/api/projects/${DAY}`, { ck: cookie })).json.reflections;
+  assert.equal(visible.some((x) => JSON.stringify(x).includes('無id秘密')), false);
+});
+
+test('P2-3: minutes-imports commit は日付の合う器を全部たどり、書ける器を使う(先頭が他組織でも)', { skip }, async () => {
+  const mine = 'sailviz-20260205-0900.sailviz.json', theirs = 'sailviz-20260205-1000.sailviz.json'; // 降順の先頭は他組織
+  const day = Date.UTC(2026, 1, 5, 3, 0, 0);
+  repo.writeProject(mine, proj({ practiceDate: day, reflections: [refl('rM', '自組織')] }), { orgId: ORG });
+  repo.writeProject(theirs, proj({ practiceDate: day, reflections: [refl('rT', '他組織')] }), { orgId: OTHER });
+  const { memberList } = await import('../src/members.js');
+  const r = await call(baseA, 'POST', '/api/minutes-imports/commit', { ck: cookie, body: { practiceDate: day, rows: [{ fullName: memberList()[0].fullName, goal: '議事録3' }] } });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.equal(r.json.name, mine);
+  assert.equal(r.json.created, false);
+});
+
+test('P2-2: readProjectWithAccess は JSON と access を同じ並びで返す', { skip }, async () => {
+  const { project, access } = repo.readProjectWithAccess(D1);
+  assert.equal(project.reflections.length, access.reflections.length);
+  assert.deepEqual(project.reflections.map((r) => r.id), access.reflections.map((r) => r.id));
+  assert.equal(project.tracks.length, access.tracks.length);
+  assert.throws(() => repo.readProjectWithAccess('nothing.sailviz.json'));
+});
+
 test('取込み: sensor-imports commit は他組織の器を 404 にする', { skip }, async () => {
   const up = await call(baseA, 'POST', '/api/sensor-imports', {
     ck: cookie,

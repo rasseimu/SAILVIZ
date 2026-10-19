@@ -67,6 +67,26 @@ export function createDbRepo({ db, dataDir }) {
     return { practiceDay: pd, sessions, tracks, reflections };
   }
 
+  // loadParts の結果から認可用 access を作る。並びは assembleProject と同じ(同じ入力・同じ整列)。
+  function accessOf(pd, { sessions, tracks, reflections }) {
+    const sessById = new Map(sessions.map((s) => [s.id, s]));
+    const pos = (sid) => sessById.get(sid)?.position ?? 0;
+    const crewOf = db.prepare('SELECT user_id FROM session_crew WHERE session_id = ? AND user_id IS NOT NULL');
+    return {
+      orgId: pd.org_id ?? null,
+      tracks: [...tracks].sort((a, b) => pos(a.session_id) - pos(b.session_id)).map((tr) => {
+        const s = sessById.get(tr.session_id) || {};
+        return {
+          kind: s.kind, visibility: s.visibility, ownerId: s.owner_user_id ?? null,
+          crewIds: crewOf.all(tr.session_id).map((c) => c.user_id),
+        };
+      }),
+      reflections: [...reflections].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)).map((r) => ({
+        id: bodyId(r), visibility: r.visibility, ownerId: r.author_user_id ?? null,
+      })),
+    };
+  }
+
   function insertAll(rows) {
     insertRow(db, 'practice_days', rows.practiceDay);
     for (const s of rows.sessions) insertRow(db, 'rec_sessions', s);
@@ -130,23 +150,27 @@ export function createDbRepo({ db, dataDir }) {
     getProjectAccess(name) {
       const pd = getPd.get(name);
       if (!pd) return null;
-      const { sessions, tracks, reflections } = loadParts(pd);
-      const sessById = new Map(sessions.map((s) => [s.id, s]));
-      const pos = (sid) => sessById.get(sid)?.position ?? 0;
-      const crewOf = db.prepare('SELECT user_id FROM session_crew WHERE session_id = ? AND user_id IS NOT NULL');
-      return {
-        orgId: pd.org_id ?? null,
-        tracks: [...tracks].sort((a, b) => pos(a.session_id) - pos(b.session_id)).map((tr) => {
-          const s = sessById.get(tr.session_id) || {};
-          return {
-            kind: s.kind, visibility: s.visibility, ownerId: s.owner_user_id ?? null,
-            crewIds: crewOf.all(tr.session_id).map((c) => c.user_id),
-          };
-        }),
-        reflections: [...reflections].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)).map((r) => ({
-          id: bodyId(r), visibility: r.visibility, ownerId: r.author_user_id ?? null,
-        })),
-      };
+      return accessOf(pd, loadParts(pd));
+    },
+
+    // 旧 JSON と access を「1回の読込み」で返す(同じ行から両方を作るので、tracks / reflections の
+    // 並びと access の添字が必ず対応する)。器が無ければ投げる。
+    readProjectWithAccess(name) {
+      const pd = getPd.get(name);
+      if (!pd) throw new Error('not found');
+      const parts = loadParts(pd);
+      return { project: { ...assembleProject(parts), _rev: pd.rev }, access: accessOf(pd, parts) };
+    },
+
+    // practiceDate と JST 日が一致する器をすべて返す(降順)。
+    findProjectsByPracticeDate(practiceDate) {
+      const target = jstMidnightMs(Number(practiceDate));
+      return db.prepare(
+        `SELECT legacy_name AS name, json_extract(web_state, '$.practiceDate') AS pdate
+           FROM practice_days WHERE legacy_name IS NOT NULL ORDER BY legacy_name DESC`,
+      ).all()
+        .filter((r) => Number.isFinite(Number(r.pdate)) && jstMidnightMs(Number(r.pdate)) === target)
+        .map((r) => ({ name: r.name, label: projectLabel(r.name) }));
     },
 
     // 進捗の認可用: 全反省の(旧 JSON の)ID・公開範囲・作者・器の組織。

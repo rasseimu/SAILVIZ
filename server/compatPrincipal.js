@@ -6,7 +6,7 @@
 //        canWrite は「閲覧ゲート有効なら true(閲覧ログイン=書き込み可。現行の requireWrite と同じ)、無効なら false」
 //   どれでもなければ null(未ログイン。呼び出し側が 401)。
 // orgId は MIGRATION_ORG_ID(未設定なら null = 共有ログインは何も読めない・書けない)。
-import { isViewer } from './auth.js';
+import { isViewer, extractCredentials, parseCookies } from './auth.js';
 import { resolveIdentity } from './accountAuth.js';
 import { legacySharedPrincipal, user } from './domain/policy.js';
 
@@ -17,6 +17,12 @@ export function resolveSubject(req, {
   const id = resolveIdentity(req, { writeToken: token, repo: accounts || undefined, now });
   if (id?.kind === 'shared') return legacySharedPrincipal({ orgId, canWrite: true });
   if (id?.kind === 'user') {
+    // 閲覧ゲートの Cookie が有効な間は、Cookie のセッション(Web)より旧共有ログインを優先する
+    // (Phase 2: 旧共有ログインは組織メンバー(書き込み可)として並走)。Bearer は user のまま。
+    if (viewEnabled && !extractCredentials(req).bearer
+        && parseCookies(req.headers.cookie).sailviz_view === viewSecret) {
+      return legacySharedPrincipal({ orgId, canWrite: true });
+    }
     const orgIds = accounts ? accounts.listMembershipsOfUser(id.user.id).map((m) => m.org_id) : [];
     return user(id.user.id, orgIds);
   }

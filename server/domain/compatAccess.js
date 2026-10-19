@@ -9,11 +9,9 @@ import {
   canRead, canWrite, canComment, canUpdateProgress, isMemberOfOrg, canSeeDayContainer,
 } from './policy.js';
 
-const isSharedWriter = (s) => !!s && s.kind === 'legacy' && s.shared === true && s.canWrite === true && s.orgId != null;
-
 // 互換 API で書けるのは「組織設定済みで書込権限のある共有ログイン」だけ。
 // ログインユーザー(Bearer)は互換 API では読み取り専用(書き込みは新 API で行う)。
-export const isCompatWriter = isSharedWriter;
+export const isCompatWriter = (s) => !!s && s.kind === 'legacy' && s.shared === true && s.canWrite === true && s.orgId != null;
 
 export const sessionTarget = (t, orgId) => ({
   kind: t.kind === 'race' ? 'race' : 'session',
@@ -52,13 +50,13 @@ export const managedReflectionPredicate = (subject, orgId) => (row) => canWrite(
 
 // PUT してよいか。器が既にあればその組織のメンバーであること。
 export function canPutDay(subject, access) {
-  if (!isSharedWriter(subject)) return false;
+  if (!isCompatWriter(subject)) return false;
   return !access || isMemberOfOrg(subject, access.orgId);
 }
 
 // DELETE してよいか。器の中身を全部書けるときだけ(見えない項目を巻き込んで消さない)。
 export function canDeleteDay(subject, access) {
-  if (!access || !isSharedWriter(subject) || !isMemberOfOrg(subject, access.orgId)) return false;
+  if (!access || !isCompatWriter(subject) || !isMemberOfOrg(subject, access.orgId)) return false;
   return (access.tracks || []).every((t) => canWrite(subject, sessionTarget(t, access.orgId)))
     && (access.reflections || []).every((r) => canWrite(subject, reflectionTarget(r, access.orgId)));
 }
@@ -154,7 +152,7 @@ export function mergeRoadmapWrite(subject, existing, incoming, access) {
   for (const name of new Set([...Object.keys(ex), ...Object.keys(inc)])) {
     const t = m.get(name);
     if (!t) { // 既存に無い名前 = 新規
-      if (name in inc && isSharedWriter(subject)) out[name] = inc[name];
+      if (name in inc && isCompatWriter(subject)) out[name] = inc[name];
       continue;
     }
     if (canRead(subject, t) && canWrite(subject, t)) {

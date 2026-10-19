@@ -42,9 +42,11 @@ if (STORAGE === 'db') {
   if (!MIGRATION_ORG_ID) {
     console.warn('[warn] MIGRATION_ORG_ID が未設定です: 共有ログイン(閲覧ゲート・書込トークン)は練習・反省・オーバーレイを何も読めない・書けません。fly secrets set MIGRATION_ORG_ID=<組織ID> を設定してください');
   } else if (accounts) {
-    let exists = true;
-    try { exists = !!accounts.getOrg(MIGRATION_ORG_ID); } catch { /* 確認できなければ警告しない */ }
-    if (!exists) console.warn('[warn] MIGRATION_ORG_ID の組織が存在しません: 共有ログインは組織のデータに一致しません(組織を作成してから設定してください)');
+    let exists = false;
+    let checked = true;
+    try { exists = !!accounts.getOrg(MIGRATION_ORG_ID); } catch { checked = false; }
+    if (!checked) console.warn('[warn] MIGRATION_ORG_ID の組織を確認できませんでした(起動は続けます): 組織が存在するか確認してください');
+    else if (!exists) console.warn('[warn] MIGRATION_ORG_ID の組織が存在しません: 共有ログインは組織のデータに一致しません(組織を作成してから設定してください)');
   }
 }
 

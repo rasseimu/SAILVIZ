@@ -54,6 +54,18 @@ export async function compatRoute(req, res, ctx) {
     });
   };
 
+  // 1回の読込みで JSON と access を得る(DB 版)。ファイル版は access なし。
+  const loadWithAccess = async (name) => (policyOn
+    ? store.readProjectWithAccess(name)
+    : { project: await store.readProject(name), access: null });
+  // 取込みの書き戻し用: 主体に見える中身だけにした JSON(見えない反省・軌跡は書き戻さない)。
+  // 器そのものが見えない(中身がすべて見えない)ときは空の中身にする(PUT は見えない項目に触れない)。
+  const loadForWrite = async (name, s) => {
+    const { project, access } = await loadWithAccess(name);
+    if (!policyOn) return project;
+    return filterProject(s, project, access) || { ...project, tracks: [], reflections: [] };
+  };
+
   if (path === '/api/auth') { send(res, 200, { unlocked: isAuthorized(req, token) }); return true; }
 
   // 閲覧セッションの状態。ゲート無効時は常にログイン済み扱い。
@@ -120,13 +132,19 @@ export async function compatRoute(req, res, ctx) {
     if (bad) { send(res, 400, { error: bad }); return true; }
 
     const reflections = reflectionsFromRows({ rows: mergeRowsByMember(rows), now: Date.now() });
-    let found = await store.findProjectByPracticeDate(practiceDate);
-    // 自分の組織の器でなければ(他組織・組織なし)使わず、新しい器を作る
-    if (found && policyOn && !canPutDay(writer, store.getProjectAccess(found.name))) found = null;
+    // 日付の合う器をすべて調べ、書ける(自組織の)最初の器を使う。無ければ新しい器を作る。
+    let found = null;
+    if (policyOn && typeof store.findProjectsByPracticeDate === 'function') {
+      found = store.findProjectsByPracticeDate(practiceDate)
+        .find((c) => canPutDay(writer, store.getProjectAccess(c.name))) || null;
+    } else {
+      found = await store.findProjectByPracticeDate(practiceDate);
+      if (found && policyOn && !canPutDay(writer, store.getProjectAccess(found.name))) found = null;
+    }
     let name, created = false, proj;
     if (found) {
       name = found.name;
-      proj = await store.readProject(name);
+      proj = await loadForWrite(name, writer);
       if (!Array.isArray(proj.reflections)) proj.reflections = [];
     } else {
       const existing = (await store.listProjects()).map((p) => p.name);
@@ -156,9 +174,10 @@ export async function compatRoute(req, res, ctx) {
     try { csv = await store.readUpload(importId, 'raw.csv'); }
     catch { send(res, 404, { error: 'import not found' }); return true; }
     let proj;
-    try { proj = await store.readProject(name); }
-    catch { send(res, 404, { error: 'project not found' }); return true; }
-    if (policyOn && !canPutDay(writer, store.getProjectAccess(name))) { send(res, 404, { error: 'project not found' }); return true; }
+    try {
+      if (policyOn && !canPutDay(writer, store.getProjectAccess(name))) throw new Error('forbidden');
+      proj = await loadForWrite(name, writer);
+    } catch { send(res, 404, { error: 'project not found' }); return true; }
 
     const parsed = parseSensorCsv(csv);
     const finalName = `${boatNumber.trim()}_${jstStamp(parsed.points[0].t)}.csv`;
@@ -234,12 +253,12 @@ export async function compatRoute(req, res, ctx) {
 
   if (path === '/api/summaries' && method === 'GET') {
     const subject = gateRead(); if (!subject) return true;
-    const list = policyOn ? await visibleList(subject) : await store.listProjects();
     const rows = [];
-    for (const { name } of list) {
+    for (const { name } of await store.listProjects()) {
       try {
-        let proj = await store.readProject(name);
-        if (policyOn) proj = filterProject(subject, proj, store.getProjectAccess(name)); // 見える中身だけで要約する
+        // 器ごとに1回だけ読む。見える中身だけで要約する(見えない器は null)。
+        const { project, access } = await loadWithAccess(name);
+        const proj = policyOn ? filterProject(subject, project, access) : project;
         if (proj) rows.push({ name, ...practiceSummary(proj, { name }) });
       } catch { /* 壊れたファイルは飛ばす */ }
     }
@@ -253,9 +272,9 @@ export async function compatRoute(req, res, ctx) {
     if (method === 'GET') {
       const subject = gateRead(); if (!subject) return true;
       try {
-        let proj = await store.readProject(name);
+        const { project, access } = await loadWithAccess(name);
         // 見えない器は存在も伏せて 404。見える器は見える中身だけ返す。
-        if (policyOn) proj = filterProject(subject, proj, store.getProjectAccess(name));
+        const proj = policyOn ? filterProject(subject, project, access) : project;
         if (!proj) { send(res, 404, { error: 'not found' }); return true; }
         send(res, 200, proj);
       } catch { send(res, 404, { error: 'not found' }); }

@@ -55,3 +55,20 @@ test('アカウントの Bearer → user(userId, 所属組織)。無効なトー
   // 共有トークンが先に判定される
   assert.equal(resolveSubject(req({ authorization: `Bearer ${TOKEN}` }), { ...base, accounts }).kind, 'legacy');
 });
+
+test('閲覧 Cookie とアカウントの sailviz_session Cookie が両方ある → 旧共有ログイン(書込可)を優先。Bearer は user のまま', () => {
+  const tok = 'account-token-xyz';
+  const accounts = {
+    getAuthTokenByHash: (h) => (h === hashToken(tok) ? { id: 't1', user_id: 'u_1', revoked_at: null, expires_at: null } : null),
+    getUser: (id) => (id === 'u_1' ? { id: 'u_1', deleted_at: null } : null),
+    touchAuthToken: () => {},
+    listMembershipsOfUser: () => [{ org_id: 'o_a' }],
+  };
+  const both = req({ cookie: `sailviz_view=${SECRET}; sailviz_session=${tok}` });
+  assert.deepEqual(resolveSubject(both, { ...base, accounts }), { kind: 'legacy', shared: true, orgId: 'o_main', canWrite: true });
+  assert.equal(resolveSubject(req({ cookie: `sailviz_session=${tok}` }), { ...base, accounts }).kind, 'user');
+  assert.equal(resolveSubject(req({ cookie: `sailviz_view=bad; sailviz_session=${tok}` }), { ...base, accounts }).kind, 'user');
+  const bearer = req({ authorization: `Bearer ${tok}`, cookie: `sailviz_view=${SECRET}` });
+  assert.equal(resolveSubject(bearer, { ...base, accounts }).kind, 'user');
+  assert.equal(resolveSubject(req({ cookie: `sailviz_session=${tok}` }), { ...base, accounts, viewEnabled: false, viewSecret: null }).kind, 'user');
+});
