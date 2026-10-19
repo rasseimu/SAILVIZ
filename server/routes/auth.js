@@ -278,7 +278,29 @@ export function createAuthRoute({
         return err(res, 422, 'invalid_password', 'パスワードが違います');
       }
       const uid = id.user.id;
+      // H25: 唯一の管理者の組織は後任へ引き継ぐ(指定があれば検証して使い、無ければ linked_at 最古→user_id 昇順)。
+      const adminOrgIds = accounts.listOrgIdsAdministeredBy(uid);
+      const succ = body.successors;
+      if (succ !== undefined && (succ === null || typeof succ !== 'object' || Array.isArray(succ)
+        || Object.values(succ).some((v) => typeof v !== 'string' || !v))) {
+        return err(res, 422, 'invalid_input', 'successors は {組織ID: ユーザーID} の形にしてください');
+      }
+      const picked = succ || {};
+      for (const [orgId, userId] of Object.entries(picked)) {
+        if (!adminOrgIds.includes(orgId)) return err(res, 422, 'invalid_input', '自分が管理していない組織が successors にあります');
+        const sole = accounts.listOrgAdmins(orgId).every((a) => a === uid);
+        if (!sole) continue; // 他にも管理者がいれば無視
+        if (userId === uid || !accounts.isMember(orgId, userId)) {
+          return err(res, 422, 'invalid_input', '後任はその組織の本人以外のメンバーから選んでください');
+        }
+      }
       accounts.withTx(() => {
+        for (const orgId of adminOrgIds) {
+          if (!accounts.listOrgAdmins(orgId).every((a) => a === uid)) continue;
+          const next = picked[orgId]
+            ?? accounts.listMembers(orgId).find((m) => m.user_id !== uid)?.user_id;
+          if (next) accounts.addOrgAdmin(orgId, next);
+        }
         accounts.revokeAllAuthTokens(uid, now());
         accounts.removeOrgAdminsOfUser(uid);
         for (const m of accounts.listMembershipsOfUser(uid)) accounts.unlinkMember(m.org_id, uid);
@@ -290,7 +312,7 @@ export function createAuthRoute({
       });
       // TODO(S2.7 以降): §4.3 の「本人のセッション・反省・ロードマップ・声の反省の削除」「他人の乗員欄を（退会済み）に置換」
       //   「議事録の本人の一言の削除」。それらを書き込む API(Phase 3〜5)ができた時点で、ここから呼ぶ(S3.1・S4.1・S4.2・S5.1・S5.5 で扱う)。
-      //   org_admins の行は上で削除済み。唯一の管理者の退会で管理者不在の組織が残る件は正本に定めが無い(未確認事項)。
+      //   org_admins の行は上で削除済み(唯一の管理者の組織は H25 に従い後任へ引き継ぎ済み)。
       send(res, 200, { ok: true }, clearCookie());
     },
 
