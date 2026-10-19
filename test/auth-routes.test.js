@@ -14,7 +14,7 @@ import { LIMITS } from '../server/routes/auth.js';
 const [major] = process.versions.node.split('.').map(Number);
 const skip = major >= 24 ? undefined : 'node:sqlite が要る(Node >=24)';
 const MIG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'server', 'db', 'migrations');
-const FAST = { N: 1024, r: 8, p: 1, keyLen: 32, saltLen: 16 };
+const FAST = { N: 1024, r: 8, p: 3, keyLen: 32, saltLen: 16 };
 const BASE_URL = 'https://app.example.test';
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -189,7 +189,7 @@ test('login: 未確認でも使える(§4.2)。古いパラメータのハッシ
   const u = accounts.createUser({ email: 'old@example.test', name: 'x', passwordHash: await hashPassword('pass-word-1', old) });
   const r = await call('POST', '/api/auth/login', { email: 'old@example.test', password: 'pass-word-1' });
   assert.equal(r.status, 200);
-  assert.match(accounts.getUser(u.id).password_hash, /^scrypt\$1024\$/);
+  assert.match(accounts.getUser(u.id).password_hash, /^scrypt\$1024\$8\$3\$/); // p=1 → p=3 に保存し直される(S2.2-P3)
   assert.equal((await call('POST', '/api/auth/login', { email: 'old@example.test', password: 'pass-word-1' })).status, 200);
 });
 
