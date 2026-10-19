@@ -4,6 +4,7 @@
 // 確認・再設定のトークンは読んだらすぐ URL から消し(history.replaceState)、ログや外部へ出さない。
 import {
   pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm, membersView,
+  inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView,
 } from './logic.js';
 
 const main = document.getElementById('ac-main');
@@ -152,7 +153,10 @@ function renderLoggedOut(tab) {
   mount(h('section', { class: 'ac-card' }, h('h1', {}, 'SailViz アカウント'), tabs, body));
 }
 
-function loginForm() {
+// ログイン・登録のあとの動作。既定は /account へ。参加ページ(/join/:code)では URL を変えずに描き直して戻る。
+const toAccount = async () => { history.replaceState(null, '', '/account'); await render(); };
+
+function loginForm(after = toAccount) {
   const email = h('input', { id: 'ac-login-email', type: 'email', autocomplete: 'username', required: true });
   const pw = h('input', { id: 'ac-login-password', type: 'password', autocomplete: 'current-password', required: true });
   const btn = h('button', { id: 'ac-login-submit', class: 'ac-btn', type: 'submit' }, 'ログイン');
@@ -163,14 +167,13 @@ function loginForm() {
       if (!email.value.trim() || !pw.value) return setMsg('メールアドレスとパスワードを入力してください', 'error');
       const r = await api('POST', '/api/auth/login', { email: email.value, password: pw.value });
       if (r.status !== 200) return setMsg(apiErrorMessage(r.status, r.json), 'error');
-      history.replaceState(null, '', '/account');
-      await render();
+      await after();
     });
   });
   return form;
 }
 
-function registerForm() {
+function registerForm(after = toAccount) {
   const email = h('input', { id: 'ac-reg-email', type: 'email', autocomplete: 'email', required: true });
   const pw = h('input', { id: 'ac-reg-password', type: 'password', autocomplete: 'new-password', required: true, minlength: '8' });
   const name = h('input', { id: 'ac-reg-name', type: 'text', autocomplete: 'name', required: true });
@@ -192,8 +195,7 @@ function registerForm() {
         email: f.email, password: f.password, name: f.name, affiliationText: f.affiliationText, agreedAt: Date.now(),
       });
       if (r.status !== 200) return setMsg(apiErrorMessage(r.status, r.json), 'error');
-      history.replaceState(null, '', '/account');
-      await render();
+      await after();
       setMsg('登録しました。確認メールのリンクを開いてください。', 'ok');
     });
   });
@@ -287,6 +289,7 @@ async function renderRoster() {
   const area = h('section', { class: 'ac-card' }, h('h1', {}, `名簿: ${me.org.name}`), h('p', { class: 'ac-note' }, '読み込み中…'));
   mount(area);
   const [rr, mr] = await Promise.all([api('GET', `/api/orgs/${orgId}/roster`), api('GET', `/api/orgs/${orgId}/members`)]);
+  if (!area.isConnected) return; // 待っている間に別の描画(hashchange など)が画面を差し替えた。古い方は何も足さない
   area.replaceChildren(h('h1', {}, `名簿: ${me.org.name}`));
   if (rr.status === 403) {
     area.append(h('p', { id: 'ac-roster-denied', class: 'ac-note' }, '名簿を見られるのは組織の管理者だけです。'));
@@ -315,6 +318,7 @@ async function renderRoster() {
       h('thead', {}, h('tr', {}, h('th', {}, '氏名'), h('th', {}, 'メール'), h('th', {}, '状態'))),
       h('tbody', {}, ...rows.map((r) => h('tr', {}, h('td', {}, r.name), h('td', {}, r.email || '—'), h('td', {}, r.linkedUserId ? '紐付け済み' : '未紐付け'))))));
     area.append(form, h('h2', {}, `名簿の現在の内容(${rows.length} 人)`), rows.length ? table : h('p', { class: 'ac-note' }, 'まだ名簿はありません。'));
+    main.append(invitesCard(orgId)); // 名簿が読めた = 管理者。招待の管理は管理者だけに出す
   }
   const mv = membersView(mr.status, mr.json);
   if (mv.kind === 'error') {
@@ -327,9 +331,145 @@ async function renderRoster() {
     members.length ? h('ul', { id: 'ac-members', class: 'ac-list' }, ...members.map((m) => h('li', {}, m.name))) : h('p', { class: 'ac-note' }, 'まだ紐付け済みのメンバーはいません。')));
 }
 
+// ---- 招待の管理(組織管理者。S2.10) ----
+// API: POST/GET /api/orgs/:orgId/invites、POST …/invites/:inviteId/revoke(設計書 v2 §10.3)。
+// 配るリンクは参加ページの正規の形 `<このサイトの origin>/join/<code>`(サーバが返す `/?invite=` 形も同じページに着く)。
+const joinUrlFor = (code) => `${location.origin}/join/${encodeURIComponent(code)}`;
+
+async function copyText(text, inputEl) {
+  try { await navigator.clipboard.writeText(text); return true; } catch { /* 権限なし・非 https など */ }
+  try { inputEl.focus(); inputEl.select(); return document.execCommand('copy'); } catch { return false; }
+}
+
+function invitesCard(orgId) {
+  const card = h('section', { id: 'ac-invites-card', class: 'ac-card' }, h('h2', {}, '招待リンク'),
+    h('p', { class: 'ac-note' }, 'リンクを知っている人は、ログインして「参加」を押すとこの組織のメンバーになれます(メール確認済みの人のみ)。配る相手を選んでください。'));
+  const list = h('div', { id: 'ac-invites-list' }, h('p', { class: 'ac-note' }, '読み込み中…'));
+  const created = h('div', { id: 'ac-invite-created', hidden: true });
+  const days = h('input', { id: 'ac-invite-days', type: 'text', inputmode: 'numeric', placeholder: '空なら無期限' });
+  const uses = h('input', { id: 'ac-invite-uses', type: 'text', inputmode: 'numeric', placeholder: '空なら無制限' });
+  const btn = h('button', { id: 'ac-invite-create', class: 'ac-btn', type: 'submit' }, '招待リンクを発行');
+  const form = h('form', { class: 'ac-form', novalidate: true }, field('有効日数(1〜365、任意)', days), field('使用回数の上限(1〜1000、任意)', uses), btn);
+
+  const copyBtn = (text, input, id) => {
+    const b = h('button', { class: 'ac-btn ac-btn-ghost ac-invite-copy', type: 'button', id }, 'コピー');
+    b.addEventListener('click', async () => {
+      const ok = await copyText(text, input);
+      setMsg(ok ? '招待リンクをコピーしました。' : 'コピーできませんでした。リンクを選択して手動でコピーしてください。', ok ? 'ok' : 'error');
+    });
+    return b;
+  };
+  const urlInput = (url, id) => h('input', { class: 'ac-invite-url', id, type: 'text', readonly: true, value: url, 'aria-label': '招待リンク' });
+
+  async function refresh() {
+    const r = await api('GET', `/api/orgs/${orgId}/invites`);
+    if (r.status !== 200 || !Array.isArray(r.json)) {
+      list.replaceChildren(h('p', { id: 'ac-invites-error', class: 'ac-note', role: 'alert' }, `招待を読み込めませんでした。${apiErrorMessage(r.status, r.json)}`));
+      return;
+    }
+    if (!r.json.length) { list.replaceChildren(h('p', { id: 'ac-invites-empty', class: 'ac-note' }, '有効な招待リンクはありません。')); return; }
+    const now = Date.now();
+    list.replaceChildren(h('ul', { id: 'ac-invites', class: 'ac-list' }, ...r.json.map((inv) => {
+      const url = joinUrlFor(inv.code);
+      const input = urlInput(url);
+      const revoke = h('button', { class: 'ac-btn ac-btn-ghost ac-invite-revoke', type: 'button' }, '失効させる');
+      revoke.addEventListener('click', () => submitting(revoke, async () => {
+        if (!window.confirm('この招待リンクを失効させます。以後このリンクでは参加できません。よろしいですか?')) return;
+        const rv = await api('POST', `/api/orgs/${orgId}/invites/${encodeURIComponent(inv.id)}/revoke`, {});
+        if (rv.status !== 200) return setMsg(apiErrorMessage(rv.status, rv.json), 'error');
+        await refresh();
+        setMsg('招待リンクを失効させました。', 'ok');
+      }));
+      return h('li', { class: 'ac-invite-row' }, input, h('p', { class: 'ac-note ac-invite-limit' }, inviteLimitLabel(inv, now)),
+        h('div', { class: 'ac-row' }, copyBtn(url, input), revoke));
+    })));
+  }
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitting(btn, async () => {
+      const p = parseInviteForm(days.value, uses.value);
+      if (!p.ok) return setMsg(p.message, 'error');
+      const r = await api('POST', `/api/orgs/${orgId}/invites`, p.body);
+      if (r.status !== 201 || !r.json?.code) return setMsg(apiErrorMessage(r.status, r.json), 'error');
+      const url = joinUrlFor(r.json.code);
+      const input = urlInput(url, 'ac-invite-url');
+      created.hidden = false;
+      created.replaceChildren(h('p', { class: 'ac-note' }, '発行しました。このリンクを招待したい人に送ってください。'), input, h('div', { class: 'ac-row' }, copyBtn(url, input, 'ac-invite-copy')));
+      await refresh();
+      setMsg('招待リンクを発行しました。', 'ok');
+    });
+  });
+  card.append(form, created, h('h3', {}, '有効な招待リンク'), list);
+  refresh();
+  return card;
+}
+
+// ---- 参加ページ /join/:code(`/?invite=<code>` はサーバが 302 でここへ寄せる。S2.10) ----
+function joinCard(...kids) { return h('section', { class: 'ac-card' }, h('h1', {}, '組織への招待'), ...kids); }
+
+function renderJoinLoggedOut(tab) {
+  const tabs = h('div', { class: 'ac-tabs', role: 'tablist' },
+    ...[['login', 'ログイン'], ['register', '新規登録']].map(([id, label]) =>
+      h('button', { id: `ac-tab-${id}`, class: 'ac-tab', type: 'button', role: 'tab', 'aria-selected': String(id === tab), onclick: () => renderJoinLoggedOut(id) }, label)));
+  mount(joinCard(
+    h('p', { id: 'ac-join-login-note' }, '組織への招待リンクです。参加するには、ログインまたは新規登録をしてください(メールアドレスの確認も必要です)。'),
+    tabs, tab === 'register' ? registerForm(render) : loginForm(render)));
+}
+
+async function renderJoin() {
+  const code = inviteCodeFromPath(location.pathname);
+  if (!code) {
+    mount(joinCard(h('p', { id: 'ac-join-result', 'data-state': 'error' }, '招待リンクが正しくありません。')));
+    return;
+  }
+  const r = await loadMe();
+  renderNav();
+  if (!me) {
+    renderJoinLoggedOut('login');
+    if (r.status === 503) setMsg(apiErrorMessage(503, r.json), 'error');
+    return;
+  }
+  const pv = await api('GET', `/api/invites/${encodeURIComponent(code)}`);
+  if (pv.status !== 200) {
+    const v = joinFailureView(pv.status, pv.json);
+    const kids = [h('p', { id: 'ac-join-result', 'data-state': 'error', 'data-kind': v.kind }, v.message)];
+    if (v.kind === 'unverified') {
+      const resend = h('button', { id: 'ac-resend', class: 'ac-btn', type: 'button' }, '確認メールを再送');
+      resend.addEventListener('click', () => submitting(resend, async () => {
+        const rs = await api('POST', '/api/auth/verify-email/resend', {});
+        if (rs.status === 200) setMsg('確認メールを送りました。届いたリンクを開いたあと、この招待リンクをもう一度開いてください。', 'ok');
+        else setMsg(apiErrorMessage(rs.status, rs.json), 'error');
+      }));
+      kids.push(resend);
+    }
+    mount(joinCard(...kids));
+    return;
+  }
+  const { orgName, valid } = pv.json;
+  if (!valid) {
+    const v = joinFailureView(410, { error: { code: `invite_${pv.json.reason}` } });
+    mount(joinCard(h('p', { id: 'ac-join-org' }, orgName), h('p', { id: 'ac-join-result', 'data-state': 'error', 'data-kind': v.kind }, v.message)));
+    return;
+  }
+  const btn = h('button', { id: 'ac-join-submit', class: 'ac-btn', type: 'button' }, `${orgName} に参加`);
+  btn.addEventListener('click', () => submitting(btn, async () => {
+    const a = await api('POST', `/api/invites/${encodeURIComponent(code)}/accept`, {});
+    if (a.status === 200) {
+      mount(joinCard(h('p', { id: 'ac-join-result', 'data-state': 'ok' }, `${orgName} に参加しました。すでに参加済みだった場合も、この表示になります。`),
+        h('a', { class: 'ac-btn', href: '/account' }, 'アカウントのページへ')));
+      return;
+    }
+    const v = joinFailureView(a.status, a.json);
+    setMsg(v.message, 'error');
+  }));
+  mount(joinCard(h('p', { id: 'ac-join-org' }, orgName), h('p', { class: 'ac-note' }, `「${orgName}」に招待されています。参加すると、この組織のメンバーとして名簿・共有の対象になります。`), btn));
+}
+
 // ---- 入口 ----
 async function render() {
   const mode = pageModeForPath(location.pathname);
+  if (mode === 'join') return renderJoin();
   if (mode === 'verify') { renderNav(); return renderVerify(); }
   if (mode === 'reset') { renderNav(); return renderReset(); }
   const r = await loadMe();

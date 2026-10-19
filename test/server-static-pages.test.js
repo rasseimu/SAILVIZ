@@ -44,6 +44,34 @@ test('serveStatic: 受け口以外(/・/index.html)には Referrer-Policy を付
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test('pagePathFor: /join/:code は account.html(招待の参加ページ、S2.10)', () => {
+  assert.equal(pagePathFor('/join/abc'), '/account.html');
+  assert.equal(pagePathFor('/join/abc/'), '/account.html');
+  assert.equal(pagePathFor('/join'), null);
+  assert.equal(pagePathFor('/join/a/b'), null);
+});
+
+test('serveStatic: /?invite=<code> は /join/<code> へ 302(サーバの招待 URL の形、S2.10)', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sailviz-pages-'));
+  try {
+    await writeFile(join(root, 'index.html'), '<h1>idx</h1>');
+    const res = fakeRes();
+    await serveStatic({ url: '/?invite=Ab-_09' }, res, root);
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/join/Ab-_09');
+    assert.equal(res.headers['referrer-policy'], 'no-referrer');
+    const odd = fakeRes();
+    await serveStatic({ url: '/?invite=a%2Fb%20c' }, odd, root);
+    assert.equal(odd.headers.location, '/join/a%2Fb%20c');
+    const empty = fakeRes();
+    await serveStatic({ url: '/?invite=' }, empty, root);
+    assert.equal(empty.status, 200); // 空は通常のトップ
+    const other = fakeRes();
+    await serveStatic({ url: '/index.html?invite=x' }, other, root);
+    assert.equal(other.status, 200); // 寄せるのは / だけ
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('serveStatic: /verify-email?token=… は HTML を返し no-store・Referrer-Policy 付き', async () => {
   const root = await mkdtemp(join(tmpdir(), 'sailviz-pages-'));
   try {

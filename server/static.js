@@ -23,14 +23,24 @@ export function contentType(pathname) {
 }
 
 // アカウント画面(S2.7)。確認・再設定メールのリンク先 /verify-email・/reset-password と /account を同じ HTML で配信する。
+// 招待の参加ページ /join/:code(S2.10)も同じ HTML。
 const ACCOUNT_PAGES = new Set(['/account', '/verify-email', '/reset-password']);
 export function pagePathFor(pathname) {
   const p = String(pathname).replace(/\/+$/, '');
+  if (/^\/join\/[^/]+$/.test(p)) return '/account.html';
   return ACCOUNT_PAGES.has(p) ? '/account.html' : null;
 }
 
 export async function serveStatic(req, res, rootDir) {
   const url = new URL(req.url, 'http://localhost');
+  // 招待 API が返す url は `/?invite=<code>`(S2.9)。参加ページの正規の形は `/join/<code>` なので、
+  // `/` に invite 付きで来たらここへ寄せる(コードは Referer に漏らさない)。
+  const invite = url.pathname === '/' ? url.searchParams.get('invite') : null;
+  if (invite) {
+    res.writeHead(302, { location: `/join/${encodeURIComponent(invite)}`, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
+    res.end();
+    return;
+  }
   let rel = decodeURIComponent(url.pathname);
   const page = pagePathFor(rel);
   if (page) rel = page;
