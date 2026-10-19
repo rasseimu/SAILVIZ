@@ -25,7 +25,7 @@ export function validateOrgName(raw) {
     return { ok: false, message: `組織名は ${ORG_NAME_MAX} 文字以内にしてください` };
   }
   if ([...name].some((ch) => isForbiddenChar(ch.codePointAt(0)))) {
-    return { ok: false, message: '組織名に制御文字は使えません' };
+    return { ok: false, message: '組織名に制御文字や見えない文字は使えません' };
   }
   return { ok: true, name };
 }

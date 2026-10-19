@@ -165,7 +165,7 @@ test('linkMember が失敗したら組織・管理者の作成も巻き戻る(�
 
 test('組織名にゼロ幅文字・タグ文字 → 422 invalid_name', { skip }, async () => {
   const { tok } = mkUser();
-  for (const ch of ['​', '⁠', '﻿', '\u{e0067}']) {
+  for (const ch of ['\u{200b}', '\u{2060}', '\u{feff}', '\u{e0067}']) {
     const r = await post({ name: `部${ch}名` }, tok);
     assert.equal(r.status, 422);
     assert.equal((await r.json()).error.code, 'invalid_name');
@@ -187,10 +187,31 @@ test('500 の本文に内部の例外メッセージを出さない(汎用メッ
     const text = await r.text();
     assert.equal(text.includes(secret), false);
     assert.deepEqual(JSON.parse(text), { error: 'internal_error' });
-    assert.ok(logged.some((l) => l.includes(secret)), 'ログには詳細が残る');
+    assert.ok(logged.some((l) => l.includes('-> 500: Error')), 'ログには例外名とフレームが残る');
+    assert.equal(logged.some((l) => l.includes(secret)), false, 'ログにも e.message は出さない');
   } finally {
     console.error = orig;
     await new Promise((r) => s.close(r));
+  }
+});
+
+test('壊れた JSON は 500 にならず 400、ログに本文の断片が出ない(旧 API 経路)', { skip }, async () => {
+  const frag = 'hunter2x';
+  const logged = [];
+  const orig = console.error;
+  console.error = (...a) => logged.push(a.map(String).join(' '));
+  try {
+    const r = await fetch(`${base}/api/sensor-imports`, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer shared-secret' },
+      body: `{"password":"${frag}}`,
+    });
+    assert.equal(r.status, 400);
+    const text = await r.text();
+    assert.deepEqual(JSON.parse(text), { error: 'bad json' });
+    assert.equal(text.includes(frag), false);
+    assert.equal(logged.some((l) => l.includes(frag)), false);
+  } finally {
+    console.error = orig;
   }
 });
 

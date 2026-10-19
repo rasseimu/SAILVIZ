@@ -64,7 +64,9 @@ export async function apiCommitMinutes({ practiceDate, rows }) {
   const res = await send('/api/minutes-imports/commit', 'POST', { practiceDate, rows });
   if (!res.ok) {
     const d = await res.json().catch(() => ({}));
-    throw new Error(d.error || `取込に失敗 (${res.status})`);
+    // サーバの汎用コード(internal_error)は画面に出さず、日本語の文言にする。
+    const msg = d.error && d.error !== 'internal_error' ? d.error : `取込に失敗 (${res.status})`;
+    throw new Error(msg);
   }
   return res.json();
 }
