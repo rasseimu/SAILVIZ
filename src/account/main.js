@@ -184,13 +184,15 @@ function registerForm(after = toAccount) {
     h('p', { class: 'ac-note' }, '登録すると確認メールが届きます。メールのリンクを開くとアカウントが有効になります。'),
     h('p', { id: 'ac-reg-roster-note', class: 'ac-note' }, '部の名簿に載っているアドレスで登録してください。名簿と違うアドレスでは、部に自動で紐付きません。'),
     field('メールアドレス', email), field('パスワード(8文字以上)', pw), field('氏名', name), field('所属(例: ○○大学ヨット部)', affil),
-    h('label', { class: 'ac-check' }, agree, '利用規約・プライバシーポリシー・位置情報と録音の用途に同意します'), btn);
+    h('label', { id: 'ac-reg-agree-label', class: 'ac-check' }, agree, '利用規約・プライバシーポリシー・位置情報と録音の用途に同意します'), btn);
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     submitting(btn, async () => {
       const f = { email: email.value, password: pw.value, name: name.value, affiliationText: affil.value, agreed: agree.checked };
       const c = checkRegisterForm(f);
       if (!c.ok) return setMsg(c.message, 'error');
+      // agreedAt は「同意ボタンを押した時刻」をクライアントの時計(Date.now())で送る。サーバの受信時刻には揃えていない。
+      // サーバ時刻に揃えるなら API 契約(設計書 v2 §10)の変更になるため、人の判断待ち(S2.7-P2 P3-3)。
       const r = await api('POST', '/api/auth/register', {
         email: f.email, password: f.password, name: f.name, affiliationText: f.affiliationText, agreedAt: Date.now(),
       });
@@ -302,6 +304,7 @@ async function renderRoster() {
     const save = h('button', { id: 'ac-roster-save', class: 'ac-btn', type: 'submit' }, '名簿を提出');
     const form = h('form', { class: 'ac-form', novalidate: true },
       h('p', { class: 'ac-note' }, '1行に1人、「氏名,メール,旧名簿の氏名(任意)」の順で入力します(CSV の貼り付け可)。提出すると名簿全体が置き換わり、メールが一致する確認済みの人が自動で組織に紐付きます。名簿から外すと紐付けも外れます。'),
+      h('p', { id: 'ac-roster-header-note', class: 'ac-note' }, 'ヘッダ行を付けるときは「氏名,メール」の形にしてください(1列だけの「氏名」はヘッダにならず、部員の名前として読まれます)。'),
       ta, save);
     form.addEventListener('submit', (e) => {
       e.preventDefault();
