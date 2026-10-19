@@ -371,6 +371,7 @@ test('password-reset/confirm: ハッシュ計算中に退会されたら 422 inv
   const r = await p;
   assert.equal(r.status, 422); assert.equal(r.json.error.code, 'invalid_token');
   assert.equal(accounts.getUser(reg.json.user.id).password_hash, before);
+  assert.equal(accounts.getEmailTokenByHash(hashToken(t)).used_at, null); // トークン未使用のまま
 });
 
 test('password-reset/confirm: ハッシュ計算中にメール未確認に戻ったら 422 invalid_token で、password_hash は書かれない', { skip }, async () => {
@@ -384,18 +385,23 @@ test('password-reset/confirm: ハッシュ計算中にメール未確認に戻�
   gate.release();
   const r = await p;
   assert.equal(r.status, 422); assert.equal(r.json.error.code, 'invalid_token');
-  assert.equal(accounts.getUser(reg.json.user.id).password_hash, before);
+  assert.equal(accounts.getEmailTokenByHash(hashToken(t)).used_at, null); // トークン未使用のまま
 });
 
-test('password-reset/confirm: 同じトークンの同時 2 本は 1 本 200・もう 1 本 422。パスワードは先に通った方で、失敗は回数に記録される', { skip }, async () => {
+test('password-reset/confirm: 同じトークンの同時 2 本は 1 本 200・もう 1 本 422(トランザクション内の consume 失敗)。パスワードは先に通った方で、失敗は回数に記録される', { skip }, async () => {
+  const gate = useGatedHash();
   const { t } = await verifiedResetToken();
-  const pws = ['first-pass-word-1', 'second-pass-word-2'];
-  const rs = await Promise.all(pws.map((newPassword) => call('POST', '/api/auth/password-reset/confirm', { resetToken: t, newPassword })));
-  const statuses = rs.map((r) => r.status).sort();
-  assert.deepEqual(statuses, [200, 422]);
-  const winner = pws[rs.findIndex((r) => r.status === 200)];
-  const loser = pws[rs.findIndex((r) => r.status === 422)];
-  assert.equal(rs.find((r) => r.status === 422).json.error.code, 'invalid_token');
+  const winner = 'second-pass-word-2'; const loser = 'first-pass-word-1';
+  // 1本目は最初の検証を通ってハッシュ計算中で止める。2本目はその間に最後まで通る。
+  const entered = gate.arm();
+  const first = call('POST', '/api/auth/password-reset/confirm', { resetToken: t, newPassword: loser });
+  await entered;
+  const second = await call('POST', '/api/auth/password-reset/confirm', { resetToken: t, newPassword: winner });
+  assert.equal(second.status, 200);
+  gate.release(); // 1本目は最初の検証を通過済みなので、失敗はトランザクション内の consume で起きる
+  const firstRes = await first;
+  assert.equal(firstRes.status, 422);
+  assert.equal(firstRes.json.error.code, 'invalid_token');
   assert.equal((await call('POST', '/api/auth/login', { email: REG.email, password: loser })).status, 401);
   assert.equal((await call('POST', '/api/auth/login', { email: REG.email, password: winner })).status, 200);
   // 負けた 1 本が失敗として 1 回記録されている(残り max-1 回で 429)
