@@ -385,6 +385,7 @@ test('password-reset/confirm: ハッシュ計算中にメール未確認に戻�
   gate.release();
   const r = await p;
   assert.equal(r.status, 422); assert.equal(r.json.error.code, 'invalid_token');
+  assert.equal(accounts.getUser(reg.json.user.id).password_hash, before);
   assert.equal(accounts.getEmailTokenByHash(hashToken(t)).used_at, null); // トークン未使用のまま
 });
 
