@@ -7,7 +7,7 @@
 //   どれでもなければ null(未ログイン。呼び出し側が 401)。
 // orgId は MIGRATION_ORG_ID(未設定なら null = 共有ログインは何も読めない・書けない)。
 import { isViewer, extractCredentials, parseCookies } from './auth.js';
-import { resolveIdentity } from './accountAuth.js';
+import { resolveIdentity, sameSecret } from './accountAuth.js';
 import { legacySharedPrincipal, user } from './domain/policy.js';
 
 export function resolveSubject(req, {
@@ -20,7 +20,7 @@ export function resolveSubject(req, {
     // 閲覧ゲートの Cookie が有効な間は、Cookie のセッション(Web)より旧共有ログインを優先する
     // (Phase 2: 旧共有ログインは組織メンバー(書き込み可)として並走)。Bearer は user のまま。
     if (viewEnabled && !extractCredentials(req).bearer
-        && parseCookies(req.headers.cookie).sailviz_view === viewSecret) {
+        && sameSecret(parseCookies(req.headers.cookie).sailviz_view, viewSecret)) {
       return legacySharedPrincipal({ orgId, canWrite: true });
     }
     const orgIds = accounts ? accounts.listMembershipsOfUser(id.user.id).map((m) => m.org_id) : [];

@@ -320,6 +320,41 @@ test('P1: 閲覧 Cookie とアカウントの sailviz_session Cookie が両方�
   // 新 API の /api/me は Cookie のアカウントのまま
   const me = await call(baseA, 'GET', '/api/me', { ck: both });
   assert.equal(me.status, 200);
+  const mine = await call(baseA, 'GET', '/api/me', { auth: ownerTok });
+  assert.ok(mine.json.user.id);
+  assert.equal(me.json.user.id, mine.json.user.id);
+  assert.equal((await call(baseA, 'GET', '/api/me', { ck: cookie })).status, 401, '閲覧 Cookie だけでは /api/me は使えない');
+});
+
+test('P3-3: sensor-imports commit の colorIndex は見えない軌跡も数える (色が重ならない)', { skip }, async () => {
+  const DAY = 'sailviz-20260301-0900.sailviz.json';
+  repo.writeProject(DAY, proj({ practiceDate: Date.UTC(2026, 2, 1, 3, 0, 0), tracks: [trk('p1', 1000), trk('p2', 2000)] }), { orgId: ORG });
+  db.prepare("UPDATE rec_sessions SET visibility = 'private', owner_user_id = 'u_x' WHERE practice_day_id = (SELECT id FROM practice_days WHERE legacy_name = ?) AND position = 0").run(DAY);
+  const csv = ['time,latitude,longitude,speed,bearing,horizontalAccuracy', ...Array.from({ length: 5 }, (_, i) => `${(Date.UTC(2026, 2, 1, 3, 0, i)) * 1e6},10.0,100.0,2,90,4`)].join('\n') + '\n';
+  const up = await call(baseA, 'POST', '/api/sensor-imports', { ck: cookie, body: { person: 'テスト部員A', csv } });
+  assert.equal(up.status, 200, JSON.stringify(up.json));
+  const c = await call(baseA, 'POST', `/api/sensor-imports/${encodeURIComponent(up.json.importId)}/commit`, { ck: cookie, body: { name: DAY, boatNumber: '1234' } });
+  assert.equal(c.status, 200, JSON.stringify(c.json));
+  const colors = rows('SELECT view FROM tracks t JOIN rec_sessions s ON s.id = t.session_id JOIN practice_days p ON p.id = s.practice_day_id WHERE p.legacy_name = ?', DAY).map((r) => JSON.parse(r.view).color);
+  assert.equal(colors.length, 3);
+  assert.equal(new Set(colors.map(String)).size >= 2, true);
+  // 新しい軌跡の色は 3 番目のパレット色(全軌跡数 2 → index 2)
+  const { buildTrack } = await import('../server/sensorimport.js');
+  const expected = buildTrack({ id: 'x', name: 'x', points: [], bounds: null, colorIndex: 2 }).color;
+  assert.ok(colors.includes(expected));
+  assert.equal(colors.filter((x) => x === expected).length >= 1, true);
+});
+
+test('P3-5: sensor-imports は同じ日・同じ人の反省が複数の器にあっても、見える器を matched にする', { skip }, async () => {
+  const day = Date.UTC(2026, 2, 31, 15, 0, 0); // JST 0 時(取込みの practiceDate と完全一致する)
+  const mine = 'sailviz-20260401-0900.sailviz.json', theirs = 'sailviz-20260401-1000.sailviz.json';
+  const person = 'テスト部員B';
+  repo.writeProject(theirs, proj({ practiceDate: day, reflections: [{ ...refl('rB2', '他'), people: [person] }] }), { orgId: OTHER });
+  repo.writeProject(mine, proj({ practiceDate: day, reflections: [{ ...refl('rB1', '自'), people: [person] }] }), { orgId: ORG });
+  const csv = ['time,latitude,longitude,speed,bearing,horizontalAccuracy', ...Array.from({ length: 5 }, (_, i) => `${(Date.UTC(2026, 3, 1, 3, 0, i)) * 1e6},10.0,100.0,2,90,4`)].join('\n') + '\n';
+  const up = await call(baseA, 'POST', '/api/sensor-imports', { ck: cookie, body: { person, csv } });
+  assert.equal(up.status, 200, JSON.stringify(up.json));
+  assert.equal(up.json.matched?.name, mine);
 });
 
 test('P2-1: minutes-imports commit は id の無い見えない反省を組織に見える行として複製しない', { skip }, async () => {

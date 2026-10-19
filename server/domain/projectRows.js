@@ -103,13 +103,24 @@ export function decomposeProject(proj, { legacyName = null, pdId = 'pd_x', date 
   return { practiceDay, sessions, tracks, reflections };
 }
 
+// 旧 JSON の tracks / reflections の並び(セッション position 順・反省 position 順)。
+// assembleProject と dbRepo の access が必ず同じ並びになるよう、整列はここだけに置く。
+export function orderParts({ sessions = [], tracks = [], reflections = [] }) {
+  const sessById = new Map(sessions.map((s) => [s.id, s]));
+  const pos = (sid) => sessById.get(sid)?.position ?? 0;
+  return {
+    sessById,
+    tracks: [...tracks].sort((a, b) => pos(a.session_id) - pos(b.session_id)),
+    reflections: [...reflections].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
+  };
+}
+
 export function assembleProject({ practiceDay, sessions = [], tracks = [], reflections = [] }) {
   const proj = { ...JSON.parse(practiceDay.web_state) };
 
-  const sessById = new Map(sessions.map((s) => [s.id, s]));
-  const pos = (sid) => sessById.get(sid)?.position ?? 0;
-  const outTracks = [...tracks]
-    .sort((a, b) => pos(a.session_id) - pos(b.session_id))
+  const ordered = orderParts({ sessions, tracks, reflections });
+  const sessById = ordered.sessById;
+  const outTracks = ordered.tracks
     .map((tr) => {
       const s = sessById.get(tr.session_id);
       // view に元の track.id を含む(合成 session_id ではなく元 id を復元する)。
@@ -121,8 +132,7 @@ export function assembleProject({ practiceDay, sessions = [], tracks = [], refle
       return t;
     });
 
-  const outRefls = [...reflections]
-    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+  const outRefls = ordered.reflections
     .map((r) => JSON.parse(r.body));
 
   proj.tracks = outTracks;
