@@ -311,6 +311,34 @@ test('password-reset/confirm: 未確認ユーザー・削除済みユーザー�
   assert.equal((await call('POST', '/api/auth/password-reset/confirm', { resetToken: v, newPassword: 'new-pass-word-2' })).status, 422);
 });
 
+test('password-reset/confirm: 更新が例外になってもトークンは未使用のまま。再試行は成功し、その後の再使用は 422', { skip }, async () => {
+  const reg = await register();
+  await call('POST', '/api/auth/verify-email', { verifyToken: tokenFrom(mailer.last('verify').url) });
+  await call('POST', '/api/auth/password-reset/request', { email: REG.email });
+  await new Promise((r) => setImmediate(r));
+  const t = tokenFrom(mailer.last('reset').url);
+  const orig = accounts.revokeAllAuthTokens;
+  accounts.revokeAllAuthTokens = () => { throw new Error('boom'); };
+  let status;
+  try { status = (await call('POST', '/api/auth/password-reset/confirm', { resetToken: t, newPassword: 'new-pass-word-2' })).status; }
+  finally { accounts.revokeAllAuthTokens = orig; }
+  assert.equal(status, 500);
+  // パスワードも変わっていない
+  assert.equal((await call('POST', '/api/auth/login', { email: REG.email, password: REG.password })).status, 200);
+  const retry = await call('POST', '/api/auth/password-reset/confirm', { resetToken: t, newPassword: 'new-pass-word-2' });
+  assert.equal(retry.status, 200);
+  const reuse = await call('POST', '/api/auth/password-reset/confirm', { resetToken: t, newPassword: 'another-pass-3' });
+  assert.equal(reuse.status, 422); assert.equal(reuse.json.error.code, 'invalid_token');
+});
+
+test('password-reset/confirm: 無効なトークンは 422 で、回数制限に記録される', { skip }, async () => {
+  const body = { resetToken: 'no-such-token', newPassword: 'new-pass-word-2' };
+  for (let i = 0; i < LIMITS.resetConfirmIp.max; i++) {
+    assert.equal((await call('POST', '/api/auth/password-reset/confirm', body)).status, 422);
+  }
+  assert.equal((await call('POST', '/api/auth/password-reset/confirm', body)).status, 429);
+});
+
 test('password-reset/request: 同じメールは 1 時間に 3 通まで(超えても応答は同じ)、IP は 429', { skip }, async () => {
   await register();
   await call('POST', '/api/auth/verify-email', { verifyToken: tokenFrom(mailer.last('verify').url) });
