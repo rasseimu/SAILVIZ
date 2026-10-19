@@ -63,7 +63,7 @@ export function consumeEmailToken(repo, token, purpose, now = Date.now()) {
 }
 
 // 共有トークン(SAILVIZ_WRITE_TOKEN)との時間一定比較。
-function sameSecret(a, b) {
+export function sameSecret(a, b) {
   if (!a || !b) return false;
   const x = Buffer.from(String(a)); const y = Buffer.from(String(b));
   return x.length === y.length && timingSafeEqual(x, y);

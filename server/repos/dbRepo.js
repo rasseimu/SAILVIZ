@@ -9,7 +9,7 @@
 //  新規トラック(incoming にあり DB に無い)は点列込みで追加。
 //  反省は incoming で置き換える(Web の編集を尊重。_rev による追加保護は Web が _rev を送る Phase 6 で有効化)。
 import { randomBytes } from 'node:crypto';
-import { decomposeProject, assembleProject } from '../domain/projectRows.js';
+import { decomposeProject, assembleProject, orderParts } from '../domain/projectRows.js';
 import {
   decomposeProgress, assembleProgress, decomposeRoadmap, assembleRoadmap,
 } from '../domain/overlayRows.js';
@@ -69,19 +69,19 @@ export function createDbRepo({ db, dataDir }) {
 
   // loadParts の結果から認可用 access を作る。並びは assembleProject と同じ(同じ入力・同じ整列)。
   function accessOf(pd, { sessions, tracks, reflections }) {
-    const sessById = new Map(sessions.map((s) => [s.id, s]));
-    const pos = (sid) => sessById.get(sid)?.position ?? 0;
+    const ordered = orderParts({ sessions, tracks, reflections });
+    const sessById = ordered.sessById;
     const crewOf = db.prepare('SELECT user_id FROM session_crew WHERE session_id = ? AND user_id IS NOT NULL');
     return {
       orgId: pd.org_id ?? null,
-      tracks: [...tracks].sort((a, b) => pos(a.session_id) - pos(b.session_id)).map((tr) => {
+      tracks: ordered.tracks.map((tr) => {
         const s = sessById.get(tr.session_id) || {};
         return {
           kind: s.kind, visibility: s.visibility, ownerId: s.owner_user_id ?? null,
           crewIds: crewOf.all(tr.session_id).map((c) => c.user_id),
         };
       }),
-      reflections: [...reflections].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)).map((r) => ({
+      reflections: ordered.reflections.map((r) => ({
         id: bodyId(r), visibility: r.visibility, ownerId: r.author_user_id ?? null,
       })),
     };
@@ -332,6 +332,18 @@ export function createDbRepo({ db, dataDir }) {
       ).all(person, practiceDate);
       if (!rows.length) return null;
       return { name: rows[0].name, label: projectLabel(rows[0].name) };
+    },
+
+    // person が反省の著者で、practiceDate が完全一致する器をすべて返す(名前の降順)。
+    // 呼び出し側が見える器を選ぶ(最初の1件が他組織だと取りこぼすため)。
+    findReflectionsByDate(person, practiceDate) {
+      return db.prepare(
+        `SELECT DISTINCT pd.legacy_name AS name
+           FROM reflections r JOIN practice_days pd ON pd.id = r.practice_day_id
+          WHERE r.legacy_author_name = ?
+            AND json_extract(pd.web_state, '$.practiceDate') = ?
+          ORDER BY pd.legacy_name DESC`,
+      ).all(person, practiceDate).map((r) => ({ name: r.name, label: projectLabel(r.name) }));
     },
 
     // fileRepo と同じ: practiceDate を持つ器のうち JST 日が一致する最初のものを返す(降順)。

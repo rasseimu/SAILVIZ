@@ -110,9 +110,15 @@ export async function compatRoute(req, res, ctx) {
     catch (e) { send(res, 422, { error: String(e.message || e) }); return true; }
     const importId = `imp_${jstStamp(parsed.practiceDate).replace(/-/g, '_')}_${randomBytes(4).toString('hex')}`;
     await store.saveUpload(importId, 'raw.csv', csv);
-    let matched = await store.findReflectionByDate(person, parsed.practiceDate);
-    // 見えない器の名前は返さない
-    if (matched && policyOn && !canSeeProject(writer, store.getProjectAccess(matched.name))) matched = null;
+    // 見えない器の名前は返さない。一致する器が複数あれば、見える最初の器を返す。
+    let matched;
+    if (policyOn && typeof store.findReflectionsByDate === 'function') {
+      matched = store.findReflectionsByDate(person, parsed.practiceDate)
+        .find((c) => canSeeProject(writer, store.getProjectAccess(c.name))) || null;
+    } else {
+      matched = await store.findReflectionByDate(person, parsed.practiceDate);
+      if (matched && policyOn && !canSeeProject(writer, store.getProjectAccess(matched.name))) matched = null;
+    }
     send(res, 200, {
       importId,
       practiceDate: parsed.practiceDate,
@@ -190,7 +196,8 @@ export async function compatRoute(req, res, ctx) {
       name: boatNumber.trim(),
       points: parsed.points,
       bounds: parsed.bounds,
-      colorIndex: tracks.length,
+      // 見えない軌跡も数える(色が既存の軌跡と重ならないように)。
+      colorIndex: Math.max(tracks.length, policyOn ? (store.getProjectAccess(name)?.tracks.length ?? 0) : 0),
       source: { importId, filename: finalName, boatNumber: boatNumber.trim(), uploadedAt },
       excludedIntervals: parsed.excludedIntervals,
     });
