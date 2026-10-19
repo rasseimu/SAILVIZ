@@ -138,10 +138,28 @@ test('verify-email: 名簿照合が例外で失敗したら、確認済みもト
   const reg = await register();
   const t = tokenFrom(mailer.last('verify').url);
   const orig = accounts.findRosterRowsByEmail;
-  accounts.findRosterRowsByEmail = () => { throw new Error('boom'); };
-  const bad = await call('POST', '/api/auth/verify-email', { verifyToken: t });
-  assert.equal(bad.status, 500);
-  accounts.findRosterRowsByEmail = orig;
+  try {
+    // 確認済みの記録の後、名簿照合の段で失敗させる
+    accounts.findRosterRowsByEmail = () => { throw new Error('boom'); };
+    const bad = await call('POST', '/api/auth/verify-email', { verifyToken: t });
+    assert.equal(bad.status, 500);
+  } finally { accounts.findRosterRowsByEmail = orig; }
+  assert.equal(accounts.getUser(reg.json.user.id).email_verified_at, null);
+  assert.equal(accounts.getEmailTokenByHash(hashToken(t)).used_at, null);
+  assert.equal((await call('POST', '/api/auth/verify-email', { verifyToken: t })).status, 200);
+  assert.notEqual(accounts.getUser(reg.json.user.id).email_verified_at, null);
+});
+
+test('verify-email(メール変更): 名簿照合が例外なら 500・トークン未使用のまま、直った後に同じリンクで 200', { skip }, async () => {
+  const reg = await register();
+  const change = await call('PATCH', '/api/me', { email: 'taro2@example.test' }, { token: reg.json.token });
+  assert.equal(change.status, 200);
+  const t = tokenFrom(mailer.last('verify').url); // 新アドレス宛ての change リンク
+  const orig = accounts.findRosterRowsByEmail;
+  try {
+    accounts.findRosterRowsByEmail = () => { throw new Error('boom'); };
+    assert.equal((await call('POST', '/api/auth/verify-email', { verifyToken: t })).status, 500);
+  } finally { accounts.findRosterRowsByEmail = orig; }
   assert.equal(accounts.getUser(reg.json.user.id).email_verified_at, null);
   assert.equal(accounts.getEmailTokenByHash(hashToken(t)).used_at, null);
   assert.equal((await call('POST', '/api/auth/verify-email', { verifyToken: t })).status, 200);
@@ -458,19 +476,6 @@ test('PATCH /api/me: 組織 A の作成者(roster_id NULL)かつ組織 B の名�
   assert.equal(accounts.isMember(orgA.id, reg.json.user.id), true);
   assert.equal(accounts.isOrgAdmin(orgA.id, reg.json.user.id), true);
   assert.equal(accounts.isMember(orgB.id, reg.json.user.id), false);
-});
-
-test('POST /api/auth/verify-email: 名簿照合が失敗したら、確認済みの記録も巻き戻る', { skip }, async () => {
-  const reg = await register();
-  const tok = tokenFrom(mailer.last('verify').url);
-  const findOrig = accounts.findRosterRowsByEmail;
-  // 確認済みの記録の後、名簿照合の段で失敗させる
-  accounts.findRosterRowsByEmail = () => { throw new Error('boom'); };
-  let status;
-  try { status = (await call('POST', '/api/auth/verify-email', { verifyToken: tok })).status; }
-  finally { accounts.findRosterRowsByEmail = findOrig; }
-  assert.notEqual(status, 200);
-  assert.equal(accounts.getUser(reg.json.user.id).email_verified_at, null);
 });
 
 test('PATCH /api/me: メールを再変更したら古い確認リンクは無効', { skip }, async () => {

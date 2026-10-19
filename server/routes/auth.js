@@ -131,6 +131,10 @@ export function createAuthRoute({
       const token = body.verifyToken;
       // トークンの使用・確認済みの記録・名簿照合(§4.4: 一致すれば組織へ紐付け、legacy_* を本人に付け替える。冪等)を
       // 1 つのトランザクションにまとめる。照合が例外で失敗したらトークンも未使用に戻る(利用者が再送せずに再試行できる)。
+      // false を返す経路は例外ではないので COMMIT される。トークンが有効(未使用・期限内)で、そのあと
+      // 削除済み・アドレス不一致(古いトークン)と判定された場合は、consumeEmailToken が先に使用済みにしているため
+      // 使用済みで確定する(再利用不可)。未知・期限切れ・使用済みのトークンは何も消費しない。
+      // ROLLBACK されるのは例外(名簿照合などの内部失敗)のときだけ。
       const valid = accounts.withTx(() => {
         const hit = consumeEmailToken(accounts, token, 'verify', now())
           || consumeEmailToken(accounts, token, 'change', now());
