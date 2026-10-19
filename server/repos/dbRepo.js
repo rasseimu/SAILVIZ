@@ -37,6 +37,14 @@ function upsertRow(db, table, row, pk) {
 
 const genId = (prefix) => `${prefix}_${randomBytes(5).toString('hex')}`;
 
+// 反省行の本文(旧 JSON)から反省 ID を取り出す。無ければ null。
+function bodyId(row) {
+  try {
+    const id = JSON.parse(row.body)?.id;
+    return id == null ? null : String(id);
+  } catch { return null; }
+}
+
 // 点列の指紋。別艇の GPS 軌跡は点数と端点が異なるので同定に十分。
 // 互換 PUT で incoming トラックを既存 DB トラックに対応づけるのに使う(id が一意でないため)。
 function trackFingerprint(points) {
@@ -59,11 +67,68 @@ export function createDbRepo({ db, dataDir }) {
     return { practiceDay: pd, sessions, tracks, reflections };
   }
 
+  // loadParts の結果から認可用 access を作る。並びは assembleProject と同じ(同じ入力・同じ整列)。
+  function accessOf(pd, { sessions, tracks, reflections }) {
+    const sessById = new Map(sessions.map((s) => [s.id, s]));
+    const pos = (sid) => sessById.get(sid)?.position ?? 0;
+    const crewOf = db.prepare('SELECT user_id FROM session_crew WHERE session_id = ? AND user_id IS NOT NULL');
+    return {
+      orgId: pd.org_id ?? null,
+      tracks: [...tracks].sort((a, b) => pos(a.session_id) - pos(b.session_id)).map((tr) => {
+        const s = sessById.get(tr.session_id) || {};
+        return {
+          kind: s.kind, visibility: s.visibility, ownerId: s.owner_user_id ?? null,
+          crewIds: crewOf.all(tr.session_id).map((c) => c.user_id),
+        };
+      }),
+      reflections: [...reflections].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)).map((r) => ({
+        id: bodyId(r), visibility: r.visibility, ownerId: r.author_user_id ?? null,
+      })),
+    };
+  }
+
   function insertAll(rows) {
     insertRow(db, 'practice_days', rows.practiceDay);
     for (const s of rows.sessions) insertRow(db, 'rec_sessions', s);
     for (const t of rows.tracks) insertRow(db, 'tracks', t);
     for (const r of rows.reflections) insertRow(db, 'reflections', r);
+  }
+
+  // managed な反省行だけを incoming と旧 JSON の反省 id で突き合わせる(トランザクション内で呼ぶ)。
+  //  - 一致した行: 位置・本文・作者名表示などを更新(公開範囲 visibility・作者 author_user_id は変えない)
+  //  - 一致しない incoming: 新しい行(公開範囲 org・作者なし)。ただし見えない既存行と同じ id は無視する
+  //  - incoming に無い managed 行: 削除。managed でない行(見えない・書けない)は触らない
+  function syncManagedReflections(pdId, incomingRows, isManaged) {
+    const rows = db.prepare('SELECT * FROM reflections WHERE practice_day_id = ?').all(pdId);
+    const managed = rows.filter((r) => isManaged({ id: bodyId(r), visibility: r.visibility, ownerId: r.author_user_id ?? null }));
+    const managedSet = new Set(managed);
+    const hiddenIds = new Set(rows.filter((r) => !managedSet.has(r)).map((r) => bodyId(r)).filter((x) => x != null));
+    const queue = new Map(); // 旧 id -> [行,…](同 id は順に消費)。id の無い行は '' に集める
+    for (const r of managed) {
+      const k = bodyId(r) ?? '';
+      if (!queue.has(k)) queue.set(k, []);
+      queue.get(k).push(r);
+    }
+    const matched = new Set();
+    for (const r of incomingRows) {
+      const bid = bodyId(r) ?? '';
+      const q = queue.get(bid);
+      const m = q && q.length ? q.shift() : null;
+      if (m) {
+        matched.add(m.id);
+        db.prepare(
+          `UPDATE reflections SET position = ?, legacy_author_name = ?, session_id = ?, body = ?,
+                  created_at = ?, updated_at = ? WHERE id = ?`,
+        ).run(r.position, r.legacy_author_name ?? null, r.session_id ?? null, r.body, r.created_at ?? null, r.updated_at, m.id);
+      } else if (bid !== '' && hiddenIds.has(bid)) {
+        // 見えない既存の反省と同じ id: 上書きしない
+      } else {
+        insertRow(db, 'reflections', { ...r, id: `${pdId}_r_${randomBytes(4).toString('hex')}` });
+      }
+    }
+    for (const m of managed) {
+      if (!matched.has(m.id)) db.prepare('DELETE FROM reflections WHERE id = ?').run(m.id);
+    }
   }
 
   return {
@@ -80,7 +145,55 @@ export function createDbRepo({ db, dataDir }) {
       return { ...assembled, _rev: pd.rev };
     },
 
-    writeProject(name, obj) {
+    // 互換 PUT が認可(policy)に使う情報。練習日の器の組織と、旧 JSON の tracks / reflections と
+    // 同じ順の項目ごとの公開範囲・所有者。器が無ければ null。(S2.5-P2)
+    getProjectAccess(name) {
+      const pd = getPd.get(name);
+      if (!pd) return null;
+      return accessOf(pd, loadParts(pd));
+    },
+
+    // 旧 JSON と access を「1回の読込み」で返す(同じ行から両方を作るので、tracks / reflections の
+    // 並びと access の添字が必ず対応する)。器が無ければ投げる。
+    readProjectWithAccess(name) {
+      const pd = getPd.get(name);
+      if (!pd) throw new Error('not found');
+      const parts = loadParts(pd);
+      return { project: { ...assembleProject(parts), _rev: pd.rev }, access: accessOf(pd, parts) };
+    },
+
+    // practiceDate と JST 日が一致する器をすべて返す(降順)。
+    findProjectsByPracticeDate(practiceDate) {
+      const target = jstMidnightMs(Number(practiceDate));
+      return db.prepare(
+        `SELECT legacy_name AS name, json_extract(web_state, '$.practiceDate') AS pdate
+           FROM practice_days WHERE legacy_name IS NOT NULL ORDER BY legacy_name DESC`,
+      ).all()
+        .filter((r) => Number.isFinite(Number(r.pdate)) && jstMidnightMs(Number(r.pdate)) === target)
+        .map((r) => ({ name: r.name, label: projectLabel(r.name) }));
+    },
+
+    // 進捗の認可用: 全反省の(旧 JSON の)ID・公開範囲・作者・器の組織。
+    listReflectionAccess() {
+      return db.prepare(
+        `SELECT r.body AS body, r.visibility AS visibility, r.author_user_id AS author, pd.org_id AS org_id
+           FROM reflections r JOIN practice_days pd ON pd.id = r.practice_day_id`,
+      ).all().map((r) => ({
+        id: bodyId(r), visibility: r.visibility, ownerId: r.author ?? null, orgId: r.org_id ?? null,
+      })).filter((r) => r.id != null);
+    },
+
+    // ロードマップの認可用: 人名ごとの組織・所有者。
+    listRoadmapAccess() {
+      return db.prepare('SELECT legacy_name, org_id, user_id FROM roadmaps').all()
+        .map((r) => ({ legacyName: r.legacy_name, orgId: r.org_id ?? null, userId: r.user_id ?? null }));
+    },
+
+    // opts.orgId: 新しい器を作るときの組織(MIGRATION_ORG_ID)。
+    // opts.managedReflection(row): 渡すと、反省は「managed な行だけ」を incoming と突き合わせる
+    //   (見えない・書けない反省には触らない)。突き合わせは旧 JSON の反省 id で行い、
+    //   既存行の公開範囲・作者は変えない。渡さなければ従来どおり incoming で置き換える。
+    writeProject(name, obj, opts = {}) {
       const incoming = { ...obj };
       delete incoming._rev; // メタは保存しない
       const now = Date.now();
@@ -88,7 +201,7 @@ export function createDbRepo({ db, dataDir }) {
       db.exec('BEGIN');
       try {
         if (!existing) {
-          const rows = decomposeProject(incoming, { legacyName: name, pdId: genId('pd'), now });
+          const rows = decomposeProject(incoming, { legacyName: name, pdId: genId('pd'), now, orgId: opts.orgId ?? null });
           rows.practiceDay.rev = 1;
           insertAll(rows);
         } else {
@@ -127,13 +240,17 @@ export function createDbRepo({ db, dataDir }) {
             }
           });
           // ② incoming に無い既存トラックは残す(何もしない)
-          // 反省: incoming で置き換え
-          const incomingReflIds = new Set(decomp.reflections.map((r) => r.id));
-          for (const ex of db.prepare('SELECT id FROM reflections WHERE practice_day_id = ?').all(pdId)) {
-            if (!incomingReflIds.has(ex.id)) db.prepare('DELETE FROM reflections WHERE id = ?').run(ex.id);
-          }
-          for (const r of decomp.reflections) {
-            upsertRow(db, 'reflections', r, 'id');
+          if (typeof opts.managedReflection === 'function') {
+            syncManagedReflections(pdId, decomp.reflections, opts.managedReflection);
+          } else {
+            // 反省: incoming で置き換え
+            const incomingReflIds = new Set(decomp.reflections.map((r) => r.id));
+            for (const ex of db.prepare('SELECT id FROM reflections WHERE practice_day_id = ?').all(pdId)) {
+              if (!incomingReflIds.has(ex.id)) db.prepare('DELETE FROM reflections WHERE id = ?').run(ex.id);
+            }
+            for (const r of decomp.reflections) {
+              upsertRow(db, 'reflections', r, 'id');
+            }
           }
         }
         db.exec('COMMIT');
@@ -173,7 +290,8 @@ export function createDbRepo({ db, dataDir }) {
       return {};
     },
 
-    writeOverlay(name, obj) {
+    // opts.orgId: roadmap で新しい行を作るときの組織(MIGRATION_ORG_ID)。既存行の org_id は変えない。
+    writeOverlay(name, obj, opts = {}) {
       const now = Date.now();
       db.exec('BEGIN');
       try {
@@ -185,6 +303,10 @@ export function createDbRepo({ db, dataDir }) {
         } else if (name === 'roadmap') {
           // 全消しにしない: 名簿照合で付け替え済みの user_id・org_id を保つ(S2.6-P5)。
           const { roadmaps } = decomposeRoadmap(obj, { now });
+          // 新しい行だけ opts.orgId を入れる。既存行は現在の org_id を渡して、COALESCE で組織が
+          // 付け替わらないようにする(他組織・組織なしの行を取り込まない)。
+          const orgOf = new Map(db.prepare('SELECT legacy_name, org_id FROM roadmaps').all().map((r) => [r.legacy_name, r.org_id ?? null]));
+          for (const r of roadmaps) r.org_id = orgOf.has(r.legacy_name) ? orgOf.get(r.legacy_name) : (opts.orgId ?? null);
           syncRoadmaps(db, roadmaps);
         }
         db.exec('COMMIT');

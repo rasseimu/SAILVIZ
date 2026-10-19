@@ -34,7 +34,7 @@ before(async () => {
   db = openDb(':memory:');
   migrate(db, loadMigrations(MIG_DIR), 1000);
   const repo = createDbRepo({ db, dataDir });
-  const api = createApi({ repo, token: TOKEN });
+  const api = createApi({ repo, token: TOKEN, migrationOrgId: 'o_test' }); // DB 版は MIGRATION_ORG_ID が必須(S2.5-P2)
   server = createServer(async (req, res) => { if (await api(req, res)) return; res.writeHead(404).end(); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;

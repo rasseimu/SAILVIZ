@@ -11,12 +11,14 @@ import { compatRoute } from './routes/compat.js';
 import { createAuthRoute, unavailableRoute } from './routes/auth.js';
 import { createOrgsRoute } from './routes/orgs.js';
 import { createMailer } from './mail.js';
+import { resolveSubject } from './compatPrincipal.js';
 import { randomBytes } from 'node:crypto';
 
 // accounts(accountsRepo)があればアカウント API(§10.2)が有効。無い(STORAGE=file)ときは該当パスが 503。
 // mailer / baseUrl は確認・再設定メール用(MAIL_PROVIDER 未設定なら log)。authOptions はテスト用の差し替え。
 export function createApi({
   dataDir, repo, token, geminiKey, viewUser, viewPassword, accounts, mailer, baseUrl, authOptions = {},
+  migrationOrgId,
 }) {
   // 保存の窓口。明示 repo が無ければ dataDir からファイル実装を組み立てる(既存挙動のまま)。
   const store = repo || createFileRepo(dataDir);
@@ -57,9 +59,20 @@ export function createApi({
       return true;
     };
 
+    // 互換 API の認可(policy.js)用の主体。リクエストごとに1度だけ組み立てる。未ログインは null。
+    let subject;
+    const getSubject = () => {
+      if (subject === undefined) {
+        subject = resolveSubject(req, {
+          token, viewEnabled, viewSecret, accounts, migrationOrgId, now: (authOptions.now || Date.now)(),
+        });
+      }
+      return subject;
+    };
+
     const ctx = {
       store, token, geminiKey, viewEnabled, viewSecret, viewUser, viewPassword,
-      secureCookie, path, method, requireViewer, requireWrite,
+      secureCookie, path, method, requireViewer, requireWrite, getSubject,
     };
 
     try {

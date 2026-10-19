@@ -34,10 +34,26 @@ const mailer = createMailer({
 // メールのリンク先(Web の URL)。未設定ならローカル。本番の値の設定は S2.8 のデプロイ手順で扱う。
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
 
+// 旧共有ログイン(閲覧ゲート・書込トークン)が属する組織(S2.5-P2)。取込み(importFromFiles)と同じ値。
+// STORAGE=db では必須。未設定でも起動は止めず(起動停止は本番 502 の原因になる)、共有ログインが
+// 何も読めない・書けない状態になるので WARN を出す。STORAGE=file では使わない。
+const MIGRATION_ORG_ID = process.env.MIGRATION_ORG_ID || '';
+if (STORAGE === 'db') {
+  if (!MIGRATION_ORG_ID) {
+    console.warn('[warn] MIGRATION_ORG_ID が未設定です: 共有ログイン(閲覧ゲート・書込トークン)は練習・反省・オーバーレイを何も読めない・書けません。fly secrets set MIGRATION_ORG_ID=<組織ID> を設定してください');
+  } else if (accounts) {
+    let exists = false;
+    let checked = true;
+    try { exists = !!accounts.getOrg(MIGRATION_ORG_ID); } catch { checked = false; }
+    if (!checked) console.warn('[warn] MIGRATION_ORG_ID の組織を確認できませんでした(起動は続けます): 組織が存在するか確認してください');
+    else if (!exists) console.warn('[warn] MIGRATION_ORG_ID の組織が存在しません: 共有ログインは組織のデータに一致しません(組織を作成してから設定してください)');
+  }
+}
+
 const api = createApi({
   dataDir: DATA_DIR, repo, token: TOKEN, geminiKey: GEMINI_KEY,
   viewUser: VIEW_USER, viewPassword: VIEW_PASSWORD,
-  accounts, mailer, baseUrl: PUBLIC_BASE_URL,
+  accounts, mailer, baseUrl: PUBLIC_BASE_URL, migrationOrgId: MIGRATION_ORG_ID,
 });
 
 const server = createServer(async (req, res) => {
@@ -50,7 +66,7 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`SailViz on http://localhost:${PORT}  data=${DATA_DIR}  storage=${STORAGE}  accounts=${accounts ? `on mail=${MAIL_PROVIDER}` : 'OFF'}  write=${TOKEN ? 'on' : 'OFF'}  ai=${GEMINI_KEY ? 'on' : 'OFF'}  view-gate=${VIEW_USER && VIEW_PASSWORD ? 'on' : 'OFF'}`);
+  console.log(`SailViz on http://localhost:${PORT}  data=${DATA_DIR}  storage=${STORAGE}  accounts=${accounts ? `on mail=${MAIL_PROVIDER}` : 'OFF'}  write=${TOKEN ? 'on' : 'OFF'}  ai=${GEMINI_KEY ? 'on' : 'OFF'}  view-gate=${VIEW_USER && VIEW_PASSWORD ? 'on' : 'OFF'}${STORAGE === 'db' ? `  migration-org=${MIGRATION_ORG_ID ? 'set' : 'OFF'}` : ''}`);
 });
 
 // 終了時に DB を閉じる(WAL をチェックポイント)。
