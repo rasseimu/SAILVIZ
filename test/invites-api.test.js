@@ -273,6 +273,58 @@ test('accept: 失効・期限切れ・上限超過は 410(理由別の code)で�
   } finally { clock -= 2 * DAY; }
 });
 
+test('accept: 既参加者は失効・期限切れ・上限超過の招待でも 200(use_count 不変。既参加の判定が先)', { skip }, async () => {
+  const { admin, org } = mkOrg();
+  const rev = await mkInvite(org, admin);
+  const exp = await mkInvite(org, admin, { expiresInDays: 1 });
+  const full = await mkInvite(org, admin, { maxUses: 1 });
+  await call('POST', `/api/invites/${full.code}/accept`, mkUser().tok);
+  const member = mkUser();
+  accounts.linkMember({ orgId: org.id, userId: member.user.id, rosterId: null, now: clock });
+  await call('POST', `/api/orgs/${org.id}/invites/${rev.id}/revoke`, admin.tok);
+  clock += 2 * DAY;
+  try {
+    for (const inv of [rev, exp, full]) {
+      const before = accounts.getInvite(inv.id).use_count;
+      const r = await call('POST', `/api/invites/${inv.code}/accept`, member.tok);
+      assert.equal(r.status, 200, inv.id);
+      assert.deepEqual(await r.json(), { orgId: org.id });
+      assert.equal(accounts.getInvite(inv.id).use_count, before);
+    }
+  } finally { clock -= 2 * DAY; }
+});
+
+test('repo: 再判定が valid でも invite_valid(410)にせず、再試行して参加できる', { skip }, async () => {
+  const { createAccountsRepo } = await import('../server/repos/accountsRepo.js');
+  const { admin, org } = mkOrg();
+  const inv = accounts.createInvite({ orgId: org.id, createdByUserId: admin.user.id, now: clock });
+  const flaky = (failures) => {
+    let left = failures;
+    return new Proxy(db, {
+      get(t, k) {
+        const v = t[k];
+        if (typeof v !== 'function') return v;
+        if (k !== 'prepare') return v.bind(t);
+        return (sql) => {
+          const st = t.prepare(sql);
+          if (!/UPDATE org_invites SET use_count/.test(sql) || left <= 0) return st;
+          return { run: (...a) => { if (left > 0) { left -= 1; return { changes: 0 }; } return st.run(...a); }, all: (...a) => st.all(...a), get: (...a) => st.get(...a) };
+        };
+      },
+    });
+  };
+  const u1 = mkUser();
+  const r1 = createAccountsRepo({ db: flaky(1) }).acceptInvite({ code: inv.code, userId: u1.user.id, now: clock });
+  assert.equal(r1.status, 'joined');
+  assert.equal(accounts.getInvite(inv.id).use_count, 1);
+  assert.equal(accounts.isMember(org.id, u1.user.id), true);
+  // 2回続けて失敗しても 'valid' は返さず例外(参加も加算も残らない)
+  const u2 = mkUser();
+  assert.throws(() => createAccountsRepo({ db: flaky(2) }).acceptInvite({ code: inv.code, userId: u2.user.id, now: clock }));
+  assert.equal(accounts.getInvite(inv.id).use_count, 1);
+  assert.equal(accounts.isMember(org.id, u2.user.id), false);
+});
+
 test('accept: 同時に上限を超えて参加できない', { skip }, async () => {
   const { admin, org } = mkOrg();
   const inv = await mkInvite(org, admin, { maxUses: 2 });

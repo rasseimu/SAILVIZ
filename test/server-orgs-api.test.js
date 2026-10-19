@@ -173,7 +173,8 @@ test('accounts 無し(STORAGE=file)は /api/orgs 配下のどれも 503', async 
   const s = await listen(createApi({ repo: {}, token: 't' }));
   try {
     const u = `http://127.0.0.1:${s.address().port}`;
-    for (const [m, p] of [['POST', '/api/orgs'], ['GET', '/api/orgs'], ['GET', '/api/orgs/o_x'], ['POST', '/api/orgs/o_x/roster']]) {
+    for (const [m, p] of [['POST', '/api/orgs'], ['GET', '/api/orgs'], ['GET', '/api/orgs/o_x'], ['POST', '/api/orgs/o_x/roster'],
+      ['GET', '/api/invites/abc'], ['POST', '/api/invites/abc/accept']]) {
       const r = await fetch(u + p, { method: m, body: m === 'POST' ? '{"name":"a"}' : undefined });
       assert.equal(r.status, 503, `${m} ${p}`);
       assert.equal((await r.json()).error.code, 'accounts_unavailable');
