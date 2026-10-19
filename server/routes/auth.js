@@ -252,7 +252,7 @@ export function createAuthRoute({
           if (Object.keys(patch).length) accounts.updateUser(id.user.id, patch);
           if (emailChanged) {
             // §4.2 / 例外は §4.4 利用者決定: 変更後は再確認が済むまで、名簿照合で入った紐付けを外す(updateUser は確認済みを外す)。
-            // roster_id が NULL の紐付け(組織の作成者・将来の招待)は名簿照合で入ったのではないので外さない。
+            // roster_id が NULL の紐付け(組織の作成者・招待(S2.9)で入ったメンバー)は名簿照合で入ったのではないので外さない。
             for (const m of accounts.listMembershipsOfUser(id.user.id)) {
               if (m.roster_id != null) accounts.unlinkMember(m.org_id, id.user.id);
             }

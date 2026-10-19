@@ -14,5 +14,12 @@ export async function readBody(req) {
   const chunks = [];
   for await (const c of req) chunks.push(c);
   if (!chunks.length) return null;
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    // JSON.parse の例外メッセージには入力の断片が入る(パスワード等)ので、そのまま投げない。
+    const e = new Error('bad json');
+    e.code = 'bad_json';
+    throw e;
+  }
 }

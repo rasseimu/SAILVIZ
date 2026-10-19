@@ -73,7 +73,13 @@ export function createApi({
       send(res, 404, { error: 'no route' });
       return true;
     } catch (e) {
-      send(res, 500, { error: String(e && e.message || e) });
+      // 壊れた JSON(readBody)は 400。旧 API の 400 と同じ { error: 文字列 } の形。
+      if (e && e.code === 'bad_json') { send(res, 400, { error: 'bad json' }); return true; }
+      // 内部の例外メッセージは利用者へ返さない。ログにも e.message は出さない
+      // (入力の断片=パスワード等が入りうる)。例外名とスタックのフレーム行だけ出す。
+      const frames = String(e && e.stack || '').split('\n').filter((l) => /^\s+at /.test(l)).join('\n');
+      console.error(`[api] ${method} ${path} -> 500: ${e && e.name || 'Error'}\n${frames}`);
+      send(res, 500, { error: 'internal_error' });
       return true;
     }
   };
