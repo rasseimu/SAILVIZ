@@ -119,6 +119,16 @@ test('GET /members: 組織メンバーは見られる(紐付け済み・{userId,
   assert.equal((await call('GET', '/api/orgs/o_nope/members', memberTok)).status, 404);
 });
 
+test('GET /members: 各要素に isAdmin(管理者・作成者 true、非管理者 false)。既存の形 {userId,name,isAdmin}', { skip }, async () => {
+  const list = await (await call('GET', `/api/orgs/${org.id}/members`, memberTok)).json();
+  const a = list.find((x) => x.userId === admin.id);
+  const m = list.find((x) => x.userId === member.id);
+  assert.equal(a.isAdmin, true); // 作成者(roster_id NULL)
+  assert.equal(m.isAdmin, false);
+  assert.ok(list.every((x) => typeof x.isAdmin === 'boolean'));
+  assert.deepEqual(Object.keys(a).sort(), ['isAdmin', 'name', 'userId']);
+});
+
 test('GET /members: name 未設定のメンバーは「ユーザー」+ID由来4文字(S2.3-P9)', { skip }, async () => {
   const nn = mk('nn@example.test', null);
   accounts.linkMember({ orgId: org.id, userId: nn.u.id, rosterId: null, now: clock });

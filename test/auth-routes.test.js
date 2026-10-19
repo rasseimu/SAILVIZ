@@ -365,6 +365,37 @@ test('GET /api/me: user・emailVerified・org(未所属は null、所属すれ�
   assert.deepEqual(me2.json.org, { id: org.id, name: 'テスト部' });
 });
 
+test('GET /api/me: orgs は未所属で []（org は null）。所属すれば {id,name,isAdmin}、org は orgs[0] の {id,name}', { skip }, async () => {
+  const reg = await register();
+  const tok = { token: reg.json.token };
+  const me0 = await call('GET', '/api/me', undefined, tok);
+  assert.deepEqual(me0.json.orgs, []);
+  assert.equal(me0.json.org, null);
+  const org = accounts.createOrg({ name: '管理部', adminUserIds: [reg.json.user.id], now: clock.t });
+  accounts.linkMember({ orgId: org.id, userId: reg.json.user.id, now: clock.t });
+  const me1 = await call('GET', '/api/me', undefined, tok);
+  assert.deepEqual(me1.json.orgs, [{ id: org.id, name: '管理部', isAdmin: true }]);
+  assert.deepEqual(me1.json.org, { id: org.id, name: '管理部' });
+});
+
+test('GET /api/me: orgs の並びは linked_at 昇順・同時刻は組織 ID 順。isAdmin は組織ごと。org === orgs[0]', { skip }, async () => {
+  const reg = await register();
+  const uid = reg.json.user.id;
+  const mkOrg = (name, admins, at) => {
+    const o = accounts.createOrg({ name, adminUserIds: admins, now: clock.t });
+    accounts.linkMember({ orgId: o.id, userId: uid, now: at });
+    return o;
+  };
+  const late = mkOrg('遅い部', [], clock.t + 100);
+  const t1 = mkOrg('同時刻1', [uid], clock.t);
+  const t2 = mkOrg('同時刻2', [], clock.t);
+  const [first, second] = [t1, t2].sort((x, y) => (x.id < y.id ? -1 : 1));
+  const me = await call('GET', '/api/me', undefined, { token: reg.json.token });
+  assert.deepEqual(me.json.orgs.map((o) => o.id), [first.id, second.id, late.id]);
+  assert.deepEqual(me.json.orgs.map((o) => o.isAdmin), [first.id === t1.id, second.id === t1.id, false]);
+  assert.deepEqual(me.json.org, { id: first.id, name: first.name });
+});
+
 test('PATCH /api/me: 名前・所属・既定の公開範囲を更新。不正は 422', { skip }, async () => {
   const reg = await register();
   const r = await call('PATCH', '/api/me', { name: '新しい名前', defaultVisibility: 'org', affiliationText: '別の所属' }, { token: reg.json.token });

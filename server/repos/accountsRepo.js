@@ -292,7 +292,7 @@ export function createAccountsRepo({ db }) {
       }));
     },
     listMembershipsOfUser(userId) {
-      return db.prepare('SELECT * FROM org_members WHERE user_id = ? ORDER BY linked_at').all(userId);
+      return db.prepare('SELECT * FROM org_members WHERE user_id = ? ORDER BY linked_at, org_id').all(userId);
     },
 
     // ---- org_invites(004_invites.sql / S2.9)----
