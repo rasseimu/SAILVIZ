@@ -129,19 +129,19 @@ export function createAuthRoute({
     // ---- POST /api/auth/verify-email ----(Web のページ /verify-email?token=… が呼ぶ)
     async verifyEmail(req, res, body) {
       const token = body.verifyToken;
-      const hit = consumeEmailToken(accounts, token, 'verify', now())
-        || consumeEmailToken(accounts, token, 'change', now());
-      const user = hit && accounts.getUser(hit.userId);
-      // 削除済み・メール変更後に古くなったトークン(verify・change とも発行時のアドレスが今と違う)は無効
-      if (!user || user.deleted_at != null || !hit.newEmail || hit.newEmail !== user.email) {
-        return err(res, 422, 'invalid_token', 'リンクが無効か、期限切れまたは使用済みです');
-      }
-      // 名簿照合(§4.4): 確認済みメールが名簿と一致すれば組織へ紐付け、legacy_* を本人に付け替える(冪等)。
-      // 確認済みの記録と紐付けは 1 つのトランザクションにまとめる(片方だけ反映されない)。
-      accounts.withTx(() => {
+      // トークンの使用・確認済みの記録・名簿照合(§4.4: 一致すれば組織へ紐付け、legacy_* を本人に付け替える。冪等)を
+      // 1 つのトランザクションにまとめる。照合が例外で失敗したらトークンも未使用に戻る(利用者が再送せずに再試行できる)。
+      const valid = accounts.withTx(() => {
+        const hit = consumeEmailToken(accounts, token, 'verify', now())
+          || consumeEmailToken(accounts, token, 'change', now());
+        const user = hit && accounts.getUser(hit.userId);
+        // 削除済み・メール変更後に古くなったトークン(verify・change とも発行時のアドレスが今と違う)は無効
+        if (!user || user.deleted_at != null || !hit.newEmail || hit.newEmail !== user.email) return false;
         if (user.email_verified_at == null) accounts.markEmailVerified(user.id, now());
         linkVerifiedUser(accounts, accounts.getUser(user.id), now());
+        return true;
       });
+      if (!valid) return err(res, 422, 'invalid_token', 'リンクが無効か、期限切れまたは使用済みです');
       send(res, 200, { ok: true });
     },
 
