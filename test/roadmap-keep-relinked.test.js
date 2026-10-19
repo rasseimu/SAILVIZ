@@ -9,8 +9,9 @@ import { fileURLToPath } from 'node:url';
 
 const [major] = process.versions.node.split('.').map(Number);
 const skip = major >= 24 ? undefined : 'node:sqlite が要る(Node >=24)';
-let openDb, migrate, loadMigrations, createAccountsRepo, createDbRepo, importFromFiles;
+let openDb, migrate, loadMigrations, createAccountsRepo, createDbRepo, importFromFiles, syncRoadmaps;
 if (!skip) {
+  ({ syncRoadmaps } = await import('../server/db/roadmapSync.js'));
   ({ openDb } = await import('../server/db/connection.js'));
   ({ migrate, loadMigrations } = await import('../server/db/migrate.js'));
   ({ createAccountsRepo } = await import('../server/repos/accountsRepo.js'));
@@ -80,4 +81,52 @@ test('取込み再実行: 付け替え済みの roadmaps 行を保ち、未設�
   assert.equal(a.id, before.id);
   assert.equal(a.goal, 'g2');
   assert.equal(after.length, 2);
+});
+
+test('互換 PUT(org_id NULL)→ 取込み: org_id が補われる・別組織の org_id は上書きしない', { skip }, async () => {
+  const { db, accounts, org } = setup();
+  const other = accounts.createOrg({ name: '別部', now: 2 });
+  const repo = createDbRepo({ db, dataDir: '/nonexistent' });
+  repo.writeOverlay('roadmap', { 旧A: { goal: 'g1' }, 旧B: { goal: 'b1' } });
+  assert.deepEqual(rows(db).map((r) => r.org_id), [null, null]);
+  db.prepare('UPDATE roadmaps SET org_id = ? WHERE legacy_name = ?').run(other.id, '旧B');
+  const dataDir = await mkdtemp(join(tmpdir(), 'sailviz-keep-'));
+  await mkdir(join(dataDir, 'projects'), { recursive: true });
+  await writeFile(join(dataDir, 'roadmap.json'), JSON.stringify({ 旧A: { goal: 'g2' }, 旧B: { goal: 'b2' } }));
+  importFromFiles({ db, dataDir, orgId: org.id });
+  const after = rows(db);
+  assert.equal(after.find((r) => r.legacy_name === '旧A').org_id, org.id);
+  assert.equal(after.find((r) => r.legacy_name === '旧B').org_id, other.id);
+  assert.equal(after.find((r) => r.legacy_name === '旧B').goal, 'b2');
+});
+
+test('syncRoadmaps: 新規行の id が既存行と衝突したら別 id を振る(既存行は壊れない)', { skip }, () => {
+  const { db } = setup();
+  syncRoadmaps(db, [{ id: 'rm_legacy_0', legacy_name: '旧A', goal: 'a' }]);
+  syncRoadmaps(db, [
+    { id: 'rm_legacy_0', legacy_name: '旧A', goal: 'a2' },
+    { id: 'rm_legacy_0', legacy_name: '旧B', goal: 'b' },
+  ]);
+  const after = rows(db);
+  assert.equal(after.length, 2);
+  assert.equal(new Set(after.map((r) => r.id)).size, 2);
+  const a = after.find((r) => r.legacy_name === '旧A');
+  assert.equal(a.id, 'rm_legacy_0');
+  assert.equal(a.goal, 'a2');
+  assert.notEqual(after.find((r) => r.legacy_name === '旧B').id, 'rm_legacy_0');
+});
+
+test('取込み 2 回目(forceReimport): roadmaps の行数・id・内容が変わらない', { skip }, async () => {
+  const { db, org } = setup();
+  const dataDir = await mkdtemp(join(tmpdir(), 'sailviz-keep-'));
+  await mkdir(join(dataDir, 'projects'), { recursive: true });
+  await writeFile(join(dataDir, 'roadmap.json'), JSON.stringify({
+    旧A: { goal: 'g1', milestones: [{ t: 1 }], memo: 'x' }, 旧B: { goal: 'b1' },
+  }));
+  const dump = () => db.prepare('SELECT id, user_id, org_id, legacy_name, goal, milestones, extra FROM roadmaps ORDER BY legacy_name').all();
+  importFromFiles({ db, dataDir, orgId: org.id, now: 100 });
+  const first = dump();
+  importFromFiles({ db, dataDir, orgId: org.id, now: 100, forceReimport: true });
+  assert.deepEqual(dump(), first);
+  assert.equal(first.length, 2);
 });
