@@ -134,6 +134,20 @@ test('verify-email: 削除済みユーザーのリンクは無効', { skip }, as
   assert.equal((await call('POST', '/api/auth/verify-email', { verifyToken: t })).status, 422);
 });
 
+test('verify-email: 名簿照合が例外で失敗したら、確認済みもトークン使用も巻き戻り、直った後に同じリンクで確認できる', { skip }, async () => {
+  const reg = await register();
+  const t = tokenFrom(mailer.last('verify').url);
+  const orig = accounts.findRosterRowsByEmail;
+  accounts.findRosterRowsByEmail = () => { throw new Error('boom'); };
+  const bad = await call('POST', '/api/auth/verify-email', { verifyToken: t });
+  assert.equal(bad.status, 500);
+  accounts.findRosterRowsByEmail = orig;
+  assert.equal(accounts.getUser(reg.json.user.id).email_verified_at, null);
+  assert.equal(accounts.getEmailTokenByHash(hashToken(t)).used_at, null);
+  assert.equal((await call('POST', '/api/auth/verify-email', { verifyToken: t })).status, 200);
+  assert.notEqual(accounts.getUser(reg.json.user.id).email_verified_at, null);
+});
+
 test('resend: 要ログイン。未確認なら新しいリンクを送り、確認済みなら送らない。回数制限あり', { skip }, async () => {
   assert.equal((await call('POST', '/api/auth/verify-email/resend', {})).status, 401);
   const reg = await register();
