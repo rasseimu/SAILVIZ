@@ -22,9 +22,18 @@ export function contentType(pathname) {
   return TYPES[extname(pathname).toLowerCase()] || 'application/octet-stream';
 }
 
+// アカウント画面(S2.7)。確認・再設定メールのリンク先 /verify-email・/reset-password と /account を同じ HTML で配信する。
+const ACCOUNT_PAGES = new Set(['/account', '/verify-email', '/reset-password']);
+export function pagePathFor(pathname) {
+  const p = String(pathname).replace(/\/+$/, '');
+  return ACCOUNT_PAGES.has(p) ? '/account.html' : null;
+}
+
 export async function serveStatic(req, res, rootDir) {
   const url = new URL(req.url, 'http://localhost');
   let rel = decodeURIComponent(url.pathname);
+  const page = pagePathFor(rel);
+  if (page) rel = page;
   if (rel === '/' || rel === '') rel = '/index.html';
   const root = normalize(rootDir);
   const full = normalize(join(rootDir, rel));
@@ -33,8 +42,12 @@ export async function serveStatic(req, res, rootDir) {
     const s = await stat(full);
     if (s.isDirectory()) { res.writeHead(403).end('forbidden'); return; }
     const buf = await readFile(full);
-    res.writeHead(200, { 'content-type': contentType(full), 'cache-control': 'no-store' });
+    const headers = { 'content-type': contentType(full), 'cache-control': 'no-store' };
+    // リンクのトークンを Referer で外へ漏らさない
+    if (page) headers['referrer-policy'] = 'no-referrer';
+    res.writeHead(200, headers);
     res.end(buf);
+
   } catch {
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end('not found');
   }
