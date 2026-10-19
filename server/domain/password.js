@@ -8,11 +8,12 @@ export const MIN_PASSWORD_LENGTH = 8; // §4.1
 export const MAX_PASSWORD_LENGTH = 1024; // scrypt への過大入力を避ける上限(設計書に無い実装上の安全弁)
 
 // 現在のパラメータ(設計書は「scrypt」としか定めていない。選定理由は S2.2 の報告に記載)。
-export const SCRYPT_PARAMS = Object.freeze({ N: 32768, r: 8, p: 1, keyLen: 32, saltLen: 16 });
-// maxmem は固定。保存値の見積り(128*N*r*p)は MAX_COST_BYTES 以下に限るので、scrypt 内部の作業領域の余裕を足した値にする。
+export const SCRYPT_PARAMS = Object.freeze({ N: 32768, r: 8, p: 3, keyLen: 32, saltLen: 16 }); // OWASP 最小推奨(S2.2-P3・H22=a)。旧 p=1 は needsRehash で上がる
+// maxmem は固定。scrypt のメモリは約 128*N*r(+128*r*p)で p にほぼ比例しない。MAX_MEM_BYTES 以下に限るので余裕を足した値にする。
 const MAXMEM = 80 * 1024 * 1024;
 // 保存値から読んだパラメータの上限(壊れた/悪意ある値でメモリ・CPU を食わないため。本番 VM が 256MB の可能性がある)
-const MAX_COST_BYTES = 64 * 1024 * 1024; // 128*N*r*p の上限。現行(N=32768・r=8・p=1)は 32MiB
+const MAX_MEM_BYTES = 64 * 1024 * 1024; // メモリの見積り 128*N*r の上限。現行(N=32768・r=8)は 32MiB
+const MAX_COST_BYTES = 128 * 1024 * 1024; // CPU 作業量の目安 128*N*r*p の上限。現行(p=3)は 96MiB、旧 p=1 は 32MiB
 const MAX_HASH_BYTES = 64; // 保存値の hash 長(= keyLen)の上限
 const LIMITS = { N: 1 << 20, r: 32, p: 16 };
 
@@ -45,7 +46,7 @@ function parse(stored) {
   if (r < 1 || p < 1 || N > LIMITS.N || r > LIMITS.r || p > LIMITS.p) return null;
   const salt = Buffer.from(parts[4], 'base64url');
   const hash = Buffer.from(parts[5], 'base64url');
-  if (128 * N * r * p > MAX_COST_BYTES) return null;
+  if (128 * N * r > MAX_MEM_BYTES || 128 * N * r * p > MAX_COST_BYTES) return null;
   // OpenSSL の scrypt は N < 2^(16r) を要求する(r=1 なら N<65536)。満たさない値は照合不能なので不正扱い。
   if (16 * r < 53 && N >= 2 ** (16 * r)) return null;
   if (!salt.length || !hash.length || hash.length > MAX_HASH_BYTES) return null;

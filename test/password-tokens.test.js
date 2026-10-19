@@ -39,6 +39,25 @@ test('verifyPassword: 現行パラメータ(本番値)で往復できる', async
   assert.equal(needsRehash(h), false);
 });
 
+test('S2.2-P3 本番値は N=2^15・r=8・p=3。保存形式にパラメータが入る', async () => {
+  assert.deepEqual([SCRYPT_PARAMS.N, SCRYPT_PARAMS.r, SCRYPT_PARAMS.p], [32768, 8, 3]);
+  const h = await hashPassword('pass-word-1');
+  assert.match(h, /^scrypt\$32768\$8\$3\$[\w-]+\$[\w-]+$/);
+  assert.equal(await verifyPassword('pass-word-1', h), true);
+  assert.equal(needsRehash(h), false);
+});
+
+test('S2.2-P3 既存の p=1 ハッシュは保存されたパラメータで照合でき、needsRehash=true(p=3 で作り直せる)', async () => {
+  const p1 = { N: 32768, r: 8, p: 1, keyLen: 32, saltLen: 16 };
+  const old = await hashPassword('pass-word-1', p1);
+  assert.match(old, /^scrypt\$32768\$8\$1\$/);
+  assert.equal(await verifyPassword('pass-word-1', old), true);
+  assert.equal(await verifyPassword('wrong-pass-1', old), false);
+  assert.equal(needsRehash(old), true);
+  const fresh = await hashPassword('pass-word-1');
+  assert.equal(needsRehash(fresh), false);
+});
+
 test('verifyPassword: 1024 文字を超える入力は scrypt を呼ばずに false', async () => {
   const h = await hashPassword('pass-word-1', FAST);
   assert.equal(await verifyPassword('x'.repeat(1025), h), false);
@@ -73,7 +92,8 @@ test('verifyPassword: 保存値のパラメータ・hash 長が上限を超え�
     `scrypt$1024$64$1$${salt}$${hash}`, // r 上限超
     `scrypt$1024$8$32$${salt}$${hash}`, // p 上限超
     `scrypt$1048576$8$1$${salt}$${hash}`, // N 上限超
-    `scrypt$32768$8$4$${salt}$${hash}`, // 128*N*r*p = 128MiB > 64MiB
+    `scrypt$32768$8$6$${salt}$${hash}`, // 作業量 128*N*r*p = 192MiB > 128MiB(p=4 までは許す)
+    `scrypt$524288$8$1$${salt}$${hash}`, // メモリ 128*N*r = 512MiB > 64MiB
     `scrypt$1024$8$1$${salt}$${'A'.repeat(100)}`, // hash 長 75 バイト > 64
   ]) {
     assert.equal(await verifyPassword('pass-word-1', bad), false, bad);
