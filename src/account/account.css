@@ -1,0 +1,51 @@
+/* アカウント画面(S2.7)。styles.css は読み込まず、ここだけで完結させる(アプリ本体の見た目に影響しない)。 */
+:root {
+  --ac-blue: #1a73e8; --ac-blue-hover: #1558b0; --ac-page: #f7f9fc; --ac-surface: #fff;
+  --ac-border: #d3dae3; --ac-text: #1a2230; --ac-text2: #5f6b7a; --ac-danger: #c5221f; --ac-ok: #1a7f37;
+}
+* { box-sizing: border-box; }
+.ac-body { margin: 0; background: var(--ac-page); color: var(--ac-text);
+  font-family: "Roboto", "Helvetica Neue", system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif; line-height: 1.6; }
+.ac-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px;
+  background: var(--ac-surface); border-bottom: 1px solid var(--ac-border); }
+.ac-brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; color: var(--ac-text); text-decoration: none; }
+.ac-brand img { height: 28px; width: auto; }
+.ac-nav { display: flex; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+.ac-nav a { color: var(--ac-blue); text-decoration: none; }
+.ac-main { max-width: 640px; margin: 0 auto; padding: 24px 16px 64px; }
+.ac-card { background: var(--ac-surface); border: 1px solid var(--ac-border); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+.ac-card h1, .ac-card h2 { margin: 0 0 12px; font-size: 20px; }
+.ac-card h2 { font-size: 17px; }
+.ac-note { color: var(--ac-text2); font-size: 14px; margin: 0 0 12px; }
+.ac-tabs { display: flex; gap: 4px; margin-bottom: 16px; flex-wrap: wrap; }
+.ac-tab { font: inherit; font-size: 14px; padding: 8px 14px; border: 1px solid var(--ac-border); border-radius: 8px; background: var(--ac-surface); cursor: pointer; color: var(--ac-text); }
+.ac-tab[aria-selected="true"] { background: var(--ac-blue); color: #fff; border-color: var(--ac-blue); }
+.ac-form { display: grid; gap: 12px; }
+.ac-form label { display: grid; gap: 4px; font-size: 14px; font-weight: 500; }
+.ac-form input[type="text"], .ac-form input[type="email"], .ac-form input[type="password"], .ac-form textarea {
+  font: inherit; width: 100%; padding: 9px 10px; border: 1px solid var(--ac-border); border-radius: 8px; background: #fff; color: var(--ac-text); }
+.ac-form textarea { min-height: 160px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+.ac-form .ac-check { display: flex; align-items: flex-start; gap: 8px; font-weight: 400; }
+.ac-btn { font: inherit; font-size: 15px; font-weight: 500; padding: 10px 18px; border: 1px solid var(--ac-blue); border-radius: 8px; background: var(--ac-blue); color: #fff; cursor: pointer; }
+.ac-btn:hover { background: var(--ac-blue-hover); }
+.ac-btn:disabled { opacity: .55; cursor: default; }
+.ac-btn-ghost { background: #fff; color: var(--ac-blue); }
+.ac-btn-ghost:hover { background: #eef4fd; }
+.ac-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ac-msg { margin: 0 0 16px; padding: 10px 12px; border-radius: 8px; font-size: 14px; border: 1px solid var(--ac-border); background: #fff; }
+.ac-msg[data-kind="error"] { border-color: var(--ac-danger); color: var(--ac-danger); background: #fdecea; }
+.ac-msg[data-kind="ok"] { border-color: var(--ac-ok); color: var(--ac-ok); background: #e9f6ec; }
+.ac-badge { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--ac-border); }
+.ac-badge[data-ok="true"] { color: var(--ac-ok); border-color: var(--ac-ok); }
+.ac-badge[data-ok="false"] { color: var(--ac-danger); border-color: var(--ac-danger); }
+.ac-dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 12px; font-size: 14px; }
+.ac-dl dt { color: var(--ac-text2); }
+.ac-dl dd { margin: 0; overflow-wrap: anywhere; }
+.ac-table-wrap { overflow-x: auto; }
+.ac-table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.ac-table th, .ac-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--ac-border); overflow-wrap: anywhere; }
+.ac-list { margin: 0; padding-left: 20px; font-size: 14px; }
+@media (max-width: 480px) {
+  .ac-main { padding: 16px 12px 48px; }
+  .ac-card { padding: 16px; }
+}

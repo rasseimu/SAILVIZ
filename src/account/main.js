@@ -1,0 +1,344 @@
+// src/account/main.js
+// アカウント画面(S2.7)。/account(登録・ログイン・組織作成・名簿)、/verify-email、/reset-password を1ファイルで描く。
+// API は設計書 v2 §10.2・§10.3 のものだけを使う。ログインのセッションは HttpOnly Cookie(same-origin)。
+// 確認・再設定のトークンは読んだらすぐ URL から消し(history.replaceState)、ログや外部へ出さない。
+import {
+  pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm, membersView,
+} from './logic.js';
+
+const main = document.getElementById('ac-main');
+const nav = document.getElementById('ac-nav');
+
+// ---- 小さな DOM ヘルパ(文字列は textContent で入れ、HTML として解釈しない) ----
+function h(tag, attrs = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === false || v == null) continue;
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  return el;
+}
+const field = (label, input) => h('label', {}, label, input);
+
+// ---- API ----
+async function api(method, path, body) {
+  let res;
+  try {
+    res = await fetch(path, {
+      method, credentials: 'same-origin',
+      headers: body === undefined ? {} : { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch { return { status: 0, json: null }; }
+  let json = null;
+  try { json = await res.json(); } catch { /* 本文なし */ }
+  return { status: res.status, json };
+}
+
+// ---- メッセージ ----
+let msgEl = null;
+function setMsg(text, kind = 'info') {
+  if (!msgEl) return;
+  msgEl.textContent = text || '';
+  msgEl.dataset.kind = kind;
+  msgEl.hidden = !text;
+  msgEl.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+}
+function mount(...nodes) {
+  main.replaceChildren();
+  msgEl = h('p', { id: 'ac-msg', class: 'ac-msg', hidden: true });
+  main.append(msgEl, ...nodes);
+}
+async function submitting(btn, fn) {
+  btn.disabled = true;
+  try { await fn(); } finally { btn.disabled = false; }
+}
+
+// ---- 状態 ----
+let me = null; // GET /api/me の応答。未ログインは null
+
+async function loadMe() {
+  const r = await api('GET', '/api/me');
+  me = r.status === 200 ? r.json : null;
+  return r;
+}
+
+function renderNav() {
+  nav.replaceChildren();
+  if (me) {
+    nav.append(h('a', { href: '/account' }, 'アカウント'));
+    if (me.org) nav.append(h('a', { href: '/account#roster' }, '名簿'));
+  }
+  nav.append(h('a', { href: '/' }, 'SailViz へ'));
+}
+
+// ---- /verify-email ----
+async function renderVerify() {
+  const token = tokenFromSearch(location.search);
+  history.replaceState(null, '', location.pathname); // トークンを URL から消す
+  const result = h('p', { id: 'ac-verify-result', 'data-state': 'pending' }, '確認しています…');
+  mount(h('section', { class: 'ac-card' }, h('h1', {}, 'メールアドレスの確認'), result));
+  if (!token) {
+    result.dataset.state = 'error';
+    result.textContent = '確認リンクが正しくありません。メールのリンクをそのまま開いてください。';
+    main.append(h('p', {}, h('a', { href: '/account' }, 'アカウントのページへ')));
+    return;
+  }
+  const r = await api('POST', '/api/auth/verify-email', { verifyToken: token });
+  if (r.status === 200) {
+    result.dataset.state = 'ok';
+    result.textContent = 'メールアドレスを確認しました。';
+    main.append(h('section', { class: 'ac-card' },
+      h('p', { id: 'ac-verify-next' }, 'SailViz のアプリに戻って、再読み込み(画面を引き下げる、または開き直す)してください。'),
+      h('p', { class: 'ac-note' }, 'Web で使う場合は下のリンクからどうぞ。'),
+      h('a', { class: 'ac-btn', href: '/account' }, 'アカウントのページへ')));
+    return;
+  }
+  result.dataset.state = 'error';
+  result.textContent = r.status === 422
+    ? 'このリンクは無効か、期限切れまたは使用済みです。ログイン後、アカウントのページから確認メールを再送してください。'
+    : r.status === 0
+      ? `${apiErrorMessage(0, null)}。メールのリンクをもう一度開いてください。`
+      : apiErrorMessage(r.status, r.json);
+  main.append(h('p', {}, h('a', { class: 'ac-btn', href: '/account' }, 'アカウントのページへ')));
+}
+
+// ---- /reset-password ----
+function renderReset() {
+  const token = tokenFromSearch(location.search);
+  history.replaceState(null, '', location.pathname);
+  if (!token) {
+    mount(h('section', { class: 'ac-card' }, h('h1', {}, 'パスワードの再設定'),
+      h('p', { id: 'ac-reset-result', 'data-state': 'error' }, '再設定リンクが正しくありません。メールのリンクをそのまま開くか、もう一度再設定を申請してください。'),
+      h('a', { class: 'ac-btn', href: '/account#forgot' }, '再設定を申請する')));
+    return;
+  }
+  const pw = h('input', { id: 'ac-reset-pw', type: 'password', autocomplete: 'new-password', required: true, minlength: '8' });
+  const pw2 = h('input', { id: 'ac-reset-pw2', type: 'password', autocomplete: 'new-password', required: true, minlength: '8' });
+  const btn = h('button', { id: 'ac-reset-submit', class: 'ac-btn', type: 'submit' }, '新しいパスワードを設定');
+  const form = h('form', { class: 'ac-form', novalidate: true }, field('新しいパスワード(8文字以上)', pw), field('新しいパスワード(確認)', pw2), btn);
+  mount(h('section', { class: 'ac-card' }, h('h1', {}, 'パスワードの再設定'), form));
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitting(btn, async () => {
+      const c = checkNewPassword(pw.value, pw2.value);
+      if (!c.ok) return setMsg(c.message, 'error');
+      const r = await api('POST', '/api/auth/password-reset/confirm', { resetToken: token, newPassword: pw.value });
+      if (r.status === 200) {
+        mount(h('section', { class: 'ac-card' }, h('h1', {}, 'パスワードの再設定'),
+          h('p', { id: 'ac-reset-result', 'data-state': 'ok' }, 'パスワードを変更しました。新しいパスワードでログインしてください。'),
+          h('a', { class: 'ac-btn', href: '/account' }, 'ログインへ')));
+      } else if (r.status === 422 && r.json?.error?.code === 'invalid_token') {
+        mount(h('section', { class: 'ac-card' }, h('h1', {}, 'パスワードの再設定'),
+          h('p', { id: 'ac-reset-result', 'data-state': 'error' }, 'このリンクは無効か、期限切れまたは使用済みです。もう一度再設定を申請してください。'),
+          h('a', { class: 'ac-btn', href: '/account#forgot' }, '再設定を申請する')));
+      } else setMsg(apiErrorMessage(r.status, r.json), 'error');
+    });
+  });
+}
+
+// ---- /account(未ログイン) ----
+function renderLoggedOut(tab) {
+  const tabs = h('div', { class: 'ac-tabs', role: 'tablist' },
+    ...[['login', 'ログイン'], ['register', '新規登録'], ['forgot', 'パスワードを忘れた']].map(([id, label]) =>
+      h('button', { id: `ac-tab-${id}`, class: 'ac-tab', type: 'button', role: 'tab', 'aria-selected': String(id === tab), onclick: () => { history.replaceState(null, '', `/account#${id}`); render(); } }, label)));
+  let body;
+  if (tab === 'register') body = registerForm();
+  else if (tab === 'forgot') body = forgotForm();
+  else body = loginForm();
+  mount(h('section', { class: 'ac-card' }, h('h1', {}, 'SailViz アカウント'), tabs, body));
+}
+
+function loginForm() {
+  const email = h('input', { id: 'ac-login-email', type: 'email', autocomplete: 'username', required: true });
+  const pw = h('input', { id: 'ac-login-password', type: 'password', autocomplete: 'current-password', required: true });
+  const btn = h('button', { id: 'ac-login-submit', class: 'ac-btn', type: 'submit' }, 'ログイン');
+  const form = h('form', { class: 'ac-form', novalidate: true }, field('メールアドレス', email), field('パスワード', pw), btn);
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitting(btn, async () => {
+      if (!email.value.trim() || !pw.value) return setMsg('メールアドレスとパスワードを入力してください', 'error');
+      const r = await api('POST', '/api/auth/login', { email: email.value, password: pw.value });
+      if (r.status !== 200) return setMsg(apiErrorMessage(r.status, r.json), 'error');
+      history.replaceState(null, '', '/account');
+      await render();
+    });
+  });
+  return form;
+}
+
+function registerForm() {
+  const email = h('input', { id: 'ac-reg-email', type: 'email', autocomplete: 'email', required: true });
+  const pw = h('input', { id: 'ac-reg-password', type: 'password', autocomplete: 'new-password', required: true, minlength: '8' });
+  const name = h('input', { id: 'ac-reg-name', type: 'text', autocomplete: 'name', required: true });
+  const affil = h('input', { id: 'ac-reg-affil', type: 'text', required: true });
+  const agree = h('input', { id: 'ac-reg-agree', type: 'checkbox' });
+  const btn = h('button', { id: 'ac-reg-submit', class: 'ac-btn', type: 'submit' }, '登録する');
+  const form = h('form', { class: 'ac-form', novalidate: true },
+    h('p', { class: 'ac-note' }, '登録すると確認メールが届きます。メールのリンクを開くとアカウントが有効になります。'),
+    h('p', { id: 'ac-reg-roster-note', class: 'ac-note' }, '部の名簿に載っているアドレスで登録してください。名簿と違うアドレスでは、部に自動で紐付きません。'),
+    field('メールアドレス', email), field('パスワード(8文字以上)', pw), field('氏名', name), field('所属(例: ○○大学ヨット部)', affil),
+    h('label', { class: 'ac-check' }, agree, '利用規約・プライバシーポリシー・位置情報と録音の用途に同意します'), btn);
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitting(btn, async () => {
+      const f = { email: email.value, password: pw.value, name: name.value, affiliationText: affil.value, agreed: agree.checked };
+      const c = checkRegisterForm(f);
+      if (!c.ok) return setMsg(c.message, 'error');
+      const r = await api('POST', '/api/auth/register', {
+        email: f.email, password: f.password, name: f.name, affiliationText: f.affiliationText, agreedAt: Date.now(),
+      });
+      if (r.status !== 200) return setMsg(apiErrorMessage(r.status, r.json), 'error');
+      history.replaceState(null, '', '/account');
+      await render();
+      setMsg('登録しました。確認メールのリンクを開いてください。', 'ok');
+    });
+  });
+  return form;
+}
+
+function forgotForm() {
+  const email = h('input', { id: 'ac-forgot-email', type: 'email', autocomplete: 'email', required: true });
+  const btn = h('button', { id: 'ac-forgot-submit', class: 'ac-btn', type: 'submit' }, '再設定メールを送る');
+  const form = h('form', { class: 'ac-form', novalidate: true },
+    h('p', { class: 'ac-note' }, 'メールアドレスを確認済みのアカウントに、再設定のリンクを送ります。'),
+    field('メールアドレス', email), btn);
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitting(btn, async () => {
+      if (!email.value.trim()) return setMsg('メールアドレスを入力してください', 'error');
+      const r = await api('POST', '/api/auth/password-reset/request', { email: email.value });
+      if (r.status !== 200) return setMsg(apiErrorMessage(r.status, r.json), 'error');
+      // 登録の有無は返さない(サーバと同じ)ので、文言も断定しない
+      setMsg('登録済み(確認済み)のメールアドレスであれば、再設定のリンクを送りました。', 'ok');
+    });
+  });
+  return form;
+}
+
+// ---- /account(ログイン済み) ----
+function profileCard() {
+  const u = me.user;
+  const verified = me.emailVerified === true;
+  const logout = h('button', { id: 'ac-logout', class: 'ac-btn ac-btn-ghost', type: 'button' }, 'ログアウト');
+  logout.addEventListener('click', () => submitting(logout, async () => {
+    await api('POST', '/api/auth/logout', {});
+    me = null; history.replaceState(null, '', '/account'); await render();
+  }));
+  const rows = [
+    h('dt', {}, '氏名'), h('dd', { id: 'ac-me-name' }, u.name),
+    h('dt', {}, 'メール'), h('dd', { id: 'ac-me-email' }, u.email),
+    h('dt', {}, '確認'), h('dd', {}, h('span', { id: 'ac-me-verified', class: 'ac-badge', 'data-ok': String(verified) }, verified ? '確認済み' : '未確認')),
+  ];
+  const actions = [logout];
+  if (!verified) {
+    const resend = h('button', { id: 'ac-resend', class: 'ac-btn', type: 'button' }, '確認メールを再送');
+    resend.addEventListener('click', () => submitting(resend, async () => {
+      const r = await api('POST', '/api/auth/verify-email/resend', {});
+      if (r.status === 200) setMsg('確認メールを送りました。届いたリンクを開いてください。', 'ok');
+      else setMsg(apiErrorMessage(r.status, r.json), 'error');
+    }));
+    actions.unshift(resend);
+  }
+  return h('section', { class: 'ac-card' }, h('h1', {}, 'アカウント'), h('dl', { class: 'ac-dl' }, ...rows),
+    !verified && h('p', { class: 'ac-note' }, 'メールの確認が済むと、組織の作成や名簿との自動紐付けができます。'),
+    h('div', { class: 'ac-row' }, ...actions));
+}
+
+function orgCard() {
+  if (me.org) {
+    return h('section', { class: 'ac-card' }, h('h2', {}, '組織'),
+      h('p', {}, h('span', { id: 'ac-org-current' }, me.org.name)),
+      h('a', { id: 'ac-open-roster', class: 'ac-btn', href: '/account#roster' }, '名簿を開く'));
+  }
+  if (me.emailVerified !== true) {
+    return h('section', { class: 'ac-card' }, h('h2', {}, '組織'),
+      h('p', { class: 'ac-note' }, '組織を作るには、先にメールアドレスの確認が必要です。'));
+  }
+  const name = h('input', { id: 'ac-org-name', type: 'text', required: true, maxlength: '100' });
+  const btn = h('button', { id: 'ac-org-submit', class: 'ac-btn', type: 'submit' }, '組織を作成');
+  const form = h('form', { class: 'ac-form', novalidate: true },
+    h('p', { class: 'ac-note' }, '作成した人が組織の管理者になり、名簿を管理できます。'),
+    field('組織の名前(例: ○○大学ヨット部)', name), btn);
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitting(btn, async () => {
+      if (!name.value.trim()) return setMsg('組織の名前を入力してください', 'error');
+      const r = await api('POST', '/api/orgs', { name: name.value });
+      if (r.status !== 201) return setMsg(apiErrorMessage(r.status, r.json), 'error');
+      history.replaceState(null, '', '/account#roster');
+      await render();
+    });
+  });
+  return h('section', { class: 'ac-card' }, h('h2', {}, '組織を作る'), form);
+}
+
+async function renderAccount() {
+  mount(profileCard(), orgCard());
+}
+
+// ---- 名簿 ----
+async function renderRoster() {
+  if (!me.org) { history.replaceState(null, '', '/account'); return renderAccount(); }
+  const orgId = encodeURIComponent(me.org.id);
+  const area = h('section', { class: 'ac-card' }, h('h1', {}, `名簿: ${me.org.name}`), h('p', { class: 'ac-note' }, '読み込み中…'));
+  mount(area);
+  const [rr, mr] = await Promise.all([api('GET', `/api/orgs/${orgId}/roster`), api('GET', `/api/orgs/${orgId}/members`)]);
+  area.replaceChildren(h('h1', {}, `名簿: ${me.org.name}`));
+  if (rr.status === 403) {
+    area.append(h('p', { id: 'ac-roster-denied', class: 'ac-note' }, '名簿を見られるのは組織の管理者だけです。'));
+  } else if (rr.status !== 200 || !Array.isArray(rr.json)) {
+    setMsg(apiErrorMessage(rr.status, rr.json), 'error');
+  } else {
+    const rows = rr.json;
+    const ta = h('textarea', { id: 'ac-roster-text', rows: '8', spellcheck: 'false', placeholder: '氏名,メール,旧名簿の氏名(任意)\n部員A,a@example.com,' });
+    ta.value = rosterToText(rows);
+    const save = h('button', { id: 'ac-roster-save', class: 'ac-btn', type: 'submit' }, '名簿を提出');
+    const form = h('form', { class: 'ac-form', novalidate: true },
+      h('p', { class: 'ac-note' }, '1行に1人、「氏名,メール,旧名簿の氏名(任意)」の順で入力します(CSV の貼り付け可)。提出すると名簿全体が置き換わり、メールが一致する確認済みの人が自動で組織に紐付きます。名簿から外すと紐付けも外れます。'),
+      ta, save);
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      submitting(save, async () => {
+        const p = parseRosterText(ta.value);
+        if (!p.ok) return setMsg(p.message, 'error');
+        const r = await api('PUT', `/api/orgs/${orgId}/roster`, { roster: p.rows });
+        if (r.status !== 200) return setMsg(apiErrorMessage(r.status, r.json), 'error');
+        await renderRoster();
+        setMsg(`名簿を提出しました(${p.rows.length} 人。新しく紐付け ${r.json.linked?.length ?? 0} 人・解除 ${r.json.unlinked?.length ?? 0} 人)。`, 'ok');
+      });
+    });
+    const table = h('div', { class: 'ac-table-wrap' }, h('table', { id: 'ac-roster-table', class: 'ac-table' },
+      h('thead', {}, h('tr', {}, h('th', {}, '氏名'), h('th', {}, 'メール'), h('th', {}, '状態'))),
+      h('tbody', {}, ...rows.map((r) => h('tr', {}, h('td', {}, r.name), h('td', {}, r.email || '—'), h('td', {}, r.linkedUserId ? '紐付け済み' : '未紐付け'))))));
+    area.append(form, h('h2', {}, `名簿の現在の内容(${rows.length} 人)`), rows.length ? table : h('p', { class: 'ac-note' }, 'まだ名簿はありません。'));
+  }
+  const mv = membersView(mr.status, mr.json);
+  if (mv.kind === 'error') {
+    main.append(h('section', { class: 'ac-card' }, h('h2', {}, '組織のメンバー'),
+      h('p', { id: 'ac-members-error', class: 'ac-note', role: 'alert' }, mv.message)));
+    return;
+  }
+  const members = mv.members;
+  main.append(h('section', { class: 'ac-card' }, h('h2', {}, `組織のメンバー(${members.length} 人)`),
+    members.length ? h('ul', { id: 'ac-members', class: 'ac-list' }, ...members.map((m) => h('li', {}, m.name))) : h('p', { class: 'ac-note' }, 'まだ紐付け済みのメンバーはいません。')));
+}
+
+// ---- 入口 ----
+async function render() {
+  const mode = pageModeForPath(location.pathname);
+  if (mode === 'verify') { renderNav(); return renderVerify(); }
+  if (mode === 'reset') { renderNav(); return renderReset(); }
+  const r = await loadMe();
+  renderNav();
+  const hash = location.hash.replace('#', '');
+  if (me) return hash === 'roster' ? renderRoster() : renderAccount();
+  renderLoggedOut(['register', 'forgot'].includes(hash) ? hash : 'login');
+  if (r.status === 503) setMsg(apiErrorMessage(503, r.json), 'error');
+}
+
+window.addEventListener('hashchange', render);
+render();
