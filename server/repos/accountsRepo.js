@@ -3,6 +3,7 @@
 // ここは永続化だけ。scrypt・トークン生成・Bearer 抽出・HTTP は S2.2 以降。
 // トークンは呼び出し側がハッシュにした値(tokenHash)だけを受け取り、平文は扱わない。
 import { randomBytes } from 'node:crypto';
+import { inviteStatus, generateInviteCode } from '../domain/invites.js';
 
 const genId = (prefix) => `${prefix}${randomBytes(5).toString('hex')}`;
 const normEmail = (e) => (typeof e === 'string' ? e.trim().toLowerCase() : e);
@@ -288,6 +289,58 @@ export function createAccountsRepo({ db }) {
     },
     listMembershipsOfUser(userId) {
       return db.prepare('SELECT * FROM org_members WHERE user_id = ? ORDER BY linked_at').all(userId);
+    },
+
+    // ---- org_invites(004_invites.sql / S2.9)----
+    createInvite({ orgId, createdByUserId, expiresAt, maxUses, now = Date.now() }) {
+      const id = genId('inv_');
+      const code = generateInviteCode();
+      db.prepare(
+        `INSERT INTO org_invites (id, org_id, code, created_by_user_id, role, expires_at, max_uses, use_count, created_at)
+         VALUES (?, ?, ?, ?, 'member', ?, ?, 0, ?)`,
+      ).run(id, orgId, code, nul(createdByUserId), nul(expiresAt), nul(maxUses), now);
+      return this.getInvite(id);
+    },
+    getInvite(id) {
+      return db.prepare('SELECT * FROM org_invites WHERE id = ?').get(id) || null;
+    },
+    getInviteByCode(code) {
+      return db.prepare('SELECT * FROM org_invites WHERE code = ?').get(String(code)) || null;
+    },
+    // 有効(未失効・期限内・上限未満)な招待だけ。新しい順。
+    listActiveInvites(orgId, now = Date.now()) {
+      return db.prepare(
+        `SELECT * FROM org_invites WHERE org_id = ? AND revoked_at IS NULL
+           AND (expires_at IS NULL OR expires_at > ?) AND (max_uses IS NULL OR use_count < max_uses)
+         ORDER BY created_at DESC, rowid DESC`,
+      ).all(orgId, now);
+    },
+    // 組織を縛って失効させる(他組織の招待 ID では何も起きない)。初回だけ true。
+    revokeInvite(orgId, inviteId, now = Date.now()) {
+      return Number(db.prepare('UPDATE org_invites SET revoked_at = ? WHERE id = ? AND org_id = ? AND revoked_at IS NULL')
+        .run(now, inviteId, orgId).changes) > 0;
+    },
+    // 招待コードで参加する。use_count の加算と参加は1トランザクション。
+    // 上限は条件付き UPDATE で守る(同時利用でも max_uses を超えない)。
+    // 戻り値: { status:'joined'|'already', orgId } | { status:'revoked'|'expired'|'exhausted', orgId } | { status:'not_found' }
+    // 既参加は(招待の状態に関わらず)'already'。加算しない。
+    acceptInvite({ code, userId, now = Date.now() }) {
+      return withTx(() => {
+        const inv = this.getInviteByCode(code);
+        if (!inv) return { status: 'not_found' };
+        if (this.isMember(inv.org_id, userId)) return { status: 'already', orgId: inv.org_id };
+        const r = db.prepare(
+          `UPDATE org_invites SET use_count = use_count + 1
+             WHERE id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
+               AND (max_uses IS NULL OR use_count < max_uses)`,
+        ).run(inv.id, now);
+        if (Number(r.changes) === 0) {
+          return { status: inviteStatus(this.getInvite(inv.id), now), orgId: inv.org_id };
+        }
+        db.prepare('INSERT OR IGNORE INTO org_members (org_id, user_id, roster_id, linked_at) VALUES (?, ?, NULL, ?)')
+          .run(inv.org_id, userId, now);
+        return { status: 'joined', orgId: inv.org_id };
+      });
     },
   };
 }

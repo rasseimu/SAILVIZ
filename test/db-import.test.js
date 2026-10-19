@@ -64,7 +64,7 @@ test('実行で行が入り、2回流しても件数が変わらない(冪等)',
   const snap = () => ['practice_days', 'rec_sessions', 'tracks', 'reflections', 'reflection_progress', 'reflection_comments', 'roadmaps'].map((t) => count(db, t));
   const first = snap();
   assert.deepEqual(first, [2, 1, 1, 2, 2, 1, 1]);
-  importFromFiles({ db, dataDir, now: 2 });
+  importFromFiles({ db, dataDir, now: 2, forceReimport: true });
   assert.deepEqual(snap(), first, '2回目も同じ件数');
   db.close();
   await rm(dataDir, { recursive: true, force: true });

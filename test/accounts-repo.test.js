@@ -39,8 +39,10 @@ test('002 を適用すると §5.1 のアカウント系の表と列ができる
   assert.deepEqual(cols(db, 'org_members'), ['org_id', 'user_id', 'roster_id', 'linked_at']);
   // 平文トークン列は無い
   assert.ok(!cols(db, 'auth_tokens').includes('token'));
-  // org_invites は S2.9(003)
-  assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'org_invites'").get(), undefined);
+  // org_invites は S2.9(004)
+  assert.ok(v.includes(4));
+  assert.deepEqual(cols(db, 'org_invites'), ['id', 'org_id', 'code', 'created_by_user_id', 'role', 'expires_at',
+    'max_uses', 'use_count', 'revoked_at', 'created_at']);
   db.close();
 });
 

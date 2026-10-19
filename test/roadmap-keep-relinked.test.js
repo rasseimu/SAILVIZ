@@ -72,7 +72,7 @@ test('取込み再実行: 付け替え済みの roadmaps 行を保ち、未設�
   const before = rows(db).find((r) => r.legacy_name === '旧A');
 
   await writeFile(join(dataDir, 'roadmap.json'), JSON.stringify({ 旧A: { goal: 'g2' }, 旧B: { goal: 'b2' } }));
-  importFromFiles({ db, dataDir, orgId: org.id });
+  importFromFiles({ db, dataDir, orgId: org.id, forceReimport: true });
   const after = rows(db);
   const a = after.find((r) => r.legacy_name === '旧A');
   assert.equal(a.user_id, userId);
