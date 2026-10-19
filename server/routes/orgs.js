@@ -67,7 +67,12 @@ export function createOrgsRoute({
     },
     'GET members': async (req, res, orgId) => {
       if (!gate(req, res, orgId, 'member')) return;
-      send(res, 200, accounts.listMembers(orgId).map((m) => ({ userId: m.user_id, name: displayNameFor(accounts.getUser(m.user_id) ?? { id: m.user_id }) })));
+      const admins = new Set(accounts.listOrgAdmins(orgId));
+      send(res, 200, accounts.listMembers(orgId).map((m) => ({
+        userId: m.user_id,
+        name: displayNameFor(accounts.getUser(m.user_id) ?? { id: m.user_id }),
+        isAdmin: admins.has(m.user_id),
+      })));
     },
   };
 

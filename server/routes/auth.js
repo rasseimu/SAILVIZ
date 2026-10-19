@@ -232,12 +232,17 @@ export function createAuthRoute({
     // ---- GET /api/me ----
     async me(req, res) {
       const id = requireUser(req, res); if (!id) return;
-      const m = accounts.listMembershipsOfUser(id.user.id)[0];
-      const org = m ? accounts.getOrg(m.org_id) : null;
+      // orgs: linked_at 昇順・同時刻は組織 ID 順。org は互換のため orgs[0] の {id,name}。
+      const orgs = [];
+      for (const m of accounts.listMembershipsOfUser(id.user.id)) {
+        const o = accounts.getOrg(m.org_id);
+        if (o) orgs.push({ id: o.id, name: o.name, isAdmin: accounts.isOrgAdmin(o.id, id.user.id) });
+      }
       send(res, 200, {
         user: publicUser(id.user),
         emailVerified: id.user.email_verified_at != null,
-        org: org ? { id: org.id, name: org.name } : null,
+        org: orgs[0] ? { id: orgs[0].id, name: orgs[0].name } : null,
+        orgs,
       });
     },
 
