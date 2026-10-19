@@ -193,6 +193,16 @@ test('login: 未確認でも使える(§4.2)。古いパラメータのハッシ
   assert.equal((await call('POST', '/api/auth/login', { email: 'old@example.test', password: 'pass-word-1' })).status, 200);
 });
 
+test('login: N・r が現行と同じで p だけ違う旧ハッシュ(p=1)もログインで p=3 に保存し直す(S2.2-P4)', { skip }, async () => {
+  const old = { N: 1024, r: 8, p: 1, keyLen: 32, saltLen: 16 }; // FAST と p だけ違う
+  const u = accounts.createUser({ email: 'oldp@example.test', name: 'x', passwordHash: await hashPassword('pass-word-1', old) });
+  assert.match(accounts.getUser(u.id).password_hash, /^scrypt\$1024\$8\$1\$/);
+  const r = await call('POST', '/api/auth/login', { email: 'oldp@example.test', password: 'pass-word-1' });
+  assert.equal(r.status, 200);
+  assert.match(accounts.getUser(u.id).password_hash, /^scrypt\$1024\$8\$3\$/);
+  assert.equal((await call('POST', '/api/auth/login', { email: 'oldp@example.test', password: 'pass-word-1' })).status, 200);
+});
+
 test('GET /api/me・login: name 未設定のユーザーは「ユーザー」+ID由来4文字、defaultVisibility は private(S2.3-P9)。DB は変えない', { skip }, async () => {
   const u = accounts.createUser({ email: 'noname@example.test', name: null, passwordHash: await hashPassword('pass-word-1', FAST) });
   const login = await call('POST', '/api/auth/login', { email: 'noname@example.test', password: 'pass-word-1' });
