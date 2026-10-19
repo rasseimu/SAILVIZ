@@ -25,6 +25,25 @@ test('pagePathFor: 受け口のパスだけ account.html に対応づける', ()
   assert.equal(pagePathFor('/'), null);
 });
 
+test('serveStatic: 受け口以外(/・/index.html)には Referrer-Policy を付けず、/account.html の直接指定も配信する', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sailviz-pages-'));
+  try {
+    await writeFile(join(root, 'account.html'), '<h1>acct</h1>');
+    await writeFile(join(root, 'index.html'), '<h1>idx</h1>');
+    for (const url of ['/', '/index.html']) {
+      const res = fakeRes();
+      await serveStatic({ url }, res, root);
+      assert.equal(res.status, 200);
+      assert.equal(res.body.toString(), '<h1>idx</h1>');
+      assert.equal(res.headers['referrer-policy'], undefined, url);
+    }
+    const direct = fakeRes();
+    await serveStatic({ url: '/account.html' }, direct, root);
+    assert.equal(direct.status, 200);
+    assert.equal(direct.body.toString(), '<h1>acct</h1>');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('serveStatic: /verify-email?token=… は HTML を返し no-store・Referrer-Policy 付き', async () => {
   const root = await mkdtemp(join(tmpdir(), 'sailviz-pages-'));
   try {

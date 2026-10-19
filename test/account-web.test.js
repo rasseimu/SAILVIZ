@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm,
+  pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm, membersView,
 } from '../src/account/logic.js';
 
 test('pageModeForPath: パスで画面を決める', () => {
@@ -55,6 +55,22 @@ test('parseRosterText: 氏名が空の行は行番号つきのエラー', () => 
 
 test('parseRosterText: 空の入力は空の名簿(全員を外す)', () => {
   assert.deepEqual(parseRosterText('  \n'), { ok: true, rows: [] });
+});
+
+test('parseRosterText: ヘッダは「氏名+メール」の2列が揃うときだけ。氏名が "name" の人は読み飛ばさない', () => {
+  assert.deepEqual(parseRosterText('Name,Email\nA,a@example.com').rows, [{ name: 'A', email: 'a@example.com', legacyName: null }]);
+  assert.deepEqual(parseRosterText('name,a@example.com').rows, [{ name: 'name', email: 'a@example.com', legacyName: null }]);
+  assert.deepEqual(parseRosterText('氏名').rows, [{ name: '氏名', email: null, legacyName: null }]);
+});
+
+test('membersView: 200 以外はエラー(0人とは区別)、200 は一覧', () => {
+  for (const [s, j] of [[401, null], [403, null], [500, null], [0, null], [200, { x: 1 }]]) {
+    const v = membersView(s, j);
+    assert.equal(v.kind, 'error', `status ${s}`);
+    assert.match(v.message, /読み込めませんでした/);
+  }
+  assert.deepEqual(membersView(200, []), { kind: 'list', members: [] });
+  assert.equal(membersView(200, [{ name: 'A' }]).members.length, 1);
 });
 
 test('rosterToText と parseRosterText は往復できる', () => {

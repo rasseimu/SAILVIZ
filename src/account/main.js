@@ -3,7 +3,7 @@
 // API は設計書 v2 §10.2・§10.3 のものだけを使う。ログインのセッションは HttpOnly Cookie(same-origin)。
 // 確認・再設定のトークンは読んだらすぐ URL から消し(history.replaceState)、ログや外部へ出さない。
 import {
-  pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm,
+  pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm, membersView,
 } from './logic.js';
 
 const main = document.getElementById('ac-main');
@@ -100,7 +100,9 @@ async function renderVerify() {
   result.dataset.state = 'error';
   result.textContent = r.status === 422
     ? 'このリンクは無効か、期限切れまたは使用済みです。ログイン後、アカウントのページから確認メールを再送してください。'
-    : apiErrorMessage(r.status, r.json);
+    : r.status === 0
+      ? `${apiErrorMessage(0, null)}。メールのリンクをもう一度開いてください。`
+      : apiErrorMessage(r.status, r.json);
   main.append(h('p', {}, h('a', { class: 'ac-btn', href: '/account' }, 'アカウントのページへ')));
 }
 
@@ -177,8 +179,9 @@ function registerForm() {
   const btn = h('button', { id: 'ac-reg-submit', class: 'ac-btn', type: 'submit' }, '登録する');
   const form = h('form', { class: 'ac-form', novalidate: true },
     h('p', { class: 'ac-note' }, '登録すると確認メールが届きます。メールのリンクを開くとアカウントが有効になります。'),
+    h('p', { id: 'ac-reg-roster-note', class: 'ac-note' }, '部の名簿に載っているアドレスで登録してください。名簿と違うアドレスでは、部に自動で紐付きません。'),
     field('メールアドレス', email), field('パスワード(8文字以上)', pw), field('氏名', name), field('所属(例: ○○大学ヨット部)', affil),
-    h('label', { class: 'ac-check' }, agree, '利用規約・個人情報の取り扱いに同意します'), btn);
+    h('label', { class: 'ac-check' }, agree, '利用規約・プライバシーポリシー・位置情報と録音の用途に同意します'), btn);
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     submitting(btn, async () => {
@@ -313,7 +316,13 @@ async function renderRoster() {
       h('tbody', {}, ...rows.map((r) => h('tr', {}, h('td', {}, r.name), h('td', {}, r.email || '—'), h('td', {}, r.linkedUserId ? '紐付け済み' : '未紐付け'))))));
     area.append(form, h('h2', {}, `名簿の現在の内容(${rows.length} 人)`), rows.length ? table : h('p', { class: 'ac-note' }, 'まだ名簿はありません。'));
   }
-  const members = mr.status === 200 && Array.isArray(mr.json) ? mr.json : [];
+  const mv = membersView(mr.status, mr.json);
+  if (mv.kind === 'error') {
+    main.append(h('section', { class: 'ac-card' }, h('h2', {}, '組織のメンバー'),
+      h('p', { id: 'ac-members-error', class: 'ac-note', role: 'alert' }, mv.message)));
+    return;
+  }
+  const members = mv.members;
   main.append(h('section', { class: 'ac-card' }, h('h2', {}, `組織のメンバー(${members.length} 人)`),
     members.length ? h('ul', { id: 'ac-members', class: 'ac-list' }, ...members.map((m) => h('li', {}, m.name))) : h('p', { class: 'ac-note' }, 'まだ紐付け済みのメンバーはいません。')));
 }

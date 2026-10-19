@@ -28,6 +28,12 @@ export function apiErrorMessage(status, json) {
   return `処理に失敗しました(${status})`;
 }
 
+// GET members の応答を表示用の状態にする。200 以外は「メンバー0人」とは区別してエラーにする。
+export function membersView(status, json) {
+  if (status !== 200 || !Array.isArray(json)) return { kind: 'error', message: `メンバーを読み込めませんでした。${apiErrorMessage(status, json)}` };
+  return { kind: 'list', members: json };
+}
+
 const MIN_PASSWORD = 8;
 const looksLikeEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim());
 const bad = (message) => ({ ok: false, message });
@@ -64,7 +70,7 @@ function splitLine(line) {
 }
 
 // 名簿のテキスト(列: 氏名, メール, 旧名簿の氏名)を PUT roster の行に変換する。
-// 先頭のヘッダ行(「氏名」「name」で始まる)と空行は読み飛ばす。空なら空の名簿(全員を外す)。
+// 先頭のヘッダ行(1列目が氏名/name かつ 2列目がメール/email)と空行は読み飛ばす。空なら空の名簿(全員を外す)。
 export function parseRosterText(text) {
   const lines = String(text || '').split(/\r?\n/);
   const rows = [];
@@ -74,7 +80,7 @@ export function parseRosterText(text) {
     const cells = splitLine(lines[i]);
     if (first) {
       first = false;
-      if (/^(氏名|name)$/i.test(cells[0])) continue;
+      if (/^(氏名|name)$/i.test(cells[0]) && /^(メール|メールアドレス|e-?mail)$/i.test(cells[1] || '')) continue;
     }
     if (!cells[0]) return bad(`${i + 1} 行目: 氏名が空です`);
     rows.push({ name: cells[0], email: cells[1] || null, legacyName: cells[2] || null });

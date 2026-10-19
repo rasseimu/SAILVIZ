@@ -47,7 +47,6 @@ export async function serveStatic(req, res, rootDir) {
     if (page) headers['referrer-policy'] = 'no-referrer';
     res.writeHead(200, headers);
     res.end(buf);
-
   } catch {
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end('not found');
   }
