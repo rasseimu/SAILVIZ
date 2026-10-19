@@ -58,7 +58,7 @@ export const publicUser = (u) => ({
 // 設定を束ねた状態を作る。テストでは now・hashParams・mailer を差し替える。
 export function createAuthRoute({
   accounts, mailer, baseUrl, writeToken, now = () => Date.now(), hashParams = SCRYPT_PARAMS, secureCookie = '',
-  logger = console.error,
+  logger = console.error, hash = hashPassword, // hash: テストでハッシュ計算中の競合を再現するための差し替え口
 }) {
   const limiters = Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, createRateLimiter(v)]));
   // ユーザー不在・パスワード未設定のログインでも同じ時間をかけるためのダミー(メールの登録有無を漏らさない)。
@@ -216,9 +216,13 @@ export function createAuthRoute({
       const peeked = peek && accounts.getUser(peek.userId);
       // 削除済み、またはメール未確認(§4.2: 再設定は確認後のみ)は無効
       if (!peeked || peeked.deleted_at != null || peeked.email_verified_at == null) return invalid();
-      const passwordHash = await hashPassword(body.newPassword, hashParams);
+      const passwordHash = await hash(body.newPassword, hashParams);
       // 消費・パスワード更新・全トークン失効を 1 つのトランザクションに。並行して先に使われていたら無効と同じ。
+      // ハッシュ計算中に退会・メール未確認に変わりうるので、トランザクション内でユーザーの状態を確かめ直す。
       const done = accounts.withTx(() => {
+        const p = peekEmailToken(accounts, body.resetToken, 'reset', now());
+        const u = p && accounts.getUser(p.userId);
+        if (!u || u.deleted_at != null || u.email_verified_at == null) return false; // トークンは消費しない
         const hit = consumeEmailToken(accounts, body.resetToken, 'reset', now());
         if (!hit) return false;
         accounts.updateUser(hit.userId, { passwordHash });

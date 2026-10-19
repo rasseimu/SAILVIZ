@@ -331,6 +331,81 @@ test('password-reset/confirm: 更新が例外になってもトークンは未�
   assert.equal(reuse.status, 422); assert.equal(reuse.json.error.code, 'invalid_token');
 });
 
+// ハッシュ計算(scrypt)中に状態が変わる競合を再現する。armed の間だけ resolve されるまで待つ。
+function useGatedHash() {
+  const gate = { armed: false, entered: null, release: null };
+  handler = createApi({
+    dataDir: '/nonexistent', repo: { }, token: 'shared-write', accounts, mailer, baseUrl: BASE_URL,
+    authOptions: {
+      now: () => clock.t, hashParams: FAST, logger: () => {},
+      hash: async (pw, params) => {
+        if (gate.armed) {
+          gate.armed = false;
+          const entered = gate.entered; const wait = new Promise((r) => { gate.release = r; });
+          entered(); await wait;
+        }
+        return hashPassword(pw, params);
+      },
+    },
+  });
+  gate.arm = () => { gate.armed = true; return new Promise((r) => { gate.entered = r; }); };
+  return gate;
+}
+async function verifiedResetToken() {
+  const reg = await register();
+  await call('POST', '/api/auth/verify-email', { verifyToken: tokenFrom(mailer.last('verify').url) });
+  await call('POST', '/api/auth/password-reset/request', { email: REG.email });
+  await new Promise((r) => setImmediate(r));
+  return { reg, t: tokenFrom(mailer.last('reset').url) };
+}
+
+test('password-reset/confirm: ハッシュ計算中に退会されたら 422 invalid_token で、password_hash は書かれず、トークンも未使用のまま', { skip }, async () => {
+  const gate = useGatedHash();
+  const { reg, t } = await verifiedResetToken();
+  const before = accounts.getUser(reg.json.user.id).password_hash;
+  const entered = gate.arm();
+  const p = call('POST', '/api/auth/password-reset/confirm', { resetToken: t, newPassword: 'new-pass-word-2' });
+  await entered;
+  accounts.markUserDeleted(reg.json.user.id, clock.t);
+  gate.release();
+  const r = await p;
+  assert.equal(r.status, 422); assert.equal(r.json.error.code, 'invalid_token');
+  assert.equal(accounts.getUser(reg.json.user.id).password_hash, before);
+});
+
+test('password-reset/confirm: ハッシュ計算中にメール未確認に戻ったら 422 invalid_token で、password_hash は書かれない', { skip }, async () => {
+  const gate = useGatedHash();
+  const { reg, t } = await verifiedResetToken();
+  const before = accounts.getUser(reg.json.user.id).password_hash;
+  const entered = gate.arm();
+  const p = call('POST', '/api/auth/password-reset/confirm', { resetToken: t, newPassword: 'new-pass-word-2' });
+  await entered;
+  db.prepare('UPDATE users SET email_verified_at = NULL WHERE id = ?').run(reg.json.user.id);
+  gate.release();
+  const r = await p;
+  assert.equal(r.status, 422); assert.equal(r.json.error.code, 'invalid_token');
+  assert.equal(accounts.getUser(reg.json.user.id).password_hash, before);
+});
+
+test('password-reset/confirm: 同じトークンの同時 2 本は 1 本 200・もう 1 本 422。パスワードは先に通った方で、失敗は回数に記録される', { skip }, async () => {
+  const { t } = await verifiedResetToken();
+  const pws = ['first-pass-word-1', 'second-pass-word-2'];
+  const rs = await Promise.all(pws.map((newPassword) => call('POST', '/api/auth/password-reset/confirm', { resetToken: t, newPassword })));
+  const statuses = rs.map((r) => r.status).sort();
+  assert.deepEqual(statuses, [200, 422]);
+  const winner = pws[rs.findIndex((r) => r.status === 200)];
+  const loser = pws[rs.findIndex((r) => r.status === 422)];
+  assert.equal(rs.find((r) => r.status === 422).json.error.code, 'invalid_token');
+  assert.equal((await call('POST', '/api/auth/login', { email: REG.email, password: loser })).status, 401);
+  assert.equal((await call('POST', '/api/auth/login', { email: REG.email, password: winner })).status, 200);
+  // 負けた 1 本が失敗として 1 回記録されている(残り max-1 回で 429)
+  const bad = { resetToken: 'no-such-token', newPassword: 'new-pass-word-2' };
+  for (let i = 0; i < LIMITS.resetConfirmIp.max - 1; i++) {
+    assert.equal((await call('POST', '/api/auth/password-reset/confirm', bad)).status, 422);
+  }
+  assert.equal((await call('POST', '/api/auth/password-reset/confirm', bad)).status, 429);
+});
+
 test('password-reset/confirm: 無効なトークンは 422 で、回数制限に記録される', { skip }, async () => {
   const body = { resetToken: 'no-such-token', newPassword: 'new-pass-word-2' };
   for (let i = 0; i < LIMITS.resetConfirmIp.max; i++) {

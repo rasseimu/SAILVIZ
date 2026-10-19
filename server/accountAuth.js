@@ -42,22 +42,26 @@ export function issueEmailToken(repo, { userId, purpose, newEmail, now = Date.no
   return { token, id, expiresAt };
 }
 
-// 消費せずに検証する。consumeEmailToken と同じ条件で { userId, newEmail } か null を返す。
-export function peekEmailToken(repo, token, purpose, now = Date.now()) {
+// peek と consume が共有する検証条件(目的一致・未使用・期限内)。有効な行か null を返す。
+function findUsableEmailToken(repo, token, purpose, now) {
   if (typeof token !== 'string' || !token) return null;
   const row = repo.getEmailTokenByHash(hashToken(token));
   if (!row || row.purpose !== purpose || row.used_at != null) return null;
   if (row.expires_at != null && row.expires_at <= now) return null;
-  return { userId: row.user_id, newEmail: row.new_email ?? null };
+  return row;
+}
+
+// 消費せずに検証する。consumeEmailToken と同じ条件で { userId, newEmail } か null を返す。
+export function peekEmailToken(repo, token, purpose, now = Date.now()) {
+  const row = findUsableEmailToken(repo, token, purpose, now);
+  return row ? { userId: row.user_id, newEmail: row.new_email ?? null } : null;
 }
 
 // 使用する。目的が合い・未使用・期限内なら { userId, newEmail } を返して使用済みにする。それ以外は null。
 // 二重使用は2回目が null(markEmailTokenUsed の更新件数で判定)。
 export function consumeEmailToken(repo, token, purpose, now = Date.now()) {
-  if (typeof token !== 'string' || !token) return null;
-  const row = repo.getEmailTokenByHash(hashToken(token));
-  if (!row || row.purpose !== purpose || row.used_at != null) return null;
-  if (row.expires_at != null && row.expires_at <= now) return null;
+  const row = findUsableEmailToken(repo, token, purpose, now);
+  if (!row) return null;
   if (!repo.markEmailTokenUsed(row.id, now)) return null;
   return { userId: row.user_id, newEmail: row.new_email ?? null };
 }
