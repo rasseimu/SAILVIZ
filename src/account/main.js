@@ -4,7 +4,7 @@
 // 確認・再設定のトークンは読んだらすぐ URL から消し(history.replaceState)、ログや外部へ出さない。
 import {
   pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm, membersView,
-  inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView,
+  soleAdminOrgs, buildDeleteBody, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView,
 } from './logic.js';
 
 const main = document.getElementById('ac-main');
@@ -278,8 +278,64 @@ function orgCard() {
   return h('section', { class: 'ac-card' }, h('h2', {}, '組織を作る'), form);
 }
 
+// ---- 退会(S2.12。設計書 v2 §4.3・§10.2 DELETE /api/me) ----
+// パスワードの再入力が要る。自分が唯一の管理者の組織があれば後任を選べる(選ばなければサーバが最も古く紐付いたメンバーへ自動で引き継ぐ: H25)。
+function deleteCard() {
+  const card = h('section', { id: 'ac-delete-card', class: 'ac-card' }, h('h2', {}, '退会'));
+  const open = h('button', { id: 'ac-delete-open', class: 'ac-btn ac-btn-ghost', type: 'button' }, '退会する…');
+  card.append(h('p', { class: 'ac-note' }, 'アカウントを削除します。取り消せません。個人情報は消え、同じメールアドレスで新しく登録し直せます。'), open);
+  open.addEventListener('click', () => submitting(open, async () => {
+    open.hidden = true;
+    const area = h('div', { id: 'ac-delete-area' }, h('p', { class: 'ac-note' }, '読み込み中…'));
+    card.append(area);
+    const adminOrgs = (me.orgs || []).filter((o) => o.isAdmin === true);
+    const membersByOrg = {};
+    await Promise.all(adminOrgs.map(async (o) => {
+      const r = await api('GET', `/api/orgs/${encodeURIComponent(o.id)}/members`);
+      if (r.status === 200 && Array.isArray(r.json)) membersByOrg[o.id] = r.json;
+    }));
+    const sole = soleAdminOrgs(me.user.id, me.orgs, membersByOrg);
+    const selects = {};
+    const kids = [];
+    if (sole.length) {
+      kids.push(h('p', { id: 'ac-delete-successor-note', class: 'ac-note' },
+        '次の組織はあなたが唯一の管理者です。後任の管理者を選んでください。選ばない場合は、最も古く紐付いたメンバーに自動で管理者が引き継がれます。'));
+      for (const s of sole) {
+        const sel = h('select', { class: 'ac-delete-successor', 'data-org': s.orgId },
+          h('option', { value: '' }, '選ばない(自動で引き継ぐ)'),
+          ...s.candidates.map((c) => h('option', { value: c.userId }, c.name)));
+        selects[s.orgId] = sel;
+        kids.push(field(`${s.orgName} の後任`, sel));
+        if (!s.candidates.length) kids.push(h('p', { class: 'ac-note' }, `${s.orgName} には、あなた以外のメンバーがいません。`));
+      }
+    }
+    const pw = h('input', { id: 'ac-delete-password', type: 'password', autocomplete: 'current-password', required: true });
+    const btn = h('button', { id: 'ac-delete-submit', class: 'ac-btn', type: 'submit' }, '退会を確定する');
+    const cancel = h('button', { id: 'ac-delete-cancel', class: 'ac-btn ac-btn-ghost', type: 'button' }, 'やめる');
+    cancel.addEventListener('click', () => { area.remove(); open.hidden = false; });
+    const form = h('form', { class: 'ac-form', novalidate: true }, ...kids, field('確認のため、パスワードを入力してください', pw), h('div', { class: 'ac-row' }, btn, cancel));
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      submitting(btn, async () => {
+        const choices = {};
+        for (const [orgId, sel] of Object.entries(selects)) choices[orgId] = sel.value;
+        const b = buildDeleteBody(pw.value, choices);
+        if (!b.ok) return setMsg(b.message, 'error');
+        const r = await api('DELETE', '/api/me', b.body);
+        if (r.status !== 200) return setMsg(apiErrorMessage(r.status, r.json), 'error');
+        me = null; history.replaceState(null, '', '/account');
+        await render();
+        setMsg('退会しました。ご利用ありがとうございました。', 'ok');
+      });
+    });
+    area.replaceChildren(form);
+    open.disabled = false;
+  }));
+  return card;
+}
+
 async function renderAccount() {
-  mount(profileCard(), orgCard());
+  mount(profileCard(), orgCard(), deleteCard());
 }
 
 // ---- 名簿 ----
