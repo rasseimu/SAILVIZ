@@ -72,6 +72,26 @@ test('serveStatic: /?invite=<code> は /join/<code> へ 302(サーバの招待 U
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test('serveStatic: /join/<code> は account.html を返し no-store・Referrer-Policy: no-referrer 付き(S2.10-P2)', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sailviz-pages-'));
+  try {
+    await writeFile(join(root, 'account.html'), '<h1>acct</h1>');
+    for (const url of ['/join/Ab-_09', '/join/Ab-_09/']) {
+      const res = fakeRes();
+      await serveStatic({ url }, res, root);
+      assert.equal(res.status, 200, url);
+      assert.equal(res.body.toString(), '<h1>acct</h1>');
+      assert.match(res.headers['content-type'], /text\/html/);
+      assert.match(res.headers['cache-control'], /no-store/);
+      assert.equal(res.headers['referrer-policy'], 'no-referrer');
+    }
+    // 深いパス(/join/a/b)は参加ページではない → 404(P3-4: /?invite=a/b → 302 後 404 は実害なし、変更不要)
+    const deep = fakeRes();
+    await serveStatic({ url: '/join/a/b' }, deep, root);
+    assert.equal(deep.status, 404);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('serveStatic: /verify-email?token=… は HTML を返し no-store・Referrer-Policy 付き', async () => {
   const root = await mkdtemp(join(tmpdir(), 'sailviz-pages-'));
   try {

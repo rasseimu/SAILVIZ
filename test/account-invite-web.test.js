@@ -46,6 +46,8 @@ test('joinFailureView: 参加できなかったときの表示(404/403/410/401/�
   assert.match(joinFailureView(410, { error: { code: 'invite_expired' } }).message, /期限/);
   assert.match(joinFailureView(410, { error: { code: 'invite_exhausted' } }).message, /上限/);
   assert.equal(joinFailureView(401, null).kind, 'login');
+  assert.equal(joinFailureView(401, null).needsLogin, true); // 参加ページはこれを見て未ログイン表示(ログインの案内)に落とす
+  for (const st of [403, 404, 410, 500]) assert.notEqual(joinFailureView(st, null).needsLogin, true);
   assert.equal(joinFailureView(500, null).kind, 'error');
   assert.equal(joinFailureView(0, null).kind, 'error');
 });
