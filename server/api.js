@@ -13,6 +13,7 @@ import { createOrgsRoute } from './routes/orgs.js';
 import { createMailer } from './mail.js';
 import { resolveSubject } from './compatPrincipal.js';
 import { randomBytes } from 'node:crypto';
+import { describeError } from './domain/errorLog.js';
 
 // accounts(accountsRepo)があればアカウント API(§10.2)が有効。無い(STORAGE=file)ときは該当パスが 503。
 // mailer / baseUrl は確認・再設定メール用(MAIL_PROVIDER 未設定なら log)。authOptions はテスト用の差し替え。
@@ -90,8 +91,8 @@ export function createApi({
       if (e && e.code === 'bad_json') { send(res, 400, { error: 'bad json' }); return true; }
       // 内部の例外メッセージは利用者へ返さない。ログにも e.message は出さない
       // (入力の断片=パスワード等が入りうる)。例外名とスタックのフレーム行だけ出す。
-      const frames = String(e && e.stack || '').split('\n').filter((l) => /^\s+at /.test(l)).join('\n');
-      console.error(`[api] ${method} ${path} -> 500: ${e && e.name || 'Error'}\n${frames}`);
+      const { name, frames } = describeError(e);
+      console.error(`[api] ${method} ${path} -> 500: ${name}\n${frames}`);
       send(res, 500, { error: 'internal_error' });
       return true;
     }

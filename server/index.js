@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createApi } from './api.js';
 import { serveStatic } from './static.js';
+import { respondStaticError } from './domain/errorLog.js';
 import { resolveViewGate } from './config.js';
 import { openRepo } from './repos/openRepo.js';
 import { createAccountsRepo } from './repos/accountsRepo.js';
@@ -61,7 +62,7 @@ const server = createServer(async (req, res) => {
     if (await api(req, res)) return;
     await serveStatic(req, res, ROOT);
   } catch (e) {
-    res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' }).end(String(e));
+    respondStaticError(res, e, `${req.method} ${String(req.url || '').split('?')[0]}`);
   }
 });
 
