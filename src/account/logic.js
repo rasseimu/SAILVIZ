@@ -82,6 +82,34 @@ export function membersView(status, json) {
   return { kind: 'list', members: json };
 }
 
+// 退会(S2.12): 自分が唯一の管理者の組織と、後任にできるメンバー(自分以外)を出す。
+// orgs は GET /api/me の orgs[](isAdmin)、membersByOrg は GET /api/orgs/:orgId/members の応答(組織ID → 配列)。
+// メンバー一覧が取れていない組織は含めない(その場合もサーバが自動で引き継ぐ: H25)。
+export function soleAdminOrgs(myUserId, orgs, membersByOrg) {
+  const out = [];
+  for (const o of Array.isArray(orgs) ? orgs : []) {
+    if (!o || o.isAdmin !== true) continue;
+    const members = membersByOrg && membersByOrg[o.id];
+    if (!Array.isArray(members)) continue;
+    if (members.some((m) => m.userId !== myUserId && m.isAdmin === true)) continue; // 他にも管理者がいる
+    out.push({
+      orgId: o.id, orgName: o.name,
+      candidates: members.filter((m) => m.userId !== myUserId).map((m) => ({ userId: m.userId, name: m.name })),
+    });
+  }
+  return out;
+}
+
+// DELETE /api/me の本文。successors は後任を選んだ組織だけ(選ばなければサーバが最も古く紐付いたメンバーへ自動で引き継ぐ)。
+export function buildDeleteBody(password, choices) {
+  if (typeof password !== 'string' || password === '') return bad('パスワードを入力してください');
+  const successors = {};
+  for (const [orgId, userId] of Object.entries(choices || {})) if (typeof userId === 'string' && userId) successors[orgId] = userId;
+  const body = { password };
+  if (Object.keys(successors).length) body.successors = successors;
+  return { ok: true, body };
+}
+
 const MIN_PASSWORD = 8;
 const looksLikeEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim());
 const bad = (message) => ({ ok: false, message });
