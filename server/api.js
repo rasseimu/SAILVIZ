@@ -73,7 +73,9 @@ export function createApi({
       send(res, 404, { error: 'no route' });
       return true;
     } catch (e) {
-      send(res, 500, { error: String(e && e.message || e) });
+      // 内部の例外メッセージは利用者へ返さない(詳細はサーバログにだけ出す)。
+      console.error(`[api] ${method} ${path} -> 500:`, e && e.stack || e);
+      send(res, 500, { error: 'internal_error' });
       return true;
     }
   };

@@ -163,6 +163,37 @@ test('linkMember が失敗したら組織・管理者の作成も巻き戻る(�
   assert.equal((await postTo(failBase, { name: '再試行' }, tok)).status, 201); // 次は通る
 });
 
+test('組織名にゼロ幅文字・タグ文字 → 422 invalid_name', { skip }, async () => {
+  const { tok } = mkUser();
+  for (const ch of ['​', '⁠', '﻿', '\u{e0067}']) {
+    const r = await post({ name: `部${ch}名` }, tok);
+    assert.equal(r.status, 422);
+    assert.equal((await r.json()).error.code, 'invalid_name');
+  }
+});
+
+test('500 の本文に内部の例外メッセージを出さない(汎用メッセージ・詳細はサーバログのみ)', { skip }, async () => {
+  const { tok } = mkUser();
+  const secret = 'SECRET-internal-detail';
+  const boom = Object.create(accounts);
+  boom.countOrgsAdministeredBy = () => { throw new Error(secret); };
+  const s = await listen(createApi({ repo: {}, token: 'shared-secret', accounts: boom, authOptions: { now: () => clock } }));
+  const logged = [];
+  const orig = console.error;
+  console.error = (...a) => logged.push(a.map(String).join(' '));
+  try {
+    const r = await postTo(`http://127.0.0.1:${s.address().port}`, { name: '内部エラー' }, tok);
+    assert.equal(r.status, 500);
+    const text = await r.text();
+    assert.equal(text.includes(secret), false);
+    assert.deepEqual(JSON.parse(text), { error: 'internal_error' });
+    assert.ok(logged.some((l) => l.includes(secret)), 'ログには詳細が残る');
+  } finally {
+    console.error = orig;
+    await new Promise((r) => s.close(r));
+  }
+});
+
 test('GET /api/orgs は未対応(404)', { skip }, async () => {
   const { tok } = mkUser();
   const r = await fetch(`${base}/api/orgs`, { headers: { authorization: `Bearer ${tok}` } });
