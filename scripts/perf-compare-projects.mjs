@@ -118,7 +118,13 @@ async function measure(storage, dataDir, name) {
     if (child.exitCode === null && child.signalCode === null) {
       child.kill('SIGTERM');
       // SIGTERM で終わらない子は 5 秒待って SIGKILL(待ち続けない)
-      const done = await Promise.race([exited.then(() => true), sleep(5000).then(() => false)]);
+      // 子が先に終わったら待ちタイマーを解除する(残すと終了が最大5秒遅れる)
+      let killTimer;
+      const done = await Promise.race([
+        exited.then(() => true),
+        new Promise((r) => { killTimer = setTimeout(() => r(false), 5000); }),
+      ]);
+      clearTimeout(killTimer);
       if (!done) { child.kill('SIGKILL'); await exited; }
     }
     children.delete(child);
@@ -192,9 +198,14 @@ const strip = ({ body, ...r }) => r;
 const tmp = mkdtempSync(join(tmpdir(), 'sailviz-perf-'));
 // Ctrl-C: 子サーバを止め、一時フォルダを消してから終了する
 process.once('SIGINT', () => {
-  for (const c of children) c.kill('SIGKILL');
-  rmSync(tmp, { recursive: true, force: true });
-  process.exit(130);
+  try {
+    for (const c of children) c.kill('SIGKILL');
+    rmSync(tmp, { recursive: true, force: true });
+  } catch (e) {
+    console.error(`cleanup failed: ${e.message}`);
+  } finally {
+    process.exit(130);
+  }
 });
 try {
   const synPath = join(tmp, 'sailviz-20260101-0900.sailviz.json'); // 取込が日付をファイル名から読むため、この形式にする
