@@ -4,7 +4,7 @@
 // 確認・再設定のトークンは読んだらすぐ URL から消し(history.replaceState)、ログや外部へ出さない。
 import {
   pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm, membersView,
-  soleAdminOrgs, unloadedAdminOrgs, unloadedNotice, displayName, buildDeleteBody, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView, accountExtrasFromMeta,
+  soleAdminOrgs, unloadedAdminOrgs, frozenSuccessionNotices, isOrgAdmin, unloadedNotice, displayName, buildDeleteBody, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView, accountExtrasFromMeta,
 } from './logic.js';
 
 // 凍結した入口(名簿・招待の期限と回数・後任の選択)。サーバが meta を差し込んだときだけ出す(FZ1。FEATURE_ACCOUNT_EXTRAS=1)。
@@ -308,8 +308,9 @@ function deleteCard() {
     }
     if (sole.length && !EXTRAS) {
       // 後任の手動選択は凍結(FZ1)。自動引き継ぎの案内だけ出す(サーバの挙動は変えない)。
-      kids.push(h('p', { id: 'ac-delete-successor-note', class: 'ac-note' },
-        '次の組織はあなたが唯一の管理者です。退会すると、最も古く紐付いたメンバーに自動で管理者が引き継がれます: ' + sole.map((s) => s.orgName).join('、')));
+      const n = frozenSuccessionNotices(sole);
+      if (n.handover) kids.push(h('p', { id: 'ac-delete-successor-note', class: 'ac-note' }, n.handover));
+      for (const t of n.noMember) kids.push(h('p', { class: 'ac-note ac-delete-nomember' }, t));
     } else if (sole.length) {
       kids.push(h('p', { id: 'ac-delete-successor-note', class: 'ac-note' },
         '次の組織はあなたが唯一の管理者です。後任の管理者を選んでください。選ばない場合は、最も古く紐付いたメンバーに自動で管理者が引き継がれます。'));
@@ -357,7 +358,7 @@ async function renderOrgHome(orgId) {
   mount(h('section', { class: 'ac-card' }, title));
   const mr = await api('GET', `/api/orgs/${orgId}/members`);
   if (!title.isConnected) return; // 待っている間に別の描画が画面を差し替えた
-  const isAdmin = (me.orgs || []).some((o) => o.id === me.org.id && o.isAdmin === true);
+  const isAdmin = isOrgAdmin(me.orgs, me.org.id);
   if (isAdmin) main.append(invitesCard(orgId));
   const mv = membersView(mr.status, mr.json);
   if (mv.kind === 'error') {
@@ -370,6 +371,7 @@ async function renderOrgHome(orgId) {
 }
 
 // ---- 名簿 ----
+// URL の #roster は、既存のリンクやブックマークを壊さないため凍結中も残す(凍結中は中身だけ組織の画面になる)。
 async function renderRoster() {
   if (!me.org) { history.replaceState(null, '', '/account'); return renderAccount(); }
   const orgId = encodeURIComponent(me.org.id);
