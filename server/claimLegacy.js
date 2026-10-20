@@ -40,7 +40,23 @@ function legacyNameExists(db, orgId, name) {
 }
 
 // まだ付け替わっていない件数(reattachLegacy が動かす対象と同じ条件)。
+// roadmapBlocked: 付け替え待ちの旧ロードマップがあるが、本人が既に持っているため移さない(user_id UNIQUE)。
 function pendingCounts(db, orgId, userId, name) {
+  const counts = pendingCountsRaw(db, orgId, userId, name);
+  const waiting = one(db, 'SELECT COUNT(*) AS n FROM roadmaps WHERE legacy_name = ? AND org_id = ? AND user_id IS NULL', name, orgId) > 0;
+  return { ...counts, roadmapBlocked: waiting && counts.roadmaps === 0 };
+}
+
+// 未適用のマイグレーションの version 一覧(DB を変更しない)。
+export function pendingMigrations(db, migrations) {
+  let applied = new Set();
+  try {
+    applied = new Set(db.prepare('SELECT version FROM schema_migrations').all().map((r) => r.version));
+  } catch { /* 表が無い = 全部未適用 */ }
+  return migrations.filter((m) => !applied.has(m.version)).map((m) => m.version);
+}
+
+function pendingCountsRaw(db, orgId, userId, name) {
   return {
     reflections: one(db, `SELECT COUNT(*) AS n FROM reflections WHERE legacy_author_name = ? AND author_user_id IS NULL
       AND practice_day_id IN (SELECT id FROM practice_days WHERE org_id = ?)`, name, orgId),
@@ -57,9 +73,9 @@ function pendingCounts(db, orgId, userId, name) {
 // 重複(同じ旧氏名または同じメールが複数行)は、該当する全行を 'duplicate' にして付け替えない。
 export function planClaims({ db, accounts }, orgId, rows) {
   if (!accounts.getOrg(orgId)) throw new Error(`組織が見つかりません: ${orgId}`);
-  const cnt = (key, fn) => rows.reduce((m, r) => { const k = fn(r); if (k) m.set(k, (m.get(k) || 0) + 1); return m; }, new Map());
-  const byName = cnt('n', (r) => r.legacyName);
-  const byMail = cnt('e', (r) => r.email);
+  const cnt = (fn) => rows.reduce((m, r) => { const k = fn(r); if (k) m.set(k, (m.get(k) || 0) + 1); return m; }, new Map());
+  const byName = cnt((r) => r.legacyName);
+  const byMail = cnt((r) => r.email);
   return rows.map((r, i) => {
     const item = { line: i + 1, legacyName: r.legacyName, email: r.email };
     if (!r.legacyName || !r.email) return { ...item, status: 'invalid' };

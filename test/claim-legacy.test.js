@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -55,7 +55,7 @@ test('dry-run(plan)は件数を出し、何も書かない', { skip }, () => {
   const before = snapshot(db);
   const plan = planClaims({ db, accounts }, org.id, [{ legacyName: '旧A', email: 'a@example.test' }]);
   assert.equal(plan[0].status, 'ok');
-  assert.deepEqual(plan[0].counts, { reflections: 2, sessions: 1, roadmaps: 1 });
+  assert.deepEqual(plan[0].counts, { reflections: 2, sessions: 1, roadmaps: 1, roadmapBlocked: false });
   assert.equal(snapshot(db), before);
 });
 
@@ -72,7 +72,7 @@ test('apply で付け替わり、2回目は 0 件で結果不変', { skip }, () 
   const r2 = applyClaims({ db, accounts }, org.id, rows);
   assert.deepEqual(r2.total, { reflections: 0, sessions: 0, roadmaps: 0 });
   assert.equal(r2.plan[0].status, 'ok');
-  assert.deepEqual(r2.plan[0].counts, { reflections: 0, sessions: 0, roadmaps: 0 });
+  assert.deepEqual(r2.plan[0].counts, { reflections: 0, sessions: 0, roadmaps: 0, roadmapBlocked: false });
   assert.equal(snapshot(db), after);
 });
 
@@ -126,5 +126,73 @@ test('CLI: 既定 dry-run は書かず、--apply で付け替える', { skip }, 
     assert.match(lines.join('\n'), /付け替え合計: 反省 2 \/ ロードマップ 1 \/ 軌跡 1/);
     assert.equal(check(), 2);
     assert.equal(run(['node', 'x'], {}, out), 2);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('apply の途中で例外が出たら全部戻る', { skip }, () => {
+  const db = openDb(':memory:');
+  const { accounts, org, user } = seed(db);
+  user('a@example.test'); user('b@example.test');
+  const before = snapshot(db);
+  const orig = accounts.reattachLegacy.bind(accounts);
+  let calls = 0;
+  accounts.reattachLegacy = (a) => { calls += 1; if (calls === 2) throw new Error('boom'); return orig(a); };
+  assert.throws(() => applyClaims({ db, accounts }, org.id, [
+    { legacyName: '旧A', email: 'a@example.test' }, { legacyName: '旧B', email: 'b@example.test' },
+  ]), /boom/);
+  assert.equal(calls, 2);
+  assert.equal(snapshot(db), before);
+});
+
+test('他の組織にある同じ旧氏名には触れない', { skip }, () => {
+  const db = openDb(':memory:');
+  const { accounts, org, user } = seed(db);
+  const other = accounts.createOrg({ name: '他部', now: 1 });
+  db.prepare('INSERT INTO practice_days (id, org_id, date, rev) VALUES (?, ?, ?, 0)').run('pdO', other.id, '2026-10-01');
+  db.prepare("INSERT INTO reflections (id, practice_day_id, legacy_author_name, visibility) VALUES ('rO','pdO','旧A','org')").run();
+  db.prepare("INSERT INTO roadmaps (id, org_id, legacy_name) VALUES ('rmO', ?, '旧A')").run(other.id);
+  user('a@example.test');
+  applyClaims({ db, accounts }, org.id, [{ legacyName: '旧A', email: 'a@example.test' }]);
+  assert.equal(db.prepare("SELECT author_user_id AS a FROM reflections WHERE id='rO'").get().a, null);
+  assert.equal(db.prepare("SELECT user_id AS a FROM roadmaps WHERE id='rmO'").get().a, null);
+});
+
+test('退会済みユーザーは user_not_found', { skip }, () => {
+  const db = openDb(':memory:');
+  const { accounts, org, user } = seed(db);
+  const u = user('a@example.test');
+  accounts.markUserDeleted(u.id, 5);
+  const plan = planClaims({ db, accounts }, org.id, [{ legacyName: '旧A', email: 'a@example.test' }]);
+  assert.equal(plan[0].status, 'user_not_found');
+});
+
+test('本人が既にロードマップを持つと移さず、理由を表示する', { skip }, () => {
+  const db = openDb(':memory:');
+  const { accounts, org, user } = seed(db);
+  const u = user('a@example.test');
+  db.prepare("INSERT INTO roadmaps (id, org_id, user_id) VALUES ('rmMine', ?, ?)").run(org.id, u.id);
+  const plan = planClaims({ db, accounts }, org.id, [{ legacyName: '旧A', email: 'a@example.test' }]);
+  assert.equal(plan[0].counts.roadmaps, 0);
+  assert.equal(plan[0].counts.roadmapBlocked, true);
+  assert.equal(plan[0].counts.reflections, 2);
+});
+
+test('CLI: DB が無ければファイルを作らず止まる／未適用マイグレーションでは止まる', { skip }, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'claim-legacy-'));
+  try {
+    const csv = join(dir, 'map.csv');
+    writeFileSync(csv, '旧A,a@example.test\n');
+    const missing = join(dir, 'nope.db');
+    assert.throws(() => run(['node', 'x', csv, '--org', 'o_x', '--db', missing], {}, () => {}), /DB ファイルがありません/);
+    assert.equal(existsSync(missing), false);
+    assert.equal(existsSync(`${missing}-wal`), false);
+    const empty = join(dir, 'empty.db');
+    const d = openDb(empty); d.close();
+    for (const extra of [[], ['--apply']]) {
+      assert.throws(() => run(['node', 'x', csv, '--org', 'o_x', '--db', empty, ...extra], {}, () => {}), /未適用のマイグレーション/);
+    }
+    const d2 = openDb(empty);
+    assert.equal(Number(d2.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='schema_migrations'").get().n), 0);
+    d2.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

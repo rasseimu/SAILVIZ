@@ -120,6 +120,10 @@ DATA_DIR=/data node scripts/claim-legacy.mjs map.csv --org <orgId>           # d
 DATA_DIR=/data node scripts/claim-legacy.mjs map.csv --org <orgId> --apply   # 1トランザクションで付け替え
 ```
 dry-run は行ごとに付け替え先と件数を表示し、見つからない旧氏名・メール、CSV 内の重複、組織メンバー外（拒否）も表示します。
+前提：練習日・ロードマップの `org_id` が入っていること（無ければ先に `MIGRATION_ORG_ID=<組織ID> node server/db/importFromFiles.js <dataDir> --fix-org-id`）。
+DB ファイルが無い・未適用のマイグレーションがあるときは止まります（作成も migrate もしません。dry-run は読み取り専用で開きます）。
+同じ人に旧氏名が2つあるときは、CSV を分けて2回流してください（同じメールの複数行は重複として扱い付け替えません）。
+本人が既にロードマップを持っているときは、ロードマップだけ移さず理由を表示します。
 重複行と拒否行は付け替えません。付け替え済みは数えないので、2回流しても結果は変わりません（取り消しはありません）。
 
 ### 認証・動画
