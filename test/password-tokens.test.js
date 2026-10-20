@@ -93,7 +93,9 @@ test('verifyPassword: 保存値のパラメータ・hash 長が上限を超え�
     `scrypt$1024$8$32$${salt}$${hash}`, // p 上限超
     `scrypt$1048576$8$1$${salt}$${hash}`, // N 上限超
     `scrypt$32768$8$6$${salt}$${hash}`, // 作業量 128*N*r*p = 192MiB > 128MiB(p=4 までは許す)
+    `scrypt$32768$8$5$${salt}$${hash}`, // 境界のすぐ上: 作業量 128*N*r*p = 160MiB > 128MiB(p=4 が上限ちょうど)
     `scrypt$524288$8$1$${salt}$${hash}`, // メモリ 128*N*r = 512MiB > 64MiB
+    `scrypt$131072$8$1$${salt}$${hash}`, // 境界のすぐ上: メモリ 128*N*r = 128MiB > 64MiB(N=65536 が上限ちょうど)
     `scrypt$1024$8$1$${salt}$${'A'.repeat(100)}`, // hash 長 75 バイト > 64
   ]) {
     assert.equal(await verifyPassword('pass-word-1', bad), false, bad);
@@ -103,7 +105,7 @@ test('verifyPassword: 保存値のパラメータ・hash 長が上限を超え�
 test('verifyPassword: 上限ちょうどのパラメータは受け付ける(作業量 128MiB・メモリ 64MiB)', async () => {
   for (const params of [
     { N: 32768, r: 8, p: 4, keyLen: 32, saltLen: 16 }, // 128*N*r*p = 128MiB(MAX_COST_BYTES ちょうど)
-    { N: 65536, r: 8, p: 1, keyLen: 32, saltLen: 16 }, // 128*N*r = 64MiB(MAX_MEM_BYTES ちょうど)
+    { N: 65536, r: 8, p: 1, keyLen: 32, saltLen: 16 }, // 128*N*r = 64MiB(MAX_MEM_BYTES ちょうど)。scrypt 1回あたり約 750ms かかる(hash+verify+wrong で複数回)
   ]) {
     const h = await hashPassword('pass-word-1', params);
     assert.ok(h.startsWith(`scrypt$${params.N}$${params.r}$${params.p}$`), h);
