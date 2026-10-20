@@ -79,7 +79,9 @@ export function createBrevoMailer({ apiKey, from, fromName = 'SailViz', fetchImp
 
 // 本番で MAIL_PROVIDER が未設定・log だと確認メール・再設定メールが届かない。起動時の WARN 文字列(不要なら null)。
 // ハブのスモークが「WARN:」と「MAIL_PROVIDER」を含む行を拾うので文言の先頭と語を変えないこと。
-export function mailProviderWarning({ nodeEnv, provider } = {}) {
+// accountsEnabled=false(STORAGE≠db でアカウント機能が無い)なら、メールを使わないので出さない。
+export function mailProviderWarning({ nodeEnv, provider, accountsEnabled = false } = {}) {
+  if (!accountsEnabled) return null;
   if (nodeEnv !== 'production') return null;
   if (provider && provider !== 'log') return null;
   return 'WARN: MAIL_PROVIDER が未設定または log です: 確認メール・再設定メールが届かず、アカウント機能(登録・ログイン・パスワード再設定)が使えません。fly secrets set MAIL_PROVIDER=brevo BREVO_API_KEY=... MAIL_FROM=... を設定してください';
@@ -91,6 +93,7 @@ export function createMailer({ provider = 'log', logger, redactToken = false, ap
     // 起動時に分かるよう、必須設定が無ければここで例外(サーバは起動しない)。
     if (!apiKey) throw new Error('MAIL_PROVIDER=brevo には BREVO_API_KEY が必要です');
     if (!from) throw new Error('MAIL_PROVIDER=brevo には MAIL_FROM(送信者メール)が必要です');
+    // MAIL_FROM は Brevo の sender.email にそのまま入る: アドレスのみ(「名前 <addr>」のような表示名つきは不可。表示名は fromName)。
     if (!String(from).includes('@') || String(from).length < 3) throw new Error('MAIL_FROM はメールアドレスの形式(@ を含む)にしてください');
     return createBrevoMailer({ apiKey, from, fetchImpl });
   }

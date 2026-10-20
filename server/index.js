@@ -29,7 +29,7 @@ const accounts = db ? createAccountsRepo({ db }) : null;
 // メール送信のアダプタ。MAIL_PROVIDER 未設定は log(確認リンクをログに出すだけ)。brevo は 2026-10-19 に実キーで送受信確認済み。
 const MAIL_PROVIDER = process.env.MAIL_PROVIDER || 'log';
 // 本番で log のままだとメールが届かない。起動は止めず WARN を1行出す(スモークが拾う)。
-const mailWarn = mailProviderWarning({ nodeEnv: process.env.NODE_ENV, provider: process.env.MAIL_PROVIDER });
+const mailWarn = mailProviderWarning({ nodeEnv: process.env.NODE_ENV, provider: process.env.MAIL_PROVIDER, accountsEnabled: !!accounts });
 if (mailWarn) console.warn(mailWarn);
 const mailer = createMailer({
   provider: MAIL_PROVIDER, redactToken: process.env.NODE_ENV === 'production',
