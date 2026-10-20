@@ -7,6 +7,7 @@ import { createApi } from './api.js';
 import { serveStatic } from './static.js';
 import { respondStaticError } from './domain/errorLog.js';
 import { resolveViewGate } from './config.js';
+import { resolveFeatures } from './features.js';
 import { openRepo } from './repos/openRepo.js';
 import { createAccountsRepo } from './repos/accountsRepo.js';
 import { createMailer, mailProviderWarning } from './mail.js';
@@ -54,6 +55,9 @@ if (STORAGE === 'db') {
   }
 }
 
+// 凍結した Web の入口(名簿・招待の期限と回数・後任の選択など)。既定は隠す。FEATURE_ACCOUNT_EXTRAS=1 で表示(FZ1)。
+const FEATURES = resolveFeatures(process.env);
+
 const api = createApi({
   dataDir: DATA_DIR, repo, token: TOKEN, geminiKey: GEMINI_KEY,
   viewUser: VIEW_USER, viewPassword: VIEW_PASSWORD,
@@ -63,7 +67,7 @@ const api = createApi({
 const server = createServer(async (req, res) => {
   try {
     if (await api(req, res)) return;
-    await serveStatic(req, res, ROOT);
+    await serveStatic(req, res, ROOT, { features: FEATURES });
   } catch (e) {
     respondStaticError(res, e, `${req.method} ${String(req.url || '').split('?')[0]}`);
   }

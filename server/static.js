@@ -2,6 +2,7 @@
 // 静的ファイル配信。text 系は charset=utf-8 を明示(serve.py と同じ理由)。
 import { readFile, stat } from 'node:fs/promises';
 import { join, normalize, extname, sep } from 'node:path';
+import { injectFeatureMeta } from './features.js';
 
 const TYPES = {
   '.js': 'text/javascript; charset=utf-8',
@@ -31,7 +32,7 @@ export function pagePathFor(pathname) {
   return ACCOUNT_PAGES.has(p) ? '/account.html' : null;
 }
 
-export async function serveStatic(req, res, rootDir) {
+export async function serveStatic(req, res, rootDir, { features } = {}) {
   const url = new URL(req.url, 'http://localhost');
   // 招待 API が返す url は `/?invite=<code>`(S2.9)。参加ページの正規の形は `/join/<code>` なので、
   // `/` に invite 付きで来たらここへ寄せる(コードは Referer に漏らさない)。
@@ -51,7 +52,9 @@ export async function serveStatic(req, res, rootDir) {
   try {
     const s = await stat(full);
     if (s.isDirectory()) { res.writeHead(403).end('forbidden'); return; }
-    const buf = await readFile(full);
+    let buf = await readFile(full);
+    // アカウント画面の HTML だけ機能フラグを差し込む(FZ1)。
+    if (page && features?.accountExtras) buf = Buffer.from(injectFeatureMeta(buf.toString('utf8'), features), 'utf8');
     const headers = { 'content-type': contentType(full), 'cache-control': 'no-store' };
     // リンクのトークンを Referer で外へ漏らさない
     if (page) headers['referrer-policy'] = 'no-referrer';
