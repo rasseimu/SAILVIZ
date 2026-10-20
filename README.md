@@ -112,6 +112,20 @@ npm run import -- <既存フォルダ> /data
 
 注：`import` コマンドは `DATA_DIR` 環境変数を見ず、取込先は第2引数で決まります。
 
+#### 旧氏名の付け替え（1回限りの CLI・Node 24）
+取込み済みの旧データ（反省・ロードマップ・軌跡）を、組織メンバーのアカウントへ付け替えます。
+```bash
+# 対応表 map.csv は「旧氏名,メール」（見出し行は任意）。DB は DATA_DIR/sailviz.db（--db で指定も可）
+DATA_DIR=/data node scripts/claim-legacy.mjs map.csv --org <orgId>           # dry-run（何も書かない）
+DATA_DIR=/data node scripts/claim-legacy.mjs map.csv --org <orgId> --apply   # 1トランザクションで付け替え
+```
+dry-run は行ごとに付け替え先と件数を表示し、見つからない旧氏名・メール、CSV 内の重複、組織メンバー外（拒否）も表示します。
+前提：練習日・ロードマップの `org_id` が入っていること（無ければ先に `MIGRATION_ORG_ID=<組織ID> node server/db/importFromFiles.js <dataDir> --fix-org-id`）。
+DB ファイルが無い・未適用のマイグレーションがあるときは止まります（作成も migrate もしません。dry-run は読み取り専用で開きます）。
+同じ人に旧氏名が2つあるときは、CSV を分けて2回流してください（同じメールの複数行は重複として扱い付け替えません）。
+本人が既にロードマップを持っているときは、ロードマップだけ移さず理由を表示します。
+重複行と拒否行は付け替えません。付け替え済みは数えないので、2回流しても結果は変わりません（取り消しはありません）。
+
 ### 認証・動画
 - **閲覧**：誰でも可（パスワード不要）
 - **書き込み**：編集モード（ロードマップ編集など）時にパスワード入力
