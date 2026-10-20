@@ -91,6 +91,8 @@ export function soleAdminOrgs(myUserId, orgs, membersByOrg) {
     if (!o || o.isAdmin !== true) continue;
     const members = membersByOrg && membersByOrg[o.id];
     if (!Array.isArray(members)) continue;
+    const self = members.find((m) => m.userId === myUserId);
+    if (self && self.isAdmin !== true) continue; // members では自分が管理者でない(orgs[] と食い違い)
     if (members.some((m) => m.userId !== myUserId && m.isAdmin === true)) continue; // 他にも管理者がいる
     out.push({
       orgId: o.id, orgName: o.name,
@@ -98,6 +100,15 @@ export function soleAdminOrgs(myUserId, orgs, membersByOrg) {
     });
   }
   return out;
+}
+
+// 管理者の組織のうち、メンバー一覧を取得できなかったもの(後任を選べない。サーバが自動で引き継ぐ)。
+export function unloadedAdminOrgs(orgs, membersByOrg) {
+  return (Array.isArray(orgs) ? orgs : []).filter((o) => o && o.isAdmin === true && !(membersByOrg && Array.isArray(membersByOrg[o.id])));
+}
+
+export function displayName(name) {
+  return typeof name === 'string' && name.trim() ? name : '(名前なし)';
 }
 
 // DELETE /api/me の本文。successors は後任を選んだ組織だけ(選ばなければサーバが最も古く紐付いたメンバーへ自動で引き継ぐ)。
