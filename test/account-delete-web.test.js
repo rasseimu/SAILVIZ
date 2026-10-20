@@ -2,7 +2,7 @@
 // 退会画面(S2.12)の純関数: 後任の選択対象の算出と DELETE /api/me の本文づくり。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { soleAdminOrgs, buildDeleteBody, displayName, unloadedAdminOrgs } from '../src/account/logic.js';
+import { soleAdminOrgs, buildDeleteBody, displayName, unloadedAdminOrgs, unloadedNotice } from '../src/account/logic.js';
 
 const orgs = [
   { id: 'o1', name: '部A', isAdmin: true },
@@ -35,6 +35,21 @@ test('soleAdminOrgs: orgs[] で isAdmin でも、members で自分が非管理�
   const r = soleAdminOrgs('me', [{ id: 'o1', name: '部A', isAdmin: true }],
     { o1: [{ userId: 'me', name: '自分', isAdmin: false }, { userId: 'u2', name: '甲', isAdmin: false }] });
   assert.deepEqual(r, []);
+});
+
+test('soleAdminOrgs: members に自分がいなければ(他に管理者もいなければ)対象のまま', () => {
+  const r = soleAdminOrgs('me', [{ id: 'o1', name: '部A', isAdmin: true }],
+    { o1: [{ userId: 'u2', name: '甲', isAdmin: false }] });
+  assert.equal(r.length, 1);
+  assert.deepEqual(r[0].candidates, [{ userId: 'u2', name: '甲' }]);
+});
+
+test('unloadedNotice: 言い切らず「唯一の管理者の場合」と条件付きで書く。組織名と「読み込めなかった」を含む', () => {
+  const s = unloadedNotice('部A');
+  assert.match(s, /部A/);
+  assert.match(s, /読み込めなかった/);
+  assert.match(s, /唯一の管理者の場合/);
+  assert.match(s, /管理者不在/);
 });
 
 test('buildDeleteBody: choices の null・数値は successors に入らない', () => {

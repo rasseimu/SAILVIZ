@@ -107,6 +107,11 @@ export function unloadedAdminOrgs(orgs, membersByOrg) {
   return (Array.isArray(orgs) ? orgs : []).filter((o) => o && o.isAdmin === true && !(membersByOrg && Array.isArray(membersByOrg[o.id])));
 }
 
+// メンバー一覧を読めなかった組織の案内文。他に管理者がいるかは分からないので、条件付きで書く(H25)。
+export function unloadedNotice(orgName) {
+  return `${orgName} のメンバーを読み込めなかったため確認できません。あなたが唯一の管理者の場合は、最も古く紐付いたメンバーへ自動で引き継ぎます(他にメンバーがいなければ管理者不在になります)。`;
+}
+
 export function displayName(name) {
   return typeof name === 'string' && name.trim() ? name : '(名前なし)';
 }
