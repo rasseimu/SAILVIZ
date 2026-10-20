@@ -56,6 +56,7 @@ test('印ありで再実行 → 明示エラー、DB は変わらない', { skip
   importFromFiles({ db, dataDir, now: 42, orgId: 'org_t' });
   db.prepare('UPDATE reflection_progress SET issue_stage = 9').run();
   assert.throws(() => importFromFiles({ db, dataDir, now: 50, orgId: 'org_t' }), (e) => e.code === 'IMPORT_ALREADY_DONE');
+  assert.equal(db.isTransaction, false);
   assert.equal(db.prepare('SELECT issue_stage s FROM reflection_progress').get().s, 9);
   assert.deepEqual(readImportMarker(db), { at: 42, orgId: 'org_t' });
   // dry-run は書かないので印があっても通る

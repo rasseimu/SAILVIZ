@@ -768,7 +768,68 @@ test('DELETE /api/me: パスワード違い(422)・回数制限(429)のとき引
   assert.deepEqual(accounts.listOrgAdmins(org.id), [uid]);
 });
 
-test('DELETE /api/me: 誤パスワードの連続は 429(本人ごと)',{ skip }, async () => {
+test('DELETE /api/me: org_admins を消した後の段階(updateUser)で例外でも、全組織の管理者行・メンバー・本人が巻き戻る', { skip }, async () => {
+  const { reg, uid, a, org } = await soloAdminSetup();
+  const other = accounts.createUser({ email: 'other@example.test' });
+  const shared = accounts.createOrg({ name: '共同部', adminUserIds: [uid, other.id], now: clock.t });
+  accounts.linkMember({ orgId: shared.id, userId: uid, now: clock.t });
+  const orig = accounts.updateUser;
+  accounts.updateUser = () => { throw new Error('boom'); };
+  try {
+    const r = await del(reg, { successors: { [org.id]: a.id } });
+    assert.ok(r.status >= 500);
+  } finally { accounts.updateUser = orig; }
+  assert.deepEqual(accounts.listOrgAdmins(org.id), [uid]); // 後任の追加も、本人の行の削除も戻る
+  assert.deepEqual(accounts.listOrgAdmins(shared.id), [other.id, uid].sort());
+  assert.ok(accounts.isMember(org.id, uid)); assert.ok(accounts.isMember(shared.id, uid));
+  assert.equal(accounts.getUser(uid).deleted_at, null);
+  assert.equal((await call('GET', '/api/me', undefined, { token: reg.json.token })).status, 200); // トークンも失効していない
+});
+
+test('DELETE /api/me: 後任指定・自動引き継ぎ・他にも管理者がいる組織が 1 回の退会で同時にあっても、それぞれ H25 どおり', { skip }, async () => {
+  const reg = await register();
+  const uid = reg.json.user.id;
+  const [p, q, r, s, o] = ['p', 'q', 'r', 's', 'o'].map((n) => accounts.createUser({ email: `${n}@example.test` }));
+  // 指定あり: 最古は q だが p を指定
+  const picked = accounts.createOrg({ name: '指定部', adminUserIds: [uid], now: clock.t });
+  accounts.linkMember({ orgId: picked.id, userId: uid, now: clock.t });
+  accounts.linkMember({ orgId: picked.id, userId: q.id, now: clock.t + 1 });
+  accounts.linkMember({ orgId: picked.id, userId: p.id, now: clock.t + 2 });
+  // 指定なし: 最古の r へ自動
+  const auto = accounts.createOrg({ name: '自動部', adminUserIds: [uid], now: clock.t });
+  accounts.linkMember({ orgId: auto.id, userId: uid, now: clock.t });
+  accounts.linkMember({ orgId: auto.id, userId: r.id, now: clock.t + 1 });
+  accounts.linkMember({ orgId: auto.id, userId: s.id, now: clock.t + 2 });
+  // 他にも管理者: 引き継ぎなし(s はメンバーだが足されない)
+  const shared = accounts.createOrg({ name: '共同部', adminUserIds: [uid, o.id], now: clock.t });
+  for (const u of [uid, o.id, s.id]) accounts.linkMember({ orgId: shared.id, userId: u, now: clock.t });
+  assert.equal((await del(reg, { successors: { [picked.id]: p.id } })).status, 200);
+  assert.deepEqual(accounts.listOrgAdmins(picked.id), [p.id]);
+  assert.deepEqual(accounts.listOrgAdmins(auto.id), [r.id]);
+  assert.deepEqual(accounts.listOrgAdmins(shared.id), [o.id]);
+  assert.deepEqual(accounts.listOrgIdsAdministeredBy(uid), []);
+  assert.ok(accounts.getUser(uid).deleted_at != null);
+});
+
+test('DELETE /api/me: 他にも管理者がいる組織の successors は、非メンバー・本人を指していても無視され 200', { skip }, async () => {
+  const reg = await register();
+  const uid = reg.json.user.id;
+  const other = accounts.createUser({ email: 'other@example.test' });
+  const stranger = accounts.createUser({ email: 'stranger@example.test' });
+  const org = accounts.createOrg({ name: '共同部', adminUserIds: [uid, other.id], now: clock.t });
+  for (const u of [uid, other.id]) accounts.linkMember({ orgId: org.id, userId: u, now: clock.t });
+  const r1 = await del(reg, { successors: { [org.id]: stranger.id } }); // 非メンバー
+  assert.equal(r1.status, 200);
+  assert.deepEqual(accounts.listOrgAdmins(org.id), [other.id]);
+  const reg2 = await register({ email: 'two@example.test' });
+  const org2 = accounts.createOrg({ name: '共同2', adminUserIds: [reg2.json.user.id, other.id], now: clock.t });
+  accounts.linkMember({ orgId: org2.id, userId: reg2.json.user.id, now: clock.t });
+  const r2 = await del(reg2, { successors: { [org2.id]: reg2.json.user.id } }); // 本人
+  assert.equal(r2.status, 200);
+  assert.deepEqual(accounts.listOrgAdmins(org2.id), [other.id]);
+});
+
+test('DELETE /api/me: 誤パスワードの連続は 429(本人ごと)', { skip }, async () => {
   const reg = await register();
   let last;
   for (let i = 0; i < LIMITS.deletePassword.max + 1; i++) last = await call('DELETE', '/api/me', { password: 'wrong-pass-1' }, { token: reg.json.token });

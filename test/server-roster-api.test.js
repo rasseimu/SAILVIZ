@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { createApi } from '../server/api.js';
+import { hashPassword } from '../server/domain/password.js';
 
 const [major] = process.versions.node.split('.').map(Number);
 const skip = major >= 24 ? undefined : 'node:sqlite(Node >=24)が要る';
@@ -127,6 +128,59 @@ test('GET /members: 各要素に isAdmin(管理者・作成者 true、非管理�
   assert.equal(m.isAdmin, false);
   assert.ok(list.every((x) => typeof x.isAdmin === 'boolean'));
   assert.deepEqual(Object.keys(a).sort(), ['isAdmin', 'name', 'userId']);
+});
+
+// 他のテストの状態に影響しないよう、専用の組織・ユーザーで isAdmin の推移を見る(H26=a・H23=b・H25)。
+const members = async (tok, orgId) => (await call('GET', `/api/orgs/${orgId}/members`, tok)).json();
+const myOrgs = async (tok) => (await (await call('GET', '/api/me', tok)).json()).orgs;
+
+test('名簿で入ったメンバーを addOrgAdmin で管理者にすると members と me.orgs の isAdmin が true になる', { skip }, async () => {
+  const a = mk('ia-admin@example.test', 'IA管理者');
+  const m = mk('ia-m@example.test', 'IA部員');
+  const o = accounts.createOrg({ name: 'IA部', adminUserIds: [a.u.id], now: clock });
+  accounts.linkMember({ orgId: o.id, userId: a.u.id, rosterId: null, now: clock });
+  const put = await (await call('PUT', `/api/orgs/${o.id}/roster`, a.tok, { roster: [{ name: 'IA部員', email: 'ia-m@example.test' }] })).json();
+  assert.deepEqual(put.linked.map((x) => x.userId), [m.u.id]);
+  assert.equal((await members(m.tok, o.id)).find((x) => x.userId === m.u.id).isAdmin, false);
+  assert.equal((await myOrgs(m.tok)).find((x) => x.id === o.id).isAdmin, false);
+  accounts.addOrgAdmin(o.id, m.u.id);
+  assert.equal((await members(a.tok, o.id)).find((x) => x.userId === m.u.id).isAdmin, true);
+  assert.equal((await myOrgs(m.tok)).find((x) => x.id === o.id).isAdmin, true);
+});
+
+test('me.orgs は org_members から作る: org_admins だけで org_members に無い組織は出ない', { skip }, async () => {
+  const x = mk('ia-only@example.test', 'IA限定');
+  const o = accounts.createOrg({ name: 'IA管理のみ', adminUserIds: [x.u.id], now: clock }); // linkMember しない
+  assert.equal(accounts.isOrgAdmin(o.id, x.u.id), true);
+  assert.equal((await myOrgs(x.tok)).some((e) => e.id === o.id), false);
+});
+
+test('退会(DELETE /api/me)で唯一の管理者が抜けると、後任の isAdmin が true・退会者は members から消える', { skip }, async () => {
+  const pw = 'pass-word-1';
+  const adminHash = await hashPassword(pw, { N: 1024, r: 8, p: 3, keyLen: 32, saltLen: 16 });
+  const u = accounts.createUser({ email: 'ia-leaver@example.test', name: 'IA退会者', passwordHash: adminHash, now: clock });
+  accounts.markEmailVerified(u.id, clock);
+  const leaver = { u, tok: issueAuthToken(accounts, u.id, clock).token };
+  const m1 = mk('ia-s1@example.test', 'IA後任候補1');
+  const m2 = mk('ia-s2@example.test', 'IA後任候補2');
+  const o = accounts.createOrg({ name: 'IA引継ぎ', adminUserIds: [leaver.u.id], now: clock });
+  accounts.linkMember({ orgId: o.id, userId: leaver.u.id, rosterId: null, now: clock });
+  // m1 は m2 より確実に先に紐付ける(既定の後任順=紐付け時刻→ID なら m1 が選ばれる)。m2 だけ名簿経由。
+  accounts.linkMember({ orgId: o.id, userId: m1.u.id, rosterId: null, now: clock - 1 });
+  const put = await (await call('PUT', `/api/orgs/${o.id}/roster`, leaver.tok, { roster: [
+    { name: 'IA2', email: 'ia-s2@example.test' }] })).json();
+  assert.deepEqual(put.linked.map((x) => x.userId), [m2.u.id]);
+  const before = await members(m1.tok, o.id);
+  assert.deepEqual(before.filter((x) => x.isAdmin).map((x) => x.userId), [leaver.u.id]);
+  // 後任を m2 に指定して退会 → m2 が管理者、m1 は非管理者のまま、退会者は消える
+  const del = await call('DELETE', '/api/me', leaver.tok, { password: pw, successors: { [o.id]: m2.u.id } });
+  assert.equal(del.status, 200);
+  const after = await members(m1.tok, o.id);
+  assert.equal(after.some((x) => x.userId === leaver.u.id), false);
+  assert.equal(after.find((x) => x.userId === m2.u.id).isAdmin, true);
+  assert.equal(after.find((x) => x.userId === m1.u.id).isAdmin, false);
+  assert.equal((await myOrgs(m2.tok)).find((e) => e.id === o.id).isAdmin, true);
+  assert.equal((await myOrgs(m1.tok)).find((e) => e.id === o.id).isAdmin, false);
 });
 
 test('GET /members: name 未設定のメンバーは「ユーザー」+ID由来4文字(S2.3-P9)', { skip }, async () => {

@@ -145,7 +145,7 @@ test('removeOrgAdminsOfUser: そのユーザーの管理者行だけを全組織
   db.close();
 });
 
-test('org_roster: 置き換え・メールの正規化と検索',{ skip: skipMsg }, () => {
+test('org_roster: 置き換え・メールの正規化と検索', { skip: skipMsg }, () => {
   const { db, repo } = setup();
   const o = repo.createOrg({ name: '合成部' });
   const { rows } = repo.replaceRoster(o.id, [
