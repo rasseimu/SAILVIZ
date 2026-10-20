@@ -64,7 +64,8 @@
 
 認証はいずれもログイン必須・対象組織の組織管理者。メール確認済みを要するかは**既存の組織 API と揃わない**:
 `routes/orgs.js` の `gate` は、ログイン(401)・組織の存在(404)・管理者/メンバー(403 `forbidden`)だけを見ており、メール確認済みは見ていない
-(確認済みを見るのは招待の参加系と `POST /api/orgs` だけ)。管理者は作成・招待・名簿のいずれの経路でも確認済みのはずなので、
+(確認済みを見るのは招待の参加系と `POST /api/orgs` だけ)。管理者は作成・招待・名簿のいずれの経路でも、その時点では確認済みだった。ただしメールを変えると確認済みが外れる一方、
+管理者・メンバーの資格は残る(確認済みでない管理者はありうる)。それでも管理者資格は確認済みと無関係に付与済みなので、
 本案は **既存 `gate` をそのまま使い、確認済みの追加検査はしない**ことを推奨する(追加する場合の選択肢は §8-13)。
 他組織の管理者(管理者でない人)が `:orgId` を指定した場合は、既存の実装どおり **403 `forbidden`**(404 は組織が存在しないときだけ)。
 
@@ -83,8 +84,10 @@
   ⑤対象行(所有者 NULL の該当行)の ID を先に選び、`reattachLegacy` と同じ条件でその行を更新する ⑥付け替えた行の ID を記録する(§4.4)。⑤⑥は同一トランザクション。
   `reattachLegacy` 自体は件数しか返さないので、FZ3-I では ID を返す版(または同じ条件で先に SELECT する版)を `accountsRepo` に足す。
 - **同じ `userId` への再 POST は再適用**: 有効な付け替えが同じ人に既にあれば、付け替えた後に届いた同じ氏名の行(互換 PUT で増えた反省など)だけを追加で付け、
-  項目を既存の記録に足して **200** `{ claim, added: counts }` を返す(冪等。追加 0 件でも 200)。別の人への指定だけ 409。
-- 応答 201(新規)/200(再適用): `{ claim: { id, orgId, userId, legacyName, counts: { reflections, sessions, roadmaps }, createdAt } }`
+  項目を既存の記録に足して **200** `{ claim, added }` を返す(冪等。追加 0 件でも 200)。別の人への指定だけ 409。
+- 応答の形は 2 通りに揃える(`counts` は `legacy_claim_items` から数えた値で、`legacy_claims` には持たない):
+  - 201(新規): `{ claim: { id, orgId, userId, legacyName, counts: { reflections, sessions, roadmaps }, createdAt } }`
+  - 200(再適用): `{ claim: { …同じ形。counts は累計 }, added: { reflections, sessions, roadmaps } }`(`added` は今回足した件数。0 件でも 200)
 - エラー: 401／403 `forbidden`(その組織の管理者でない。他組織の `:orgId` も同じ)／404(組織なし)／
   422 `invalid_input`(空の氏名・メンバーでない userId・§8-14 で許さない場合の自分自身)／
   **409 `legacy_name_claimed`**(その旧氏名に有効な付け替えが別の人にある)／409 `legacy_nothing_to_claim`(新規で該当データが 0 件。§5.2)。
@@ -129,8 +132,8 @@ CREATE TABLE legacy_claim_items (
 ### 4.5 設計書 §10.3 に足す文案
 
 > | `GET /api/orgs/:orgId/legacy-names` | 組織管理者 | 未付け替えの旧氏名の一覧 `[{legacyName, reflections, sessions, roadmaps, claimedBy}]` |
-> | `POST /api/orgs/:orgId/legacy-claims` | 組織管理者 | `{userId, legacyName}` → 201 `{claim}`。その組織の `legacy_*` のうち所有者が NULL の反省・軌跡・ロードマップを、組織メンバー `userId` に付け替える(§11)。409 `legacy_name_claimed`／`legacy_nothing_to_claim` |
-> | `POST /api/orgs/:orgId/legacy-claims/:claimId/revoke` | 組織管理者 | → `{ok:true, counts}`。付け替えを元に戻す(冪等) |
+> | `POST /api/orgs/:orgId/legacy-claims` | 組織管理者 | `{userId, legacyName}` → 新規は 201 `{claim}`、同じ人への再 POST は 200 `{claim, added}`(再適用。後から増えた行だけ付ける・冪等)。その組織の `legacy_*` のうち所有者が NULL の反省・軌跡・ロードマップを、組織メンバー `userId` に付け替える(§11)。409 `legacy_name_claimed`(**別の人**に有効な付け替えがあるときだけ)／409 `legacy_nothing_to_claim`(新規で該当 0 件) |
+> | `POST /api/orgs/:orgId/legacy-claims/:claimId/revoke` | 組織管理者 | 本文は任意 `{restoreOrgVisibility?: boolean}`(`private` に変わった行を `org` に戻すか。既定は §8-2)→ 200 `{ok:true, counts}`。付け替えた行の ID だけを元に戻す(冪等) |
 >
 > 名簿照合(§4.4)が使えない運用でも、旧データの付け替えは組織管理者が上記で行う。旧氏名は名簿の `legacyName` に依存しない。
 
@@ -159,8 +162,9 @@ CREATE TABLE legacy_claim_items (
   - 行が既に削除されている・所有者が変わっている項目は飛ばす(件数に数えない)。
 - 本人が新規に作った行は項目に無いので巻き込まない。付け替え後に本人が旧反省を編集した内容は、行ごと NULL 所有に戻るため**内容は残る**(所有だけ戻る)。
 - 取り消しは `accountsRepo` に新関数(例 `detachLegacy({claimId})`)で実装する案。取り消し後は同じ氏名を別の人に指定できる。
-- **公開範囲の問題**: `policy.canRead` は、`private` で所有者が NULL の反省・軌跡を誰にも読めないとする(所有者でも組織メンバーでも不可)。
-  付け替え後に本人が `private` に変えた行を取り消すと、所有者が NULL に戻って**誰にも見えなくなる**(本文は DB に残るが読めない)。
+- **公開範囲の問題**: `policy.canRead` は、`private` で所有者が NULL の**反省**を誰にも読めないとする(所有者でも組織メンバーでも不可)。
+  付け替え後に本人が `private` に変えた反省を取り消すと、所有者が NULL に戻って**誰にも見えなくなる**(本文は DB に残るが読めない)。
+  軌跡は、`private` で所有者が NULL でも乗員(`isCrew`)なら読めるので、「誰にも読めない」のは反省だけである(ただし乗員でない組織メンバーには見えない)。
   対応案は ①取り消し時に `private` の行を `org` に戻す(旧データの取込み時の既定が `org` なので元の状態に近い)②戻さずに警告するだけ ③`private` の行があれば取り消しを拒否する。§8-2 で決める。
 - 再適用(§4.2)で足した行も同じ項目表に入り、取り消しで一緒に戻る。
 
@@ -185,7 +189,7 @@ CREATE TABLE legacy_claim_items (
 - 管理者が自分自身に旧データを付けられるか(自分の旧氏名を自分に指定)は §8-14 で決める。
 - 管理者の不正指定(他人の反省を別人に付ける)は、旧データがもともと組織所有で、本人が「自分のもの」と主張する根拠が名簿にしか無かった点を考えると、
   信頼は組織管理者に置く設計になる。対策は ①取り消せる ②`legacy_claims` に実施者・日時が残る ③付け替え先の本人に通知(§8-4)。
-- 監査: `legacy_claims` の行(実施者・日時・件数・取り消し)。ログに氏名を出さない(旧氏名は個人情報。ログには claim ID と件数だけ)。
+- 監査: `legacy_claims` の行(実施者・日時・取り消し)と、`legacy_claim_items` の項目(件数は項目の数から数える。`legacy_claims` には件数の列を持たない)。ログに氏名を出さない(旧氏名は個人情報。ログには claim ID と件数だけ)。
 - 回数制限: 管理者の誤操作・連打に備え、書込系(`legacy-claims` の POST と revoke)は本人ごと 1 時間 60 回を推奨する。
   これは組織作成の「本人ごと 1 時間 10 回」(`limiters.orgCreate`)とは**別の値・別の制限器**で、数値は実装値であり利用者決定ではない(§8-8)。
 
@@ -207,7 +211,7 @@ CREATE TABLE legacy_claim_items (
 - 一時データに、`people[0]` が旧氏名(架空名)の反省を持つ旧形式プロジェクトを用意し、旧データの取込み(旧形式プロジェクトの PUT)で `legacy_author_name` を作る。
   (要確認:現在の e2e がこの種の旧データを作れるか。作れなければシナリオ側で旧 API の PUT を足す)
 - 流れ: 管理者と一般メンバーを登録・確認 → 招待で一般メンバーが参加 → 管理者が `legacy-names` を取得(件数あり)→ `legacy-claims` で付け替え(201・件数)
-  → 本人の `GET /api/practice-days` 等で自分の反省として見える → 二重指定 409 → revoke → 元に戻る → 再度別のメンバーに付け替えられる。
+  → 本人の `GET /api/practice-days` 等で自分の反省として見える → 別のメンバーへの指定で 409 → revoke → 元に戻る → 再度別のメンバーに付け替えられる。
 - 画面(1280px・390px): メンバー一覧に「旧データを紐付ける」が出ること。変更前の版では FAIL、変更後で PASS になるように書く(FZ3-I で実施)。
 
 ## 8. 人に決めてほしい点
@@ -226,7 +230,7 @@ CREATE TABLE legacy_claim_items (
 | 10 | 取り消しで項目の ID を記録する表 `legacy_claim_items` を足してよいか(§4.4) | 可 / 氏名一致で戻す(表なし) | **可** | 氏名一致だと名簿経由の行を巻き込み、互換 PUT で氏名が直された行は戻らない(§5.1)。ID 記録が正確。表が 1 つ増えるコストのみ |
 | 11 | 再適用(同じ人への再 POST)を認めるか | 認める(200・増えた行だけ付ける) / 認めない(取り消してからやり直し) | **認める** | 付け替えた後も互換 PUT で同じ旧氏名の反省が増えうる(旧 Web が使われる間)。取り消してやり直すと、本人が直した行まで一度 NULL 所有になる |
 | 12 | 軌跡の件数(現状は常に 0)の扱い | 画面・応答に軌跡を出さない(0 なら省く) / 常に出す | **0 のときは画面で省く(API の `counts.sessions` は残す)** | 取込みが `legacy_owner_name` を null にするため旧データの軌跡は付かず、「軌跡 0 件」の表示は利用者を混乱させる。将来、軌跡の所有者を判断できる取込みを足したら自動で出る |
-| 13 | 付け替えの API でメール確認済みを要するか | 既存の `gate` と同じく要しない / 要する(403 `email_not_verified`) | **要しない** | 既存の組織の管理 API(名簿・招待の発行)は確認済みを見ていない。管理者は作成・招待などで確認済みのはず。要するなら新しい検査を足すことになり、他の API と不揃いになる |
+| 13 | 付け替えの API でメール確認済みを要するか | 既存の `gate` と同じく要しない / 要する(403 `email_not_verified`) | **要しない** | 既存の組織の管理 API(名簿・招待の発行)は確認済みを見ていない。メールを変えると確認済みが外れるが、管理者・メンバーの資格は残る仕様で、他の管理 API もそれを前提にしている。要するなら新しい検査を足すことになり、他の API と不揃いになる |
 | 14 | 管理者が自分自身に旧データを付けられるか | 許す / 許さない(別の管理者が行う) | **許す** | 管理者自身の旧データも付ける必要がある。唯一の管理者の部では他に頼めない。濫用は取り消しと `legacy_claims` の記録で歯止め。許さない場合は 422 `invalid_input` |
 
 ## 9. 未確認事項
@@ -244,7 +248,7 @@ CREATE TABLE legacy_claim_items (
 
 ## 10. 実装の順序案(FZ3-I)
 
-1. `legacy_claims` のマイグレーションと `accountsRepo`(`listLegacyNames`・`createClaim`・`detachLegacy`・`revokeClaim`)。純関数と単体テスト。
+1. `legacy_claims` と `legacy_claim_items` のマイグレーション(§4.4 の 2 表と部分一意インデックス)と `accountsRepo`(`listLegacyNames`・`createClaim`・`detachLegacy`・`revokeClaim`)。純関数と単体テスト。
 2. ルート 3 本と権限・エラー。設計書 §10.3 の追記(conductor/人が設計書側に反映)。
 3. Web のメンバー一覧の UI。
 4. ハブ e2e のシナリオ(変更前 FAIL・変更後 PASS)とスモーク。
