@@ -4,7 +4,7 @@
 // 確認・再設定のトークンは読んだらすぐ URL から消し(history.replaceState)、ログや外部へ出さない。
 import {
   pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm, membersView,
-  soleAdminOrgs, unloadedAdminOrgs, displayName, buildDeleteBody, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView,
+  soleAdminOrgs, unloadedAdminOrgs, unloadedNotice, displayName, buildDeleteBody, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView,
 } from './logic.js';
 
 const main = document.getElementById('ac-main');
@@ -301,7 +301,7 @@ function deleteCard() {
     const kids = [];
     for (const o of unloadedAdminOrgs(me.orgs, membersByOrg)) {
       kids.push(h('p', { class: 'ac-note ac-delete-unloaded', 'data-org': o.id },
-        `${o.name} のメンバーを読み込めなかったため、最も古く紐付いたメンバーへ自動で引き継ぎます。`));
+        unloadedNotice(o.name)));
     }
     if (sole.length) {
       kids.push(h('p', { id: 'ac-delete-successor-note', class: 'ac-note' },
