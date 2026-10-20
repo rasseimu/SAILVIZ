@@ -102,10 +102,21 @@ test('verifyPassword: 保存値のパラメータ・hash 長が上限を超え�
   }
 });
 
+test('上限判定そのものの検証: 保存値と同じパラメータを needsRehash に渡し、parse が通るかだけを見る', () => {
+  // 保存値のパラメータと比較対象を一致させると、needsRehash は parse が null(上限超・不正)のときだけ true になる。
+  const salt = 'AAAAAAAAAAAAAAAAAAAAAA'; // 16 バイト
+  const hash = 'A'.repeat(43); // 32 バイト
+  const same = (N, r, p) => needsRehash(`scrypt$${N}$${r}$${p}$${salt}$${hash}`, { N, r, p, keyLen: 32, saltLen: 16 });
+  assert.equal(same(32768, 8, 4), false, '作業量 128MiB ちょうどは上限内');
+  assert.equal(same(32768, 8, 5), true, '作業量 160MiB は上限超');
+  assert.equal(same(65536, 8, 1), false, 'メモリ 64MiB ちょうどは上限内');
+  assert.equal(same(131072, 8, 1), true, 'メモリ 128MiB は上限超');
+});
+
 test('verifyPassword: 上限ちょうどのパラメータは受け付ける(作業量 128MiB・メモリ 64MiB)', async () => {
   for (const params of [
     { N: 32768, r: 8, p: 4, keyLen: 32, saltLen: 16 }, // 128*N*r*p = 128MiB(MAX_COST_BYTES ちょうど)
-    { N: 65536, r: 8, p: 1, keyLen: 32, saltLen: 16 }, // 128*N*r = 64MiB(MAX_MEM_BYTES ちょうど)。scrypt 1回あたり約 750ms かかる(hash+verify+wrong で複数回)
+    { N: 65536, r: 8, p: 1, keyLen: 32, saltLen: 16 }, // 128*N*r = 64MiB(MAX_MEM_BYTES ちょうど)。このテスト全体で約 0.7 秒(scrypt 64MiB を複数回)
   ]) {
     const h = await hashPassword('pass-word-1', params);
     assert.ok(h.startsWith(`scrypt$${params.N}$${params.r}$${params.p}$`), h);
