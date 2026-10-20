@@ -203,7 +203,7 @@ export async function compatRoute(req, res, ctx) {
       points: parsed.points,
       bounds: parsed.bounds,
       // 見えない軌跡も数える(色が既存の軌跡と重ならないように)。ポリシー有効時は全軌跡数(access)。
-      colorIndex: policyOn ? (access?.tracks.length ?? 0) : tracks.length,
+      colorIndex: policyOn ? access.tracks.length : tracks.length,
       source: { importId, filename: finalName, boatNumber: boatNumber.trim(), uploadedAt },
       excludedIntervals: parsed.excludedIntervals,
     });

@@ -109,10 +109,13 @@ export function orderParts({ sessions = [], tracks = [], reflections = [] }) {
   const sessById = new Map(sessions.map((s) => [s.id, s]));
   const pos = (sid) => sessById.get(sid)?.position ?? 0;
   // 同順位は id の昇順(読み込み順に依らず並びを一意にする)。
-  const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  // tracks テーブルに id 列は無い(主キーは session_id)ので、軌跡は session_id、反省は id。
+  const cmp = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
+  const byId = (a, b) => cmp(a.id, b.id);
+  const bySid = (a, b) => cmp(a.session_id, b.session_id);
   return {
     sessById,
-    tracks: [...tracks].sort((a, b) => (pos(a.session_id) - pos(b.session_id)) || byId(a, b)),
+    tracks: [...tracks].sort((a, b) => (pos(a.session_id) - pos(b.session_id)) || bySid(a, b)),
     reflections: [...reflections].sort((a, b) => ((a.position ?? 0) - (b.position ?? 0)) || byId(a, b)),
   };
 }
