@@ -85,8 +85,16 @@ test('brevo: タイムアウト(signal の abort)で reject する(API キーを
     (e) => /接続に失敗/.test(e.message) && /TimeoutError/.test(e.message) && !e.message.includes(KEY));
 });
 
-test('brevo: 既定のタイムアウトは 5 秒', () => {
+test('brevo: timeoutMs を省くと既定(5 秒)の AbortSignal.timeout が fetch に渡る', async () => {
   assert.equal(DEFAULT_BREVO_TIMEOUT_MS, 5000);
+  const orig = AbortSignal.timeout;
+  const used = [];
+  AbortSignal.timeout = (ms) => { used.push(ms); return orig.call(AbortSignal, ms); }; // 実時間は待たない(呼ばれた値だけ見る)
+  try {
+    await mk(fakeFetch()).send({ to: 'u@example.com', kind: 'verify', url: 'https://a.example.com/x?token=t' });
+    await mk(fakeFetch(), { timeoutMs: 20 }).send({ to: 'u@example.com', kind: 'verify', url: 'https://a.example.com/x?token=t' });
+  } finally { AbortSignal.timeout = orig; }
+  assert.deepEqual(used, [5000, 20]);
 });
 
 test('brevo: 非 2xx の応答本文は body.cancel() で捨てる', async () => {
@@ -107,13 +115,18 @@ test('createMailer: brevo の MAIL_FROM に @ が無ければ起動時に例外'
   assert.equal(typeof createMailer({ provider: 'brevo', apiKey: KEY, from: 'a@example.com' }).send, 'function');
 });
 
-test('mailProviderWarning: 本番で未設定・log のときだけ WARN 文字列', () => {
+test('mailProviderWarning: 本番・アカウント機能ありで未設定・log のときだけ WARN 文字列', () => {
   for (const provider of [undefined, '', 'log']) {
-    const w = mailProviderWarning({ nodeEnv: 'production', provider });
+    const w = mailProviderWarning({ nodeEnv: 'production', provider, accountsEnabled: true });
     assert.match(w, /^WARN:/);
     assert.match(w, /MAIL_PROVIDER/);
   }
-  assert.equal(mailProviderWarning({ nodeEnv: 'production', provider: 'brevo' }), null);
-  assert.equal(mailProviderWarning({ nodeEnv: 'development', provider: 'log' }), null);
-  assert.equal(mailProviderWarning({ nodeEnv: undefined, provider: undefined }), null);
+  assert.equal(mailProviderWarning({ nodeEnv: 'production', provider: 'brevo', accountsEnabled: true }), null);
+  assert.equal(mailProviderWarning({ nodeEnv: 'development', provider: 'log', accountsEnabled: true }), null);
+  assert.equal(mailProviderWarning({ nodeEnv: undefined, provider: undefined, accountsEnabled: true }), null);
+});
+
+test('mailProviderWarning: アカウント機能が無い(STORAGE≠db)なら本番・未設定でも出さない', () => {
+  assert.equal(mailProviderWarning({ nodeEnv: 'production', provider: undefined, accountsEnabled: false }), null);
+  assert.equal(mailProviderWarning({ nodeEnv: 'production', provider: 'log' }), null);
 });
