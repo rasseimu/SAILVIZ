@@ -4,7 +4,7 @@
 // 確認・再設定のトークンは読んだらすぐ URL から消し(history.replaceState)、ログや外部へ出さない。
 import {
   pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm, membersView,
-  soleAdminOrgs, unloadedAdminOrgs, unloadedNotice, displayName, buildDeleteBody, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView, accountExtrasFromMeta,
+  soleAdminOrgs, unloadedAdminOrgs, unloadedNotice, displayName, buildDeleteBody, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView, resendFailureView, accountExtrasFromMeta,
 } from './logic.js';
 
 // 凍結した入口(名簿・招待の期限と回数・後任の選択)。サーバが meta を差し込んだときだけ出す(FZ1。FEATURE_ACCOUNT_EXTRAS=1)。
@@ -497,7 +497,8 @@ function invitesCard(orgId) {
 }
 
 // ---- 参加ページ /join/:code(`/?invite=<code>` はサーバが 302 でここへ寄せる。S2.10) ----
-function joinCard(...kids) { return h('section', { class: 'ac-card' }, h('h1', {}, '組織への招待'), ...kids); }
+// data-join-401="login": 401 でログインの案内に落ちる版の目印(動作テストが版を見分けるのに使う)
+function joinCard(...kids) { return h('section', { class: 'ac-card', 'data-join-401': 'login' }, h('h1', {}, '組織への招待'), ...kids); }
 
 // ログイン切れ(401)のとき: 未ログイン表示に落として、ログインを促す(ログイン後は URL のまま参加ページを描き直す)。
 function dropToJoinLogin() {
@@ -537,7 +538,11 @@ async function renderJoin() {
       resend.addEventListener('click', () => submitting(resend, async () => {
         const rs = await api('POST', '/api/auth/verify-email/resend', {});
         if (rs.status === 200) setMsg('確認メールを送りました。届いたリンクを開いたあと、この招待リンクをもう一度開いてください。', 'ok');
-        else setMsg(apiErrorMessage(rs.status, rs.json), 'error');
+        else {
+          const rv = resendFailureView(rs.status, rs.json);
+          if (rv.needsLogin) return dropToJoinLogin();
+          setMsg(rv.message, 'error');
+        }
       }));
       kids.push(resend);
     }
