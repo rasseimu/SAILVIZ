@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto';
 import { importFromFiles } from '../server/db/importFromFiles.js';
 import { migrate, loadMigrations } from '../server/db/migrate.js';
 import { openDb } from '../server/db/connection.js';
+import { createAccountsRepo } from '../server/repos/accountsRepo.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -91,9 +92,12 @@ function stats(ms) {
   return { n: s.length, min: s[0], median: q(0.5), mean, p95: q(0.95), max: s[s.length - 1] };
 }
 
-async function measure(storage, dataDir, name) {
+async function measure(storage, dataDir, name, orgId = null) {
   const port = await freePort();
   const env = { ...process.env, PORT: String(port), DATA_DIR: dataDir, STORAGE: storage };
+  // DB 版は旧共有ログインが属する組織(MIGRATION_ORG_ID)が要る。無いと GET が 404 になる(S2.5)。
+  delete env.MIGRATION_ORG_ID;
+  if (storage === 'db' && orgId) env.MIGRATION_ORG_ID = orgId;
   delete env.NODE_ENV; delete env.SAILVIZ_VIEW_USER; delete env.SAILVIZ_VIEW_PASSWORD;
   delete env.SAILVIZ_WRITE_TOKEN; delete env.GEMINI_API_KEY;
   // stderr は継承して、子の失敗理由が見えるようにする
@@ -159,10 +163,12 @@ async function runTarget(label, src, tmp) {
   // DB 版: 移行スクリプトと同じ関数でファイルから取り込む
   const db = openDb(join(dbDir, 'sailviz.db'));
   migrate(db, loadMigrations(join(ROOT, 'server', 'db', 'migrations')));
-  const rep = importFromFiles({ db, dataDir: dbDir });
+  // 一時の組織を作り、取込みと子サーバの両方に同じ ID を渡す(本番の取込みと同じ手順)
+  const org = createAccountsRepo({ db }).createOrg({ name: 'perf-compare' });
+  const rep = importFromFiles({ db, dataDir: dbDir, orgId: org.id });
   db.close();
 
-  const run = (storage) => measure(storage, storage === 'file' ? fileDir : dbDir, name);
+  const run = (storage) => measure(storage, storage === 'file' ? fileDir : dbDir, name, org.id);
   // 周1: file→db、周2: db→file(順序効果を見る)
   const rounds = [];
   for (const order of [['file', 'db'], ['db', 'file']]) {
