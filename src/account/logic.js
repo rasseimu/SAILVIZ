@@ -17,6 +17,12 @@ export function inviteCodeFromPath(pathname) {
   try { return decodeURIComponent(m[1]) || null; } catch { return null; }
 }
 
+// 凍結した入口(名簿・招待の期限と回数・後任の選択)を出すか(FZ1)。サーバが差し込む
+// <meta name="sailviz-features" content="account-extras"> の content を渡す。無い・別の値なら隠す。
+export function accountExtrasFromMeta(content) {
+  return String(content || '').split(/[\s,]+/).includes('account-extras');
+}
+
 const intOrNull = (s, min, max) => {
   const t = String(s ?? '').trim();
   if (t === '') return { ok: true, value: null };

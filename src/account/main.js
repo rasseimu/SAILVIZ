@@ -4,8 +4,11 @@
 // 確認・再設定のトークンは読んだらすぐ URL から消し(history.replaceState)、ログや外部へ出さない。
 import {
   pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm, membersView,
-  soleAdminOrgs, unloadedAdminOrgs, unloadedNotice, displayName, buildDeleteBody, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView,
+  soleAdminOrgs, unloadedAdminOrgs, unloadedNotice, displayName, buildDeleteBody, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView, accountExtrasFromMeta,
 } from './logic.js';
+
+// 凍結した入口(名簿・招待の期限と回数・後任の選択)。サーバが meta を差し込んだときだけ出す(FZ1。FEATURE_ACCOUNT_EXTRAS=1)。
+const EXTRAS = accountExtrasFromMeta(document.querySelector('meta[name="sailviz-features"]')?.content);
 
 const main = document.getElementById('ac-main');
 const nav = document.getElementById('ac-nav');
@@ -71,7 +74,7 @@ function renderNav() {
   nav.replaceChildren();
   if (me) {
     nav.append(h('a', { href: '/account' }, 'アカウント'));
-    if (me.org) nav.append(h('a', { href: '/account#roster' }, '名簿'));
+    if (me.org) nav.append(h('a', { href: '/account#roster' }, EXTRAS ? '名簿' : '組織'));
   }
   nav.append(h('a', { href: '/' }, 'SailViz へ'));
 }
@@ -182,7 +185,7 @@ function registerForm(after = toAccount) {
   const btn = h('button', { id: 'ac-reg-submit', class: 'ac-btn', type: 'submit' }, '登録する');
   const form = h('form', { class: 'ac-form', novalidate: true },
     h('p', { class: 'ac-note' }, '登録すると確認メールが届きます。メールのリンクを開くとアカウントが有効になります。'),
-    h('p', { id: 'ac-reg-roster-note', class: 'ac-note' }, '部の名簿に載っているアドレスで登録してください。名簿と違うアドレスでは、部に自動で紐付きません。'),
+    EXTRAS && h('p', { id: 'ac-reg-roster-note', class: 'ac-note' }, '部の名簿に載っているアドレスで登録してください。名簿と違うアドレスでは、部に自動で紐付きません。'),
     field('メールアドレス', email), field('パスワード(8文字以上)', pw), field('氏名', name), field('所属(例: ○○大学ヨット部)', affil),
     h('label', { id: 'ac-reg-agree-label', class: 'ac-check' }, agree, '利用規約・プライバシーポリシー・位置情報と録音の用途に同意します'), btn);
   form.addEventListener('submit', (e) => {
@@ -248,7 +251,7 @@ function profileCard() {
     actions.unshift(resend);
   }
   return h('section', { class: 'ac-card' }, h('h1', {}, 'アカウント'), h('dl', { class: 'ac-dl' }, ...rows),
-    !verified && h('p', { class: 'ac-note' }, 'メールの確認が済むと、組織の作成や名簿との自動紐付けができます。'),
+    !verified && h('p', { class: 'ac-note' }, EXTRAS ? 'メールの確認が済むと、組織の作成や名簿との自動紐付けができます。' : 'メールの確認が済むと、組織の作成や招待リンクでの参加ができます。'),
     h('div', { class: 'ac-row' }, ...actions));
 }
 
@@ -256,7 +259,7 @@ function orgCard() {
   if (me.org) {
     return h('section', { class: 'ac-card' }, h('h2', {}, '組織'),
       h('p', {}, h('span', { id: 'ac-org-current' }, me.org.name)),
-      h('a', { id: 'ac-open-roster', class: 'ac-btn', href: '/account#roster' }, '名簿を開く'));
+      h('a', { id: 'ac-open-roster', class: 'ac-btn', href: '/account#roster' }, EXTRAS ? '名簿を開く' : '組織を開く'));
   }
   if (me.emailVerified !== true) {
     return h('section', { class: 'ac-card' }, h('h2', {}, '組織'),
@@ -265,7 +268,7 @@ function orgCard() {
   const name = h('input', { id: 'ac-org-name', type: 'text', required: true, maxlength: '100' });
   const btn = h('button', { id: 'ac-org-submit', class: 'ac-btn', type: 'submit' }, '組織を作成');
   const form = h('form', { class: 'ac-form', novalidate: true },
-    h('p', { class: 'ac-note' }, '作成した人が組織の管理者になり、名簿を管理できます。'),
+    h('p', { class: 'ac-note' }, EXTRAS ? '作成した人が組織の管理者になり、名簿を管理できます。' : '作成した人が組織の管理者になり、招待リンクでメンバーを招けます。'),
     field('組織の名前(例: ○○大学ヨット部)', name), btn);
   form.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -303,7 +306,11 @@ function deleteCard() {
       kids.push(h('p', { class: 'ac-note ac-delete-unloaded', 'data-org': o.id },
         unloadedNotice(o.name)));
     }
-    if (sole.length) {
+    if (sole.length && !EXTRAS) {
+      // 後任の手動選択は凍結(FZ1)。自動引き継ぎの案内だけ出す(サーバの挙動は変えない)。
+      kids.push(h('p', { id: 'ac-delete-successor-note', class: 'ac-note' },
+        '次の組織はあなたが唯一の管理者です。退会すると、最も古く紐付いたメンバーに自動で管理者が引き継がれます: ' + sole.map((s) => s.orgName).join('、')));
+    } else if (sole.length) {
       kids.push(h('p', { id: 'ac-delete-successor-note', class: 'ac-note' },
         '次の組織はあなたが唯一の管理者です。後任の管理者を選んでください。選ばない場合は、最も古く紐付いたメンバーに自動で管理者が引き継がれます。'));
       for (const s of sole) {
@@ -343,10 +350,30 @@ async function renderAccount() {
   mount(profileCard(), orgCard(), deleteCard());
 }
 
+// ---- 組織(名簿は凍結中。FZ1) ----
+// 名簿の提出・一覧は出さず、招待リンクの管理(管理者のみ)とメンバー一覧だけを出す。管理者かどうかは /api/me の orgs[].isAdmin で見る。
+async function renderOrgHome(orgId) {
+  const title = h('h1', {}, `組織: ${me.org.name}`);
+  mount(h('section', { class: 'ac-card' }, title));
+  const mr = await api('GET', `/api/orgs/${orgId}/members`);
+  if (!title.isConnected) return; // 待っている間に別の描画が画面を差し替えた
+  const isAdmin = (me.orgs || []).some((o) => o.id === me.org.id && o.isAdmin === true);
+  if (isAdmin) main.append(invitesCard(orgId));
+  const mv = membersView(mr.status, mr.json);
+  if (mv.kind === 'error') {
+    main.append(h('section', { class: 'ac-card' }, h('h2', {}, '組織のメンバー'),
+      h('p', { id: 'ac-members-error', class: 'ac-note', role: 'alert' }, mv.message)));
+    return;
+  }
+  main.append(h('section', { class: 'ac-card' }, h('h2', {}, `組織のメンバー(${mv.members.length} 人)`),
+    mv.members.length ? h('ul', { id: 'ac-members', class: 'ac-list' }, ...mv.members.map((m) => h('li', {}, m.name))) : h('p', { class: 'ac-note' }, 'まだ紐付け済みのメンバーはいません。')));
+}
+
 // ---- 名簿 ----
 async function renderRoster() {
   if (!me.org) { history.replaceState(null, '', '/account'); return renderAccount(); }
   const orgId = encodeURIComponent(me.org.id);
+  if (!EXTRAS) return renderOrgHome(orgId);
   const area = h('section', { class: 'ac-card' }, h('h1', {}, `名簿: ${me.org.name}`), h('p', { class: 'ac-note' }, '読み込み中…'));
   mount(area);
   const [rr, mr] = await Promise.all([api('GET', `/api/orgs/${orgId}/roster`), api('GET', `/api/orgs/${orgId}/members`)]);
@@ -412,7 +439,8 @@ function invitesCard(orgId) {
   const days = h('input', { id: 'ac-invite-days', type: 'text', inputmode: 'numeric', placeholder: '空なら無期限' });
   const uses = h('input', { id: 'ac-invite-uses', type: 'text', inputmode: 'numeric', placeholder: '空なら無制限' });
   const btn = h('button', { id: 'ac-invite-create', class: 'ac-btn', type: 'submit' }, '招待リンクを発行');
-  const form = h('form', { class: 'ac-form', novalidate: true }, field('有効日数(1〜365、任意)', days), field('使用回数の上限(1〜1000、任意)', uses), btn);
+  // 期限・回数の入力欄は凍結(FZ1)。既定は無期限・無制限で発行する(本文は空)。
+  const form = h('form', { class: 'ac-form', novalidate: true }, ...(EXTRAS ? [field('有効日数(1〜365、任意)', days), field('使用回数の上限(1〜1000、任意)', uses)] : []), btn);
 
   const copyBtn = (text, input, id) => {
     const b = h('button', { class: 'ac-btn ac-btn-ghost ac-invite-copy', type: 'button', id }, 'コピー');
@@ -451,7 +479,7 @@ function invitesCard(orgId) {
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     submitting(btn, async () => {
-      const p = parseInviteForm(days.value, uses.value);
+      const p = EXTRAS ? parseInviteForm(days.value, uses.value) : { ok: true, body: {} };
       if (!p.ok) return setMsg(p.message, 'error');
       const r = await api('POST', `/api/orgs/${orgId}/invites`, p.body);
       if (r.status !== 201 || !r.json?.code) return setMsg(apiErrorMessage(r.status, r.json), 'error');
@@ -534,7 +562,7 @@ async function renderJoin() {
     if (v.needsLogin) return dropToJoinLogin();
     setMsg(v.message, 'error');
   }));
-  mount(joinCard(h('p', { id: 'ac-join-org' }, orgName), h('p', { class: 'ac-note' }, `「${orgName}」に招待されています。参加すると、この組織のメンバーとして名簿・共有の対象になります。`), btn));
+  mount(joinCard(h('p', { id: 'ac-join-org' }, orgName), h('p', { class: 'ac-note' }, `「${orgName}」に招待されています。参加すると、この組織のメンバーとして${EXTRAS ? '名簿・' : ''}共有の対象になります。`), btn));
 }
 
 // ---- 入口 ----
