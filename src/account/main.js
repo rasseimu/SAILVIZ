@@ -4,7 +4,7 @@
 // 確認・再設定のトークンは読んだらすぐ URL から消し(history.replaceState)、ログや外部へ出さない。
 import {
   pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm, membersView,
-  soleAdminOrgs, buildDeleteBody, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView,
+  soleAdminOrgs, unloadedAdminOrgs, displayName, buildDeleteBody, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView,
 } from './logic.js';
 
 const main = document.getElementById('ac-main');
@@ -299,13 +299,17 @@ function deleteCard() {
     const sole = soleAdminOrgs(me.user.id, me.orgs, membersByOrg);
     const selects = {};
     const kids = [];
+    for (const o of unloadedAdminOrgs(me.orgs, membersByOrg)) {
+      kids.push(h('p', { class: 'ac-note ac-delete-unloaded', 'data-org': o.id },
+        `${o.name} のメンバーを読み込めなかったため、最も古く紐付いたメンバーへ自動で引き継ぎます。`));
+    }
     if (sole.length) {
       kids.push(h('p', { id: 'ac-delete-successor-note', class: 'ac-note' },
         '次の組織はあなたが唯一の管理者です。後任の管理者を選んでください。選ばない場合は、最も古く紐付いたメンバーに自動で管理者が引き継がれます。'));
       for (const s of sole) {
         const sel = h('select', { class: 'ac-delete-successor', 'data-org': s.orgId },
           h('option', { value: '' }, '選ばない(自動で引き継ぐ)'),
-          ...s.candidates.map((c) => h('option', { value: c.userId }, c.name)));
+          ...s.candidates.map((c) => h('option', { value: c.userId }, displayName(c.name))));
         selects[s.orgId] = sel;
         kids.push(field(`${s.orgName} の後任`, sel));
         if (!s.candidates.length) kids.push(h('p', { class: 'ac-note' }, `${s.orgName} には、あなた以外のメンバーがいません。`));
@@ -331,7 +335,6 @@ function deleteCard() {
       });
     });
     area.replaceChildren(form);
-    open.disabled = false;
   }));
   return card;
 }

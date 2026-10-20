@@ -2,7 +2,7 @@
 // 退会画面(S2.12)の純関数: 後任の選択対象の算出と DELETE /api/me の本文づくり。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { soleAdminOrgs, buildDeleteBody } from '../src/account/logic.js';
+import { soleAdminOrgs, buildDeleteBody, displayName, unloadedAdminOrgs } from '../src/account/logic.js';
 
 const orgs = [
   { id: 'o1', name: '部A', isAdmin: true },
@@ -29,6 +29,34 @@ test('soleAdminOrgs: メンバーが自分だけの組織は候補なし(後任�
   assert.equal(r.length, 1);
   assert.deepEqual(r[0].candidates, []);
   assert.deepEqual(soleAdminOrgs('me', null, null), []);
+});
+
+test('soleAdminOrgs: orgs[] で isAdmin でも、members で自分が非管理者なら対象外', () => {
+  const r = soleAdminOrgs('me', [{ id: 'o1', name: '部A', isAdmin: true }],
+    { o1: [{ userId: 'me', name: '自分', isAdmin: false }, { userId: 'u2', name: '甲', isAdmin: false }] });
+  assert.deepEqual(r, []);
+});
+
+test('buildDeleteBody: choices の null・数値は successors に入らない', () => {
+  assert.deepEqual(buildDeleteBody('pw', { o1: null, o2: 5, o3: 'u3' }), { ok: true, body: { password: 'pw', successors: { o3: 'u3' } } });
+  assert.deepEqual(buildDeleteBody('pw', { o1: null, o2: 5 }), { ok: true, body: { password: 'pw' } });
+});
+
+test('buildDeleteBody: 空白だけのパスワードも加工せずそのまま送る', () => {
+  assert.deepEqual(buildDeleteBody('   ', {}), { ok: true, body: { password: '   ' } });
+});
+
+test('displayName: 名前が空・空白なら「(名前なし)」', () => {
+  assert.equal(displayName('甲'), '甲');
+  assert.equal(displayName(''), '(名前なし)');
+  assert.equal(displayName('  '), '(名前なし)');
+  assert.equal(displayName(undefined), '(名前なし)');
+});
+
+test('unloadedAdminOrgs: 管理者の組織のうち members を取得できなかったものを返す', () => {
+  const r = unloadedAdminOrgs(orgs, { o1: [] });
+  assert.deepEqual(r.map((o) => o.id), ['o2']);
+  assert.deepEqual(unloadedAdminOrgs(null, null), []);
 });
 
 test('buildDeleteBody: パスワード必須。選んだ組織だけ successors に入れ、未選択なら successors を付けない', () => {
