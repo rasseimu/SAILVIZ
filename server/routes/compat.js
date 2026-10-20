@@ -110,14 +110,15 @@ export async function compatRoute(req, res, ctx) {
     catch (e) { send(res, 422, { error: String(e.message || e) }); return true; }
     const importId = `imp_${jstStamp(parsed.practiceDate).replace(/-/g, '_')}_${randomBytes(4).toString('hex')}`;
     await store.saveUpload(importId, 'raw.csv', csv);
-    // 見えない器の名前は返さない。一致する器が複数あれば、見える最初の器を返す。
+    // commit できる(PUT できる)器だけを返す。見えても書けない他組織の器は返さない(commit が 404 になるため)。
+    // 一致する器が複数あれば、書ける最初の器を返す。
     let matched;
     if (policyOn && typeof store.findReflectionsByDate === 'function') {
       matched = store.findReflectionsByDate(person, parsed.practiceDate)
-        .find((c) => canSeeProject(writer, store.getProjectAccess(c.name))) || null;
+        .find((c) => canPutDay(writer, store.getProjectAccess(c.name))) || null;
     } else {
       matched = await store.findReflectionByDate(person, parsed.practiceDate);
-      if (matched && policyOn && !canSeeProject(writer, store.getProjectAccess(matched.name))) matched = null;
+      if (matched && policyOn && !canPutDay(writer, store.getProjectAccess(matched.name))) matched = null;
     }
     send(res, 200, {
       importId,
@@ -179,10 +180,15 @@ export async function compatRoute(req, res, ctx) {
     let csv;
     try { csv = await store.readUpload(importId, 'raw.csv'); }
     catch { send(res, 404, { error: 'import not found' }); return true; }
-    let proj;
+    let proj, access = null;
     try {
-      if (policyOn && !canPutDay(writer, store.getProjectAccess(name))) throw new Error('forbidden');
-      proj = await loadForWrite(name, writer);
+      // 器の読込みは1回だけ(JSON と access を同じ行から得る)。
+      const loaded = await loadWithAccess(name);
+      access = loaded.access;
+      if (policyOn && !canPutDay(writer, access)) throw new Error('forbidden');
+      proj = policyOn
+        ? filterProject(writer, loaded.project, access) || { ...loaded.project, tracks: [], reflections: [] }
+        : loaded.project;
     } catch { send(res, 404, { error: 'project not found' }); return true; }
 
     const parsed = parseSensorCsv(csv);
@@ -196,8 +202,8 @@ export async function compatRoute(req, res, ctx) {
       name: boatNumber.trim(),
       points: parsed.points,
       bounds: parsed.bounds,
-      // 見えない軌跡も数える(色が既存の軌跡と重ならないように)。
-      colorIndex: Math.max(tracks.length, policyOn ? (store.getProjectAccess(name)?.tracks.length ?? 0) : 0),
+      // 見えない軌跡も数える(色が既存の軌跡と重ならないように)。ポリシー有効時は全軌跡数(access)。
+      colorIndex: policyOn ? access.tracks.length : tracks.length,
       source: { importId, filename: finalName, boatNumber: boatNumber.trim(), uploadedAt },
       excludedIntervals: parsed.excludedIntervals,
     });

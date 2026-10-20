@@ -337,12 +337,10 @@ test('P3-3: sensor-imports commit の colorIndex は見えない軌跡も数え�
   assert.equal(c.status, 200, JSON.stringify(c.json));
   const colors = rows('SELECT view FROM tracks t JOIN rec_sessions s ON s.id = t.session_id JOIN practice_days p ON p.id = s.practice_day_id WHERE p.legacy_name = ?', DAY).map((r) => JSON.parse(r.view).color);
   assert.equal(colors.length, 3);
-  assert.equal(new Set(colors.map(String)).size >= 2, true);
-  // 新しい軌跡の色は 3 番目のパレット色(全軌跡数 2 → index 2)
+  // 新しい軌跡の色は 3 番目のパレット色(全軌跡数 2 → index 2)。既存の 2 本(trk の固定色)とは別の色。
   const { buildTrack } = await import('../server/sensorimport.js');
   const expected = buildTrack({ id: 'x', name: 'x', points: [], bounds: null, colorIndex: 2 }).color;
-  assert.ok(colors.includes(expected));
-  assert.equal(colors.filter((x) => x === expected).length >= 1, true);
+  assert.equal(colors.filter((x) => x === expected).length, 1);
 });
 
 test('P3-5: sensor-imports は同じ日・同じ人の反省が複数の器にあっても、見える器を matched にする', { skip }, async () => {
@@ -401,4 +399,22 @@ test('取込み: sensor-imports commit は他組織の器を 404 にする', { s
   assert.equal(up.status, 200, JSON.stringify(up.json));
   const c = await call(baseA, 'POST', `/api/sensor-imports/${encodeURIComponent(up.json.importId)}/commit`, { ck: cookie, body: { name: D3, boatNumber: '9999' } });
   assert.equal(c.status, 404);
+});
+
+test('S2.5-P4: sensor-imports の matched は PUT できる器を選ぶ (他組織の public な器が見えても使わず、commit が 404 にならない)', { skip }, async () => {
+  const day = Date.UTC(2026, 3, 1, 15, 0, 0); // JST 2026-04-02 0 時
+  const mine = 'sailviz-20260402-0900.sailviz.json', theirs = 'sailviz-20260402-1000.sailviz.json'; // 降順の先頭は他組織
+  const person = 'テスト部員C';
+  repo.writeProject(mine, proj({ practiceDate: day, reflections: [{ ...refl('rC1', '自'), people: [person] }] }), { orgId: ORG });
+  repo.writeProject(theirs, proj({ practiceDate: day, reflections: [{ ...refl('rC2', '他'), people: [person] }] }), { orgId: OTHER });
+  db.prepare("UPDATE reflections SET visibility = 'public' WHERE practice_day_id = (SELECT id FROM practice_days WHERE legacy_name = ?)").run(theirs);
+  // 前提: 他組織の器は共有ログインに見える(が PUT はできない)
+  assert.equal((await call(baseA, 'GET', `/api/projects/${theirs}`, { ck: cookie })).status, 200);
+  assert.equal((await call(baseA, 'PUT', `/api/projects/${theirs}`, { ck: cookie, body: proj() })).status, 403);
+  const csv = ['time,latitude,longitude,speed,bearing,horizontalAccuracy', ...Array.from({ length: 5 }, (_, i) => `${(Date.UTC(2026, 3, 2, 3, 0, i)) * 1e6},10.0,100.0,2,90,4`)].join('\n') + '\n';
+  const up = await call(baseA, 'POST', '/api/sensor-imports', { ck: cookie, body: { person, csv } });
+  assert.equal(up.status, 200, JSON.stringify(up.json));
+  assert.equal(up.json.matched?.name, mine);
+  const c = await call(baseA, 'POST', `/api/sensor-imports/${encodeURIComponent(up.json.importId)}/commit`, { ck: cookie, body: { name: up.json.matched.name, boatNumber: '1234' } });
+  assert.equal(c.status, 200, JSON.stringify(c.json));
 });

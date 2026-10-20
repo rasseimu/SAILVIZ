@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { decomposeProject, assembleProject } from '../server/domain/projectRows.js';
+import { decomposeProject, assembleProject, orderParts } from '../server/domain/projectRows.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PROJ_DIR = join(ROOT, 'data', 'projects');
@@ -71,4 +71,19 @@ test('実データ data/projects/*.json が全件往復一致', () => {
 test('denormalized date はファイル名から導出(practiceDate 欠落時)', () => {
   const rows = decomposeProject({ tracks: [], reflections: [] }, { legacyName: 'sailviz-20260903-0844.sailviz.json', pdId: 'pd_x', now: 1 });
   assert.equal(rows.practiceDay.date, '2026-09-03');
+});
+
+test('orderParts: 同順位(同じ position)は id の昇順で決まり、入力順に依らない', () => {
+  const sessions = [{ id: 's1', position: 0 }];
+  // tracks テーブルに id 列は無い(主キーは session_id)。実際の行の形で確かめる。
+  const sess2 = [{ id: 's_b', position: 0 }, { id: 's_a', position: 0 }, { id: 's_c', position: 0 }];
+  const tr = (sid) => ({ session_id: sid });
+  const rf = (id) => ({ id, position: 0 });
+  const a = orderParts({ sessions: sess2, tracks: [tr('s_b'), tr('s_a'), tr('s_c')], reflections: [rf('r_b'), rf('r_a')] });
+  const b = orderParts({ sessions: sess2, tracks: [tr('s_c'), tr('s_a'), tr('s_b')], reflections: [rf('r_a'), rf('r_b')] });
+  void sessions;
+  assert.deepEqual(a.tracks.map((x) => x.session_id), ['s_a', 's_b', 's_c']);
+  assert.deepEqual(a.reflections.map((x) => x.id), ['r_a', 'r_b']);
+  assert.deepEqual(b.tracks, a.tracks);
+  assert.deepEqual(b.reflections, a.reflections);
 });
