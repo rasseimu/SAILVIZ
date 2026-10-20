@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { createApi } from '../server/api.js';
+import { hashPassword } from '../server/domain/password.js';
 
 const [major] = process.versions.node.split('.').map(Number);
 const skip = major >= 24 ? undefined : 'node:sqlite(Node >=24)が要る';
@@ -156,7 +157,7 @@ test('me.orgs は org_members から作る: org_admins だけで org_members に
 
 test('退会(DELETE /api/me)で唯一の管理者が抜けると、後任の isAdmin が true・退会者は members から消える', { skip }, async () => {
   const pw = 'pass-word-1';
-  const adminHash = await (await import('../server/domain/password.js')).hashPassword(pw, { N: 1024, r: 8, p: 3, keyLen: 32, saltLen: 16 });
+  const adminHash = await hashPassword(pw, { N: 1024, r: 8, p: 3, keyLen: 32, saltLen: 16 });
   const u = accounts.createUser({ email: 'ia-leaver@example.test', name: 'IA退会者', passwordHash: adminHash, now: clock });
   accounts.markEmailVerified(u.id, clock);
   const leaver = { u, tok: issueAuthToken(accounts, u.id, clock).token };
@@ -164,8 +165,11 @@ test('退会(DELETE /api/me)で唯一の管理者が抜けると、後任の isA
   const m2 = mk('ia-s2@example.test', 'IA後任候補2');
   const o = accounts.createOrg({ name: 'IA引継ぎ', adminUserIds: [leaver.u.id], now: clock });
   accounts.linkMember({ orgId: o.id, userId: leaver.u.id, rosterId: null, now: clock });
-  await call('PUT', `/api/orgs/${o.id}/roster`, leaver.tok, { roster: [
-    { name: 'IA1', email: 'ia-s1@example.test' }, { name: 'IA2', email: 'ia-s2@example.test' }] });
+  // m1 は m2 より確実に先に紐付ける(既定の後任順=紐付け時刻→ID なら m1 が選ばれる)。m2 だけ名簿経由。
+  accounts.linkMember({ orgId: o.id, userId: m1.u.id, rosterId: null, now: clock - 1 });
+  const put = await (await call('PUT', `/api/orgs/${o.id}/roster`, leaver.tok, { roster: [
+    { name: 'IA2', email: 'ia-s2@example.test' }] })).json();
+  assert.deepEqual(put.linked.map((x) => x.userId), [m2.u.id]);
   const before = await members(m1.tok, o.id);
   assert.deepEqual(before.filter((x) => x.isAdmin).map((x) => x.userId), [leaver.u.id]);
   // 後任を m2 に指定して退会 → m2 が管理者、m1 は非管理者のまま、退会者は消える
