@@ -47,7 +47,7 @@ test('soleAdminOrgs: members に自分がいなければ(他に管理者もい�
 test('unloadedNotice: 言い切らず「唯一の管理者の場合」と条件付きで書く。組織名と「読み込めなかった」を含む', () => {
   const s = unloadedNotice('部A');
   assert.match(s, /部A/);
-  assert.match(s, /読み込めませんでした/);
+  assert.match(s, /読み込めなかった/);
   assert.match(s, /唯一の管理者の場合/);
   assert.match(s, /管理者不在/);
 });
