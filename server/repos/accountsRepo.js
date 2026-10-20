@@ -153,7 +153,8 @@ export function createAccountsRepo({ db }) {
       return db.prepare('SELECT org_id FROM org_admins WHERE user_id = ? ORDER BY org_id').all(userId).map((r) => r.org_id);
     },
     // そのユーザーの org_admins 行を全組織ぶん消す(§4.3 退会)。消した行数を返す。
-    // 唯一の管理者でも組織は残る(管理者不在になる)。正本に定めが無いため拒否・移譲はしない。
+    // 唯一の管理者でも組織は残る(管理者不在になる)。ここでは移譲しない:
+    // 後任への引き継ぎ(H25)は呼び出し側(routes/auth.js の deleteMe)がこの前に同じトランザクション内で行う。
     removeOrgAdminsOfUser(userId) {
       return Number(db.prepare('DELETE FROM org_admins WHERE user_id = ?').run(userId).changes);
     },
