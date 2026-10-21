@@ -114,7 +114,7 @@ export function soleAdminOrgs(myUserId, orgs, membersByOrg) {
   return out;
 }
 
-// 管理者の組織のうち、メンバー一覧を取得できなかったもの(後任を選べない。サーバが自動で引き継ぐ)。
+// 管理者の組織のうち、メンバー一覧を取得できなかったもの(後任を選べない。唯一の管理者ならサーバが自動で引き継ぐ)。
 export function unloadedAdminOrgs(orgs, membersByOrg) {
   return (Array.isArray(orgs) ? orgs : []).filter((o) => o && o.isAdmin === true && !(membersByOrg && Array.isArray(membersByOrg[o.id])));
 }
@@ -122,6 +122,25 @@ export function unloadedAdminOrgs(orgs, membersByOrg) {
 // メンバー一覧を読めなかった組織の案内文。他に管理者がいるかは分からないので、条件付きで書く(H25)。
 export function unloadedNotice(orgName) {
   return `${orgName} のメンバーを読み込めなかったため確認できません。あなたが唯一の管理者の場合は、最も古く紐付いたメンバーへ自動で引き継ぎます(他にメンバーがいなければ管理者不在になります)。`;
+}
+
+// 凍結中(FEATURE_ACCOUNT_EXTRAS 未設定)の退会画面の案内文。後任は選ばせない。
+// soleAdminOrgs の結果を、他にメンバーがいる組織(自動で引き継がれる)と自分しかいない組織(管理者不在になる: H25)に分ける。
+export function frozenSuccessionNotices(sole) {
+  const list = Array.isArray(sole) ? sole : [];
+  const hasOthers = (s) => Boolean(s.candidates && s.candidates.length);
+  const withMembers = list.filter(hasOthers);
+  return {
+    handover: withMembers.length
+      ? '次の組織はあなたが唯一の管理者です。退会すると、最も古く紐付いたメンバーに自動で管理者が引き継がれます: ' + withMembers.map((s) => s.orgName).join('、')
+      : null,
+    noMember: list.filter((s) => !hasOthers(s)).map((s) => `${s.orgName} には、あなた以外のメンバーがいません(管理者がいなくなります)。`),
+  };
+}
+
+// この組織の管理者か(GET /api/me の orgs[].isAdmin)。組織の画面で招待カードを出すかの判定に使う。
+export function isOrgAdmin(orgs, orgId) {
+  return (Array.isArray(orgs) ? orgs : []).some((o) => o && o.id === orgId && o.isAdmin === true);
 }
 
 export function displayName(name) {

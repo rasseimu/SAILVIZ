@@ -2,7 +2,7 @@
 // 退会画面(S2.12)の純関数: 後任の選択対象の算出と DELETE /api/me の本文づくり。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { soleAdminOrgs, buildDeleteBody, displayName, unloadedAdminOrgs, unloadedNotice } from '../src/account/logic.js';
+import { soleAdminOrgs, buildDeleteBody, displayName, unloadedAdminOrgs, unloadedNotice, frozenSuccessionNotices, isOrgAdmin } from '../src/account/logic.js';
 
 const orgs = [
   { id: 'o1', name: '部A', isAdmin: true },
@@ -79,4 +79,28 @@ test('buildDeleteBody: パスワード必須。選んだ組織だけ successors 
   assert.deepEqual(buildDeleteBody('pw', {}), { ok: true, body: { password: 'pw' } });
   assert.deepEqual(buildDeleteBody('pw', { o1: '', o2: undefined }), { ok: true, body: { password: 'pw' } });
   assert.deepEqual(buildDeleteBody('pw', { o1: 'u2', o2: '' }), { ok: true, body: { password: 'pw', successors: { o1: 'u2' } } });
+});
+
+test('frozenSuccessionNotices: 他にメンバーがいる組織は自動引き継ぎ、自分だけの組織は「管理者がいなくなります」', () => {
+  const sole = [
+    { orgId: 'o1', orgName: '部A', candidates: [{ userId: 'u2', name: '甲' }] },
+    { orgId: 'o2', orgName: '部B', candidates: [] },
+  ];
+  const n = frozenSuccessionNotices(sole);
+  assert.match(n.handover, /自動で管理者が引き継がれます: 部A$/);
+  assert.ok(!n.handover.includes('部B'));
+  assert.deepEqual(n.noMember, ['部B には、あなた以外のメンバーがいません(管理者がいなくなります)。']);
+  const alone = frozenSuccessionNotices([sole[1]]);
+  assert.equal(alone.handover, null);
+  assert.equal(alone.noMember.length, 1);
+  assert.deepEqual(frozenSuccessionNotices([]), { handover: null, noMember: [] });
+  assert.deepEqual(frozenSuccessionNotices(undefined), { handover: null, noMember: [] });
+});
+
+test('isOrgAdmin: その組織の管理者だけ true(メンバー・不明な組織・不正入力は false)', () => {
+  assert.equal(isOrgAdmin(orgs, 'o1'), true);
+  assert.equal(isOrgAdmin(orgs, 'o3'), false);
+  assert.equal(isOrgAdmin(orgs, 'zzz'), false);
+  assert.equal(isOrgAdmin(null, 'o1'), false);
+  assert.equal(isOrgAdmin([null, { id: 'o1', isAdmin: 'true' }], 'o1'), false);
 });

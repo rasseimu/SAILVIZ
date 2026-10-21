@@ -12,5 +12,6 @@ export function resolveFeatures(env = process.env) {
 export function injectFeatureMeta(html, features) {
   if (!features || !features.accountExtras) return html;
   const tag = `<meta name="${FEATURE_META_NAME}" content="account-extras" />`;
+  // </head> が無い HTML には差し込まない。= 画面は「隠す」(凍結)側のままになり、機能を出す側には倒れない。
   return html.includes('</head>') ? html.replace('</head>', `${tag}</head>`) : html;
 }
