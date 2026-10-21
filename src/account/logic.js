@@ -63,6 +63,12 @@ export function joinFailureView(status, json) {
   return { kind: 'error', message: apiErrorMessage(status, json) };
 }
 
+// 参加ページの「確認メールを再送」が失敗したときの扱い。401 は参加・プレビューと同じくログインの案内に落とす。
+export function resendFailureView(status, json) {
+  if (status === 401) return { needsLogin: true, message: joinFailureView(401, json).message };
+  return { needsLogin: false, message: apiErrorMessage(status, json) };
+}
+
 // ?token=… を取り出す。無い・空なら null。
 export function tokenFromSearch(search) {
   const t = new URLSearchParams(String(search || '')).get('token');
