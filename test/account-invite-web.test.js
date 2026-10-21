@@ -2,7 +2,7 @@
 // 招待の管理画面・参加ページ(S2.10)の純関数。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pageModeForPath, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView, resendFailureView, apiErrorMessage } from '../src/account/logic.js';
+import { pageModeForPath, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView, resendFailureView, apiErrorMessage, SESSION_EXPIRED_MESSAGE } from '../src/account/logic.js';
 
 test('pageModeForPath: /join/:code は join', () => {
   assert.equal(pageModeForPath('/join/abc'), 'join');
@@ -61,4 +61,8 @@ test('resendFailureView: 再送が 401 ならログインの案内に落とし�
     assert.equal(v.needsLogin, false);
     assert.equal(v.message, apiErrorMessage(st, null));
   }
+});
+
+test('SESSION_EXPIRED_MESSAGE: ログイン切れの文言は固定', () => {
+  assert.equal(SESSION_EXPIRED_MESSAGE, 'ログインの有効期限が切れました。もう一度ログインしてください。');
 });

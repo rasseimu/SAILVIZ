@@ -63,7 +63,10 @@ export function joinFailureView(status, json) {
   return { kind: 'error', message: apiErrorMessage(status, json) };
 }
 
-// 参加ページの「確認メールを再送」が失敗したときの扱い。401 は参加・プレビュー・アカウントページと同じくログインの案内に落とす(文言は画面側で固定)。
+// ログイン切れ(401)でログイン表示に落とすときの文言(参加ページ・アカウントページ共通)。
+export const SESSION_EXPIRED_MESSAGE = 'ログインの有効期限が切れました。もう一度ログインしてください。';
+
+// 参加ページ・アカウントページの「確認メールを再送」が失敗したときの扱い。401 は参加・プレビュー・アカウントページと同じくログインの案内に落とす(文言は SESSION_EXPIRED_MESSAGE)。
 export function resendFailureView(status, json) {
   if (status === 401) return { needsLogin: true };
   return { needsLogin: false, message: apiErrorMessage(status, json) };

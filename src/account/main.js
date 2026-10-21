@@ -4,7 +4,7 @@
 // 確認・再設定のトークンは読んだらすぐ URL から消し(history.replaceState)、ログや外部へ出さない。
 import {
   pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm, membersView,
-  soleAdminOrgs, unloadedAdminOrgs, frozenSuccessionNotices, isOrgAdmin, unloadedNotice, displayName, buildDeleteBody, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView, resendFailureView, accountExtrasFromMeta,
+  soleAdminOrgs, unloadedAdminOrgs, frozenSuccessionNotices, isOrgAdmin, unloadedNotice, displayName, buildDeleteBody, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView, resendFailureView, accountExtrasFromMeta, SESSION_EXPIRED_MESSAGE,
 } from './logic.js';
 
 // 凍結した入口(名簿・招待の期限と回数・後任の選択)。サーバが meta を差し込んだときだけ出す(FZ1。FEATURE_ACCOUNT_EXTRAS=1)。
@@ -505,7 +505,7 @@ function invitesCard(orgId) {
 // アカウントページで 401 になったとき: 未ログイン表示に落とす(参加ページの dropToJoinLogin と同じ文言)。
 function dropToAccountLogin() {
   me = null; renderNav(); renderLoggedOut('login');
-  setMsg('ログインの有効期限が切れました。もう一度ログインしてください。', 'error');
+  setMsg(SESSION_EXPIRED_MESSAGE, 'error');
 }
 
 // ---- 参加ページ /join/:code(`/?invite=<code>` はサーバが 302 でここへ寄せる。S2.10) ----
@@ -515,7 +515,7 @@ function joinCard(...kids) { return h('section', { class: 'ac-card', 'data-join-
 // ログイン切れ(401)のとき: 未ログイン表示に落として、ログインを促す(ログイン後は URL のまま参加ページを描き直す)。
 function dropToJoinLogin() {
   me = null; renderNav(); renderJoinLoggedOut('login');
-  setMsg('ログインの有効期限が切れました。もう一度ログインしてください。', 'error');
+  setMsg(SESSION_EXPIRED_MESSAGE, 'error');
 }
 
 function renderJoinLoggedOut(tab) {
