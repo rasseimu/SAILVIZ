@@ -2,7 +2,7 @@
 // 招待の管理画面・参加ページ(S2.10)の純関数。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pageModeForPath, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView, resendFailureView } from '../src/account/logic.js';
+import { pageModeForPath, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView, resendFailureView, apiErrorMessage } from '../src/account/logic.js';
 
 test('pageModeForPath: /join/:code は join', () => {
   assert.equal(pageModeForPath('/join/abc'), 'join');
@@ -53,10 +53,12 @@ test('joinFailureView: 参加できなかったときの表示(404/403/410/401/�
 });
 
 test('resendFailureView: 再送が 401 ならログインの案内に落とし、それ以外はそのままエラー表示', () => {
-  assert.equal(resendFailureView(401, null).needsLogin, true);
+  const v401 = resendFailureView(401, null);
+  assert.equal(v401.needsLogin, true);
+  assert.equal('message' in v401, false); // 401 の文言は画面側(ログイン切れの案内)で固定。使われない message は返さない
   for (const st of [429, 500, 0]) {
     const v = resendFailureView(st, null);
     assert.equal(v.needsLogin, false);
-    assert.ok(v.message);
+    assert.equal(v.message, apiErrorMessage(st, null));
   }
 });

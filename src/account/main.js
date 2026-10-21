@@ -246,7 +246,11 @@ function profileCard() {
     resend.addEventListener('click', () => submitting(resend, async () => {
       const r = await api('POST', '/api/auth/verify-email/resend', {});
       if (r.status === 200) setMsg('確認メールを送りました。届いたリンクを開いてください。', 'ok');
-      else setMsg(apiErrorMessage(r.status, r.json), 'error');
+      else {
+        const rv = resendFailureView(r.status, r.json);
+        if (rv.needsLogin) return dropToAccountLogin();
+        setMsg(rv.message, 'error');
+      }
     }));
     actions.unshift(resend);
   }
@@ -496,6 +500,12 @@ function invitesCard(orgId) {
   card.append(form, created, h('h3', {}, '有効な招待リンク'), list);
   refresh();
   return card;
+}
+
+// アカウントページで 401 になったとき: 未ログイン表示に落とす(参加ページの dropToJoinLogin と同じ文言)。
+function dropToAccountLogin() {
+  me = null; renderNav(); renderLoggedOut('login');
+  setMsg('ログインの有効期限が切れました。もう一度ログインしてください。', 'error');
 }
 
 // ---- 参加ページ /join/:code(`/?invite=<code>` はサーバが 302 でここへ寄せる。S2.10) ----
