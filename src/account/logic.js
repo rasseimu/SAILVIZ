@@ -63,9 +63,9 @@ export function joinFailureView(status, json) {
   return { kind: 'error', message: apiErrorMessage(status, json) };
 }
 
-// 参加ページの「確認メールを再送」が失敗したときの扱い。401 は参加・プレビューと同じくログインの案内に落とす。
+// 参加ページの「確認メールを再送」が失敗したときの扱い。401 は参加・プレビュー・アカウントページと同じくログインの案内に落とす(文言は画面側で固定)。
 export function resendFailureView(status, json) {
-  if (status === 401) return { needsLogin: true, message: joinFailureView(401, json).message };
+  if (status === 401) return { needsLogin: true };
   return { needsLogin: false, message: apiErrorMessage(status, json) };
 }
 
@@ -96,7 +96,7 @@ export function membersView(status, json) {
 
 // 退会(S2.12): 自分が唯一の管理者の組織と、後任にできるメンバー(自分以外)を出す。
 // orgs は GET /api/me の orgs[](isAdmin)、membersByOrg は GET /api/orgs/:orgId/members の応答(組織ID → 配列)。
-// メンバー一覧が取れていない組織は含めない(その場合もサーバが自動で引き継ぐ: H25)。
+// メンバー一覧が取れていない組織は含めない(唯一の管理者ならサーバが自動で引き継ぐ。他にメンバーがいなければ管理者不在: H25)。
 export function soleAdminOrgs(myUserId, orgs, membersByOrg) {
   const out = [];
   for (const o of Array.isArray(orgs) ? orgs : []) {
