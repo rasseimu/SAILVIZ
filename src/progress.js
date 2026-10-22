@@ -237,7 +237,7 @@ export function createProgress({
       : `<div class="goal-cards">${goalsHtml || '<p>(目標なし)</p>'}</div>`;
 
     const loadingBanner = entriesLoading
-      ? '<div class="pq-loading">練習データを集計中…</div>' : '';
+      ? '<div class="pq-loading"><span class="pq-spinner"></span>練習データを集計中…</div>' : '';
     content.innerHTML =
       loadingBanner
       + `<section class="progress-section pq-goals"><div class="pq-goals-head"><h3>目標の変化</h3>${goalToggle}</div>${goalBody}</section>`
@@ -583,6 +583,8 @@ export function createProgress({
   async function render() {
     // 1st pass: 軽量オーバーレイ(進捗・ロードマップ)を先に取得し、骨組みを即描画。
     // 保存済み全練習の読込(重い)を待たずにロードマップ枠が見えるようにする。
+    const content = $('progress-content');
+    if (content) content.innerHTML = '<div class="pq-loading pq-loading-full"><span class="pq-spinner"></span>読み込み中…</div>';
     progress = await loadProgressData();
     roadmapData = await loadRoadmapData();
     reflections = [];
