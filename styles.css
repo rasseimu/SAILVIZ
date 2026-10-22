@@ -752,7 +752,7 @@ body.view-roadmap #transport { display: none; }
 
 #progress-nav { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; border-bottom: 1px solid #eee; overflow-x: auto; }
 /* 十字4分割: 左上=目標 右上=課題 左下=発見 右下=推移。各象限は独立スクロール。 */
-#progress-content { flex: 1; overflow: hidden; padding: 16px; display: grid;
+#progress-content { flex: 1; overflow: hidden; padding: 16px; display: grid; position: relative;
   grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 16px; }
 .progress-section { min-width: 0; min-height: 0; display: flex; flex-direction: column;
   border: 1px solid #e5e5e5; border-radius: 8px; padding: 10px 12px; overflow: hidden; }
@@ -783,7 +783,14 @@ body.view-roadmap #transport { display: none; }
 .pq-rm-child { font-size: 12px; color: #666; padding: 1px 0; }
 .pq-rm-child-done { color: #3aa657; text-decoration: line-through; }
 /* 練習集計中バナー(ロードマップ枠を先に描画する間) */
-.pq-loading { grid-column: 1 / -1; font-size: 12px; color: #888; padding: 2px 4px; }
+/* グリッドの行を奪わないよう絶対配置で上部パディングに重ねる */
+.pq-loading { position: absolute; top: 0; left: 16px; font-size: 12px; color: #888;
+  display: flex; align-items: center; gap: 6px; }
+.pq-loading-full { inset: 0; justify-content: center; font-size: 14px; }
+.pq-spinner { width: 14px; height: 14px; border: 2px solid #ddd; border-top-color: #4a90d9;
+  border-radius: 50%; animation: pq-spin 0.8s linear infinite; flex: none; }
+.pq-loading-full .pq-spinner { width: 22px; height: 22px; border-width: 3px; }
+@keyframes pq-spin { to { transform: rotate(360deg); } }
 /* 目標(左上): カードを横スクロール */
 .pq-goals .goal-cards { flex: 1; display: flex; gap: 10px; overflow-x: auto; overflow-y: hidden;
   align-items: stretch; padding-bottom: 4px; }
