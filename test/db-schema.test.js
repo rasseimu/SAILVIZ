@@ -35,11 +35,23 @@ test('001_data で Phase 1 の全データ表が作られる', { skip: skipMsg }
   db.close();
 });
 
-test('practice_days.legacy_name は UNIQUE', { skip: skipMsg }, () => {
+test('005: practice_days.legacy_name は重複できる・既存行と列は保たれる', { skip: skipMsg }, () => {
   const db = openDb(':memory:');
-  migrate(db, loadMigrations(MIG_DIR), 1000);
-  const ins = db.prepare('INSERT INTO practice_days (id, date, legacy_name, rev) VALUES (?, ?, ?, 0)');
-  ins.run('pd_1', '2026-09-03', 'a.sailviz.json');
-  assert.throws(() => ins.run('pd_2', '2026-09-03', 'a.sailviz.json'), /UNIQUE/);
+  const all = loadMigrations(MIG_DIR);
+  migrate(db, all.filter((m) => m.version <= 4), 1000);
+  db.prepare(
+    `INSERT INTO practice_days (id, org_id, owner_user_id, date, legacy_name, web_state, saved_at, rev, created_at, updated_at)
+     VALUES ('pd_1', 'org_1', NULL, '2026-09-03', 'a.sailviz.json', '{"mode":"x"}', '2026-09-03T10:00:00Z', 3, 111, 222)`,
+  ).run();
+  const before = db.prepare('SELECT * FROM practice_days WHERE id = ?').get('pd_1');
+  migrate(db, all.filter((m) => m.version === 5), 2000);
+  // 同じ legacy_name の 2 行目を入れられる
+  db.prepare("INSERT INTO practice_days (id, date, legacy_name, rev) VALUES ('pd_2', '2026-09-03', 'a.sailviz.json', 0)").run();
+  // 既存行は全列そのまま
+  assert.deepEqual(db.prepare('SELECT * FROM practice_days WHERE id = ?').get('pd_1'), before);
+  // 一意でない索引が付く
+  const idx = db.prepare('PRAGMA index_list(practice_days)').all().find((i) => i.name === 'idx_practice_days_legacy_name');
+  assert.ok(idx);
+  assert.equal(idx.unique, 0);
   db.close();
 });
