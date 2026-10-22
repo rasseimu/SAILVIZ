@@ -6,12 +6,32 @@
 //   { orgId, tracks:[{kind,visibility,ownerId,crewIds}], reflections:[{id,visibility,ownerId}] }
 //   tracks / reflections は assembleProject が組み立てる旧 JSON の配列と同じ順(インデックスが対応する)。
 import {
-  canRead, canWrite, canComment, canUpdateProgress, isMemberOfOrg, canSeeDayContainer,
+  canRead as policyCanRead, canWrite as policyCanWrite, canComment as policyCanComment,
+  canUpdateProgress as policyCanUpdateProgress, isMemberOfOrg as policyIsMemberOfOrg, activeOrgOf,
 } from './policy.js';
 
-// 互換 API で書けるのは「組織設定済みで書込権限のある共有ログイン」だけ。
-// ログインユーザー(Bearer)は互換 API では読み取り専用(書き込みは新 API で行う)。
-export const isCompatWriter = (s) => !!s && s.kind === 'legacy' && s.shared === true && s.canWrite === true && s.orgId != null;
+// 互換 API で書けるのは「組織設定済みで書込権限のある共有ログイン」と
+// 「表示中の組織があるログインユーザー」(設計書 §5.4。所属外ヘッダーの orgForbidden は除く)。
+export const isCompatWriter = (s) => !!s && (
+  (s.kind === 'legacy' && s.shared === true && s.canWrite === true && s.orgId != null)
+  || (s.kind === 'user' && s.activeOrgId != null && !s.orgForbidden));
+
+// 対象の組織が主体の表示中の組織か(設計書 §5.3・§5.4)。
+//   user:   表示中の組織の対象だけ(他組織の public も含めて外は読み書きしない)。表示中の組織が無ければ何も無い。
+//   それ以外(共有ログイン・未ログイン): 常に真(今の動きを保つ)。
+export const inScope = (subject, orgId) => {
+  if (!subject || subject.kind !== 'user') return true;
+  const active = activeOrgOf(subject);
+  return active != null && orgId === active;
+};
+
+// 以下の判定は、表示中の組織の外の対象を「読めない」として扱う(読み取りでは出さず、書き込みでは既存のまま残す)。
+const canRead = (s, t) => !!t && inScope(s, t.orgId) && policyCanRead(s, t);
+const canWrite = (s, t) => !!t && inScope(s, t.orgId) && policyCanWrite(s, t);
+const canComment = (s, t) => !!t && inScope(s, t.orgId) && policyCanComment(s, t);
+const canUpdateProgress = (s, t) => !!t && inScope(s, t.orgId) && policyCanUpdateProgress(s, t);
+const isMemberOfOrg = (s, orgId) => inScope(s, orgId) && policyIsMemberOfOrg(s, orgId);
+const canSeeDayContainer = (s, items) => (items || []).some((t) => canRead(s, t));
 
 export const sessionTarget = (t, orgId) => ({
   kind: t.kind === 'race' ? 'race' : 'session',
