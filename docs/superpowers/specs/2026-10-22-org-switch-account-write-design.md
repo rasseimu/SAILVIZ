@@ -51,7 +51,8 @@ staging(`sailviz-sit-staging`、`STORAGE=db`)で、アカウントでログイ�
 
 ### 5.2 サーバーに表示中の組織を伝える
 
-- Web は、旧 API への全リクエストに表示中の組織の ID を付ける。付け方はリクエストヘッダー(例: `X-Sailviz-Org`)。名前は実装者が決めてよい。
+- Web は、API への全リクエストに表示中の組織の ID をヘッダー **`X-Sailviz-Org: <組織ID>`** で付ける。sailviz-field(Flutter アプリ)も同じヘッダーを使うので、名前は固定。
+- サーバーは、旧 API だけでなく、今後作る新 API(`/api/practice-days`・`/api/me/reflections` など、設計書 v2 の API)でも、組織で絞る処理にはこのヘッダーを使う(§5.10)。
 - サーバーは、アカウントでログインした主体(`user`)について、その ID が本人の所属組織か確かめる。所属していなければ 403。
 - ヘッダーが無いときは、所属組織の先頭(`/api/me` の `orgs[0]` と同じ順)を表示中の組織とみなす。
 - 共有の書き込みトークン・閲覧ゲートの主体(`legacy`)は、ヘッダーを無視する。今までどおり `MIGRATION_ORG_ID` の組織に限る。
@@ -90,13 +91,20 @@ staging(`sailviz-sit-staging`、`STORAGE=db`)で、アカウントでログイ�
   - 書き換えは組織メンバー全員ができる(§5.4)ので、所有者が空でも困らない。
   - 「誰が書いたか」を残したくなったら、別のカラムを足す別の作業にする。
 
-### 5.5.1 練習の名前が他の組織とぶつかったとき(設計者の判断)
+### 5.5.1 練習は ID で見分ける。名前は重複してよい
 
-- 練習の名前(`practice_days.legacy_name`)は、サーバー全体で一意。Web は `GET /api/projects` の一覧を見て、新しい名前を `uniqueProjectName`(`src/projectfs.js`)で決めている。
-- 一覧を表示中の組織だけに絞ると、他の組織にある同じ名前を避けられない。
-- **サーバー側:** 新規保存の PUT の名前が他の組織の器と同じなら、`409`(例: `{ error: 'name_taken' }`)を返す。他の組織の器であることは伝えない。
-- **Web 側:** 409 を受けたら、その名前を「使用中」に加えて `uniqueProjectName` で名前を付け直し、もう一度保存する(数回まで)。
-- 一覧には他の組織の名前を出さない(§5.3 を守る)。名前は日時から作るので、衝突はまれ。
+利用者の決定: **練習の名前は重複可能にして、練習 ID で見分ける。**
+
+- 練習 ID は `practice_days.id`(`pd_…`)。サーバーが付ける。
+- 名前(`practice_days.legacy_name`、今は `sailviz-YYYYMMDD-HHMM.sailviz.json` の形)は表示用になる。同じ組織の中でも重複してよい。`001_data.sql` の `legacy_name TEXT UNIQUE` を外すマイグレーションを足す(SQLite は制約を外すのに表の作り直しが要る)。
+- 旧 API の形を次のように変える(Web をあわせて直す)。
+  - `GET /api/projects`・`GET /api/summaries`: 要素に `id` を足す。`name`・`label` は今までどおり。
+  - `GET/PUT/DELETE /api/projects/:id`: パスは名前ではなく練習 ID。
+  - 新しい練習は `POST /api/projects`(本文は練習の JSON)で作り、`{ id }` を返す。作成先は表示中の組織。
+  - 議事録取込み(`/api/minutes-imports/commit`)・センサー取込みなど、練習を名前で指していた所も ID にする。
+- ファイル版(`STORAGE=file`、本番)では、ファイル名をそのまま ID として返す(`id === name`)。ファイル版の動きは変えない。
+- 取込み(`importFromFiles`)が同じファイルを二重に入れないための突き合わせ(`legacy_name`)は残す。
+- sailviz-field の最新版(`origin/main`)は旧 API を使っていないので、この変更の影響を受けない。
 
 ### 5.6 全体目標とロードマップを組織ごとにする
 
@@ -122,9 +130,19 @@ staging(`sailviz-sit-staging`、`STORAGE=db`)で、アカウントでログイ�
 
 - 組織の概念が無いので、今のまま(本番 `sailviz-sit` はファイル版で動いている)。ヘッダーは無視する。
 
+### 5.10 新 API と sailviz-field
+
+- sailviz-field(`/Users/reimurase/Documents/sailviz-field`)は設計書 v2 の新 API を使う。練習は `practiceDayId` で見分けている。新 API はサーバーにまだ無い(移行計画 Phase 3〜5)。
+- sailviz-field にも、表示中の組織を選ぶ仕組みを入れる(別の指示で sailviz-field 側で作業する)。所属が 1 つなら選ばせず、選んだ組織を覚え、全リクエストに `X-Sailviz-Org` を付ける。
+- サーバーが新 API を作るときの約束:
+  - 組織で絞る読み取り(例: `GET /api/practice-days?scope=org`)は、表示中の組織だけを返す。
+  - 練習日を探す・作る処理(例: `PUT /api/me/reflections/:id` が練習日から器を決める)は、表示中の組織の中で探し、無ければ表示中の組織に作る。
+  - ヘッダーが無ければ所属組織の先頭、所属していない組織なら 403(§5.2 と同じ)。
+  - 自分のもの(`scope=mine`、自分の声の反省など)は組織で絞らない。
+
 ## 6. 実装者に任せること
 
-- ヘッダー名、`localStorage` のキー名。
+- `localStorage` のキー名。
 - 組織管理画面のボタンの見た目と配置。表示中の組織であることの示し方。
 - ホーム画面などに「今どの組織を表示しているか」を出すかどうか。出すなら組織管理へのリンクにする。
 - 主体の表し方(`user` に `activeOrgId` を足すか、新しい種類の主体にするか)。ただし `policy.js` は純関数のまま保つ。
@@ -139,3 +157,4 @@ staging(`sailviz-sit-staging`、`STORAGE=db`)で、アカウントでログイ�
 - 1 組織だけのアカウントには切り替えボタンが出ず、保存できる。
 - 書き込みトークンでの読み書きが今までどおり動く(既存の互換 API のテストが通る)。
 - 所属していない組織の ID をヘッダーに付けると 403 になる。
+- 2 つの組織に同じ名前の練習があっても、それぞれ ID で開け、保存しても他方が変わらない。
