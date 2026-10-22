@@ -37,7 +37,7 @@ test('STORAGE 未指定は file 版リポジトリ(db は null)', { skip: skipMs
   const dataDir = await mkdtemp(join(tmpdir(), 'sailviz-openrepo-'));
   const { repo, db } = openRepo({ dataDir });
   assert.equal(db, null);
-  await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj);
+  await repo.createProject(baseProj, { name: 'sailviz-20260901-0900.sailviz.json' });
   const files = await readdir(join(dataDir, 'projects'));
   assert.ok(files.includes('sailviz-20260901-0900.sailviz.json'), 'file written');
   await rm(dataDir, { recursive: true, force: true });
