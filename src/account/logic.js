@@ -218,3 +218,23 @@ const cell = (v) => (v == null ? '' : /[",\t\n]/.test(v) ? `"${String(v).replace
 export function rosterToText(rows) {
   return (rows || []).map((r) => [r.name, r.email, r.legacyName].map(cell).join(',')).join('\n');
 }
+
+// ---- 組織管理(/account#org) ----
+
+// 表示する組織。preferredId が所属組織にあればそれ、無ければ先頭(GET /api/me の orgs は紐付いた順)。所属なしは null。
+export function pickOrg(orgs, preferredId) {
+  const list = (Array.isArray(orgs) ? orgs : []).filter((o) => o && o.id);
+  return list.find((o) => o.id === preferredId) || list[0] || null;
+}
+
+export function orgRoleLabel(isAdmin) {
+  return isAdmin === true ? '管理者' : 'メンバー';
+}
+
+// メールアドレス変更フォームの送信前チェック(最終判断はサーバ: PATCH /api/me)。
+export function checkEmailChange(current, next) {
+  const v = String(next || '').trim();
+  if (!looksLikeEmail(v)) return bad('メールアドレスの形式が正しくありません');
+  if (v.toLowerCase() === String(current || '').trim().toLowerCase()) return bad('今と同じメールアドレスです');
+  return { ok: true, email: v };
+}

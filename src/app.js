@@ -41,6 +41,9 @@ import {
 } from './daysummaryflow.js';
 import { renderDaySummaryHtml } from './daysummaryview.js';
 import { isDaySummaryShape } from './daysummaryschema.js';
+import {
+  teamGoalOf, setTeamGoal, latestPractice, recentPracticeHtml, memberGoalsHtml, guideHtml,
+} from './homeview.js';
 
 // トラック自動割当＆色変更メニューの共通パレット(識別しやすい12色)。
 const PALETTE = [
@@ -635,12 +638,91 @@ $('ds-modal').addEventListener('click', async (e) => {
     { loadPractice, showTrack, setVmgOn, openReflectionEditor });
 });
 
-// ================= ホーム画面(カード型ランチャー) =================
+// ================= ホーム(直近の練習・全体目標・使い方ガイド) =================
+// 直近の練習は /api/summaries の要約から選ぶ(本体は読まない)。全体目標は roadmap オーバーレイの予約キー(homeview.js)。
+
+let topRecent = null; // ホームに出している直近の練習(要約)
+
+async function renderTop() {
+  $('top-guide').innerHTML = guideHtml();
+  const recentEl = $('top-recent');
+  try {
+    topRecent = latestPractice(await store.listSummaries());
+    recentEl.innerHTML = recentPracticeHtml(topRecent);
+  } catch (e) {
+    topRecent = null;
+    recentEl.innerHTML = `<p class="hs-note">練習一覧の取得に失敗しました: ${escapeHtml(e.message)}</p>`;
+  }
+  await renderTopGoals();
+}
+
+async function renderTopGoals() {
+  const textEl = $('top-goal-text');
+  let rm;
+  try { rm = await store.readRoadmap(); } catch (e) {
+    textEl.textContent = `目標の取得に失敗しました: ${e.message}`;
+    textEl.classList.add('is-empty');
+    $('top-member-goals').innerHTML = '';
+    return;
+  }
+  const goal = teamGoalOf(rm);
+  textEl.textContent = goal || 'まだ全体目標がありません。「編集」から部の目標を書きましょう。';
+  textEl.classList.toggle('is-empty', !goal);
+  $('top-member-goals').innerHTML = memberGoalsHtml(rm, memberList());
+}
+
+function setTopGoalEditing(on) {
+  $('top-goal-form').hidden = !on;
+  $('top-goal-text').hidden = on;
+  $('top-goal-edit').hidden = on;
+  $('top-goal-status').hidden = true;
+}
+
+$('top-goal-edit').addEventListener('click', async () => {
+  let rm = {};
+  try { rm = await store.readRoadmap(); } catch { /* 空から書き始める */ }
+  $('top-goal-input').value = teamGoalOf(rm);
+  setTopGoalEditing(true);
+  $('top-goal-input').focus();
+});
+$('top-goal-cancel').addEventListener('click', () => setTopGoalEditing(false));
+$('top-goal-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('top-goal-save');
+  btn.disabled = true;
+  try {
+    // 保存直前に読み直して、部員のロードマップ(別画面での変更)を上書きしない
+    const rm = await store.readRoadmap();
+    await store.writeRoadmap(setTeamGoal(rm, $('top-goal-input').value));
+    setTopGoalEditing(false);
+    await renderTopGoals();
+  } catch (err) {
+    const st = $('top-goal-status');
+    st.textContent = `保存に失敗しました: ${err.message}`;
+    st.hidden = false;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('top-screen').addEventListener('click', (e) => {
+  const nav = e.target.closest('[data-home-nav]');
+  if (nav) { NAV_ACTIONS[nav.dataset.homeNav]?.(); return; }
+  const btn = e.target.closest('[data-home-action]');
+  if (!btn) return;
+  const action = btn.dataset.homeAction;
+  if (action === 'practices') showHome();
+  else if (action === 'open' && topRecent) openPractice(topRecent.name);
+  else if (action === 'summary' && topRecent?.daySummary) openDaySummary(topRecent.daySummary, { fromHomeName: topRecent.name });
+});
+
+// ================= 練習データ(カード型ランチャー) =================
 
 // 画面(view)は body の view-* クラスで排他切替。遷移時は必ず全 view を外してから付与する。
-const ALL_VIEWS = ['view-landing', 'view-home', 'view-dashboard', 'view-progress', 'view-roadmap'];
+const ALL_VIEWS = ['view-landing', 'view-top', 'view-home', 'view-dashboard', 'view-progress', 'view-roadmap'];
 function clearViews() { for (const c of ALL_VIEWS) document.body.classList.remove(c); }
 function showLanding() { clearViews(); document.body.classList.add('view-landing'); setActiveNav(null); }
+function showTop() { clearViews(); document.body.classList.add('view-top'); setActiveNav('top'); renderTop(); }
 function showHome() { clearViews(); document.body.classList.add('view-home'); setActiveNav('home'); renderHome(); }
 async function showDashboard() {
   clearViews();
@@ -1036,8 +1118,8 @@ const NOTICE_KEY = 'sailviz.noticeDismissed.v1';
   });
 })();
 
-// ログイン後にアプリ本体(練習データ)へ入る。
-function enterApp() { showHome(); }
+// ログイン後はホームから入る。
+function enterApp() { showTop(); }
 
 // 起動時: 編集認証・動画フォルダ復元のあと、閲覧セッションを確認して
 // ログイン済ならアプリ、未ログインならランディング(公開LP)を表示。
@@ -1059,11 +1141,12 @@ async function doLogout() {
   showLanding();
 }
 const NAV_ACTIONS = {
+  top: showTop,
   home: showHome,
   dashboard: showDashboard,
   progress: showProgress,
 };
-// 現在地をサイドバーでハイライト。home/dashboard/progress のみ対象。
+// 現在地をサイドバーでハイライト。top/home/dashboard/progress のみ対象。
 const sbItems = [...document.querySelectorAll('.sb-item')];
 function setActiveNav(view) {
   for (const el of sbItems) el.classList.toggle('active', el.dataset.nav === view);
@@ -1151,7 +1234,8 @@ $('landing-screen').addEventListener('click', (e) => {
   else if (e.target.closest('#landing-register, [data-lp-register]')) openContact();
 });
 
-$('app-title').addEventListener('click', showHome); // タイトルクリックでホームへ
+$('app-title').addEventListener('click', showTop); // タイトルクリックでホームへ
+$('sb-home-logo').addEventListener('click', showTop); // サイドバーのアイコンでホームへ
 // ロードマップ編集への導線は進捗画面のロードマップ表示の下に集約(onEditRoadmap)。
 $('roadmap-home-link').addEventListener('click', showProgress);
 $('home-new').addEventListener('click', startNewPractice);

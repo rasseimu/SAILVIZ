@@ -66,3 +66,28 @@ test('resendFailureView: 再送が 401 ならログインの案内に落とし�
 test('SESSION_EXPIRED_MESSAGE: ログイン切れの文言は固定', () => {
   assert.equal(SESSION_EXPIRED_MESSAGE, 'ログインの有効期限が切れました。もう一度ログインしてください。');
 });
+
+test('pickOrg: 選んだ組織があればそれ、無ければ先頭、所属なしは null', async () => {
+  const { pickOrg } = await import('../src/account/logic.js');
+  const orgs = [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }];
+  assert.equal(pickOrg(orgs, 'b').id, 'b');
+  assert.equal(pickOrg(orgs, 'zzz').id, 'a');
+  assert.equal(pickOrg(orgs, null).id, 'a');
+  assert.equal(pickOrg([], 'a'), null);
+  assert.equal(pickOrg(undefined, 'a'), null);
+});
+
+test('orgRoleLabel: 管理者かメンバー', async () => {
+  const { orgRoleLabel } = await import('../src/account/logic.js');
+  assert.equal(orgRoleLabel(true), '管理者');
+  assert.equal(orgRoleLabel(false), 'メンバー');
+  assert.equal(orgRoleLabel(undefined), 'メンバー');
+});
+
+test('checkEmailChange: 形式と「今と同じ」を送信前に弾く', async () => {
+  const { checkEmailChange } = await import('../src/account/logic.js');
+  assert.deepEqual(checkEmailChange('a@example.com', ' b@example.com '), { ok: true, email: 'b@example.com' });
+  assert.equal(checkEmailChange('a@example.com', 'A@Example.com').ok, false);
+  assert.equal(checkEmailChange('a@example.com', 'not-an-email').ok, false);
+  assert.equal(checkEmailChange('a@example.com', '').ok, false);
+});

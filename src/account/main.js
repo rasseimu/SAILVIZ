@@ -1,10 +1,11 @@
 // src/account/main.js
-// アカウント画面(S2.7)。/account(登録・ログイン・組織作成・名簿)、/verify-email、/reset-password を1ファイルで描く。
+// アカウント画面(S2.7)。/account(登録・ログイン・組織作成・名簿・組織管理 #org)、/verify-email、/reset-password を1ファイルで描く。
 // API は設計書 v2 §10.2・§10.3 のものだけを使う。ログインのセッションは HttpOnly Cookie(same-origin)。
 // 確認・再設定のトークンは読んだらすぐ URL から消し(history.replaceState)、ログや外部へ出さない。
 import {
   pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm, membersView,
   soleAdminOrgs, unloadedAdminOrgs, frozenSuccessionNotices, isOrgAdmin, unloadedNotice, displayName, buildDeleteBody, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView, resendFailureView, accountExtrasFromMeta, SESSION_EXPIRED_MESSAGE,
+  pickOrg, orgRoleLabel, checkEmailChange,
 } from './logic.js';
 
 // 凍結した入口(名簿・招待の期限と回数・後任の選択)。サーバが meta を差し込んだときだけ出す(FZ1。FEATURE_ACCOUNT_EXTRAS=1)。
@@ -74,7 +75,8 @@ function renderNav() {
   nav.replaceChildren();
   if (me) {
     nav.append(h('a', { href: '/account' }, 'アカウント'));
-    if (me.org) nav.append(h('a', { href: '/account#roster' }, EXTRAS ? '名簿' : '組織'));
+    nav.append(h('a', { href: '/account#org' }, '組織管理'));
+    if (me.org && EXTRAS) nav.append(h('a', { href: '/account#roster' }, '名簿'));
   }
   nav.append(h('a', { href: '/' }, 'SailViz へ'));
 }
@@ -154,6 +156,15 @@ function renderLoggedOut(tab) {
   else if (tab === 'forgot') body = forgotForm();
   else body = loginForm();
   mount(h('section', { class: 'ac-card' }, h('h1', {}, 'SailViz アカウント'), tabs, body));
+}
+
+// 組織管理(#org)を未ログインで開いたとき: ログインのあと組織管理へ戻す。
+function renderOrgLoggedOut() {
+  const toOrg = async () => { history.replaceState(null, '', '/account#org'); await render(); };
+  mount(h('section', { class: 'ac-card' }, h('h1', {}, '組織管理'),
+    h('p', { id: 'ac-orgadmin-login-note', class: 'ac-note' }, '組織管理には個人アカウント(メールアドレス)でのログインが必要です。アカウントがない場合は「新規登録」から作成してください。'),
+    loginForm(toOrg),
+    h('p', {}, h('a', { href: '/account#register' }, '新規登録'), ' ・ ', h('a', { href: '/account#forgot' }, 'パスワードを忘れた'))));
 }
 
 // ログイン・登録のあとの動作。既定は /account へ。参加ページ(/join/:code)では URL を変えずに描き直して戻る。
@@ -263,12 +274,20 @@ function orgCard() {
   if (me.org) {
     return h('section', { class: 'ac-card' }, h('h2', {}, '組織'),
       h('p', {}, h('span', { id: 'ac-org-current' }, me.org.name)),
-      h('a', { id: 'ac-open-roster', class: 'ac-btn', href: '/account#roster' }, EXTRAS ? '名簿を開く' : '組織を開く'));
+      h('a', { id: 'ac-open-roster', class: 'ac-btn', href: EXTRAS ? '/account#roster' : '/account#org' }, EXTRAS ? '名簿を開く' : '組織管理を開く'));
   }
   if (me.emailVerified !== true) {
     return h('section', { class: 'ac-card' }, h('h2', {}, '組織'),
       h('p', { class: 'ac-note' }, '組織を作るには、先にメールアドレスの確認が必要です。'));
   }
+  return h('section', { class: 'ac-card' }, h('h2', {}, '組織を作る'), createOrgForm(async () => {
+    history.replaceState(null, '', EXTRAS ? '/account#roster' : '/account#org');
+    await render();
+  }));
+}
+
+// 組織の作成フォーム(POST /api/orgs)。after(作成した組織)は作成できたあとの動作。
+function createOrgForm(after) {
   const name = h('input', { id: 'ac-org-name', type: 'text', required: true, maxlength: '100' });
   const btn = h('button', { id: 'ac-org-submit', class: 'ac-btn', type: 'submit' }, '組織を作成');
   const form = h('form', { class: 'ac-form', novalidate: true },
@@ -279,12 +298,12 @@ function orgCard() {
     submitting(btn, async () => {
       if (!name.value.trim()) return setMsg('組織の名前を入力してください', 'error');
       const r = await api('POST', '/api/orgs', { name: name.value });
+      if (r.status === 401) return dropToAccountLogin();
       if (r.status !== 201) return setMsg(apiErrorMessage(r.status, r.json), 'error');
-      history.replaceState(null, '', '/account#roster');
-      await render();
+      await after(r.json.org);
     });
   });
-  return h('section', { class: 'ac-card' }, h('h2', {}, '組織を作る'), form);
+  return form;
 }
 
 // ---- 退会(S2.12。設計書 v2 §4.3・§10.2 DELETE /api/me) ----
@@ -372,6 +391,99 @@ async function renderOrgHome(orgId) {
   }
   main.append(h('section', { class: 'ac-card' }, h('h2', {}, `組織のメンバー(${mv.members.length} 人)`),
     mv.members.length ? h('ul', { id: 'ac-members', class: 'ac-list' }, ...mv.members.map((m) => h('li', {}, m.name))) : h('p', { class: 'ac-note' }, 'まだ紐付け済みのメンバーはいません。')));
+}
+
+// ---- 組織管理(#org): メールアドレスの変更・所属組織の切替とメンバー・招待リンク・組織の追加 ----
+let orgAdminSelected = null; // 表示中の組織 ID(ページ内の切替。再読込では先頭の組織に戻る)
+
+function emailCard() {
+  const verified = me.emailVerified === true;
+  const email = h('input', { id: 'ac-email-new', type: 'email', autocomplete: 'email', required: true });
+  const btn = h('button', { id: 'ac-email-submit', class: 'ac-btn', type: 'submit' }, '確認メールを送って変更');
+  const form = h('form', { class: 'ac-form', novalidate: true },
+    field('新しいメールアドレス', email),
+    h('p', { class: 'ac-note' }, '新しいアドレスに確認メールを送ります。リンクを開くまでは未確認の状態になり、名簿のメールで紐付いていた組織からは一時的に外れます(作成・招待で参加した組織はそのままです)。'),
+    btn);
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitting(btn, async () => {
+      const c = checkEmailChange(me.user.email, email.value);
+      if (!c.ok) return setMsg(c.message, 'error');
+      const r = await api('PATCH', '/api/me', { email: c.email });
+      if (r.status === 401) return dropToAccountLogin();
+      if (r.status !== 200) return setMsg(apiErrorMessage(r.status, r.json), 'error');
+      await loadMe();
+      await renderOrgAdmin();
+      setMsg(`メールアドレスを ${c.email} に変更しました。届いた確認メールのリンクを開いてください。`, 'ok');
+    });
+  });
+  return h('section', { id: 'ac-email-card', class: 'ac-card' }, h('h2', {}, 'メールアドレス'),
+    h('dl', { class: 'ac-dl' },
+      h('dt', {}, '現在'), h('dd', { id: 'ac-email-current' }, me.user.email),
+      h('dt', {}, '確認'), h('dd', {}, h('span', { class: 'ac-badge', 'data-ok': String(verified) }, verified ? '確認済み' : '未確認'))),
+    form);
+}
+
+function orgListCard(current) {
+  const orgs = me.orgs || [];
+  if (!orgs.length) {
+    return h('section', { id: 'ac-orgs-card', class: 'ac-card' }, h('h2', {}, '所属している組織'),
+      h('p', { id: 'ac-orgs-empty', class: 'ac-note' }, 'まだどの組織にも所属していません。下の「新しい組織を追加」から作るか、管理者から届いた招待リンクを開いてください。'));
+  }
+  return h('section', { id: 'ac-orgs-card', class: 'ac-card' }, h('h2', {}, `所属している組織(${orgs.length})`),
+    h('ul', { id: 'ac-orgs', class: 'ac-list ac-org-list' }, ...orgs.map((o) => {
+      const selected = current && o.id === current.id;
+      const btn = h('button', { class: 'ac-org-pick', type: 'button', 'aria-pressed': String(Boolean(selected)), 'data-org': o.id },
+        h('span', { class: 'ac-org-pick-name' }, o.name), h('span', { class: 'ac-badge', 'data-ok': String(o.isAdmin === true) }, orgRoleLabel(o.isAdmin)));
+      btn.addEventListener('click', () => { orgAdminSelected = o.id; renderOrgAdmin(); });
+      return h('li', {}, btn);
+    })));
+}
+
+async function orgDetailCards(org) {
+  const orgId = encodeURIComponent(org.id);
+  const title = h('h2', {}, `${org.name} のメンバー`);
+  const card = h('section', { id: 'ac-org-members-card', class: 'ac-card' }, title, h('p', { class: 'ac-note' }, '読み込み中…'));
+  const out = [card];
+  if (org.isAdmin === true) out.push(invitesCard(orgId));
+  else out.push(h('section', { class: 'ac-card' }, h('h2', {}, '招待リンク'), h('p', { class: 'ac-note' }, '招待リンクを発行できるのは、この組織の管理者だけです。')));
+  api('GET', `/api/orgs/${orgId}/members`).then((mr) => {
+    if (!card.isConnected) return;
+    if (mr.status === 401) return dropToAccountLogin();
+    const mv = membersView(mr.status, mr.json);
+    if (mv.kind === 'error') {
+      card.replaceChildren(title, h('p', { id: 'ac-members-error', class: 'ac-note', role: 'alert' }, mv.message));
+      return;
+    }
+    title.textContent = `${org.name} のメンバー(${mv.members.length} 人)`;
+    card.replaceChildren(title, mv.members.length
+      ? h('ul', { id: 'ac-members', class: 'ac-list' }, ...mv.members.map((m) => h('li', {}, displayName(m.name), m.isAdmin === true ? h('span', { class: 'ac-badge', 'data-ok': 'true' }, '管理者') : null)))
+      : h('p', { class: 'ac-note' }, 'まだ紐付け済みのメンバーはいません。'));
+  });
+  return out;
+}
+
+function addOrgCard() {
+  const card = h('section', { id: 'ac-add-org-card', class: 'ac-card' }, h('h2', {}, '新しい組織を追加'));
+  if (me.emailVerified !== true) {
+    card.append(h('p', { class: 'ac-note' }, '組織を作るには、先にメールアドレスの確認が必要です。'));
+    return card;
+  }
+  card.append(createOrgForm(async (org) => {
+    await loadMe();
+    orgAdminSelected = org?.id ?? null;
+    await renderOrgAdmin();
+    setMsg(`組織「${org?.name ?? ''}」を作成しました。招待リンクを発行してメンバーを招きましょう。`, 'ok');
+  }));
+  return card;
+}
+
+async function renderOrgAdmin() {
+  const org = pickOrg(me.orgs, orgAdminSelected);
+  orgAdminSelected = org ? org.id : null;
+  const head = h('section', { class: 'ac-card' }, h('h1', {}, '組織管理'),
+    h('p', { class: 'ac-note' }, `${displayName(me.user.name)} としてログイン中。`, h('a', { href: '/' }, 'SailViz に戻る')));
+  mount(head, emailCard(), orgListCard(org), ...(org ? await orgDetailCards(org) : []), addOrgCard());
 }
 
 // ---- 名簿 ----
@@ -591,8 +703,12 @@ async function render() {
   const r = await loadMe();
   renderNav();
   const hash = location.hash.replace('#', '');
-  if (me) return hash === 'roster' ? renderRoster() : renderAccount();
-  renderLoggedOut(['register', 'forgot'].includes(hash) ? hash : 'login');
+  if (me) {
+    if (hash === 'org') return renderOrgAdmin();
+    return hash === 'roster' ? renderRoster() : renderAccount();
+  }
+  if (hash === 'org') renderOrgLoggedOut();
+  else renderLoggedOut(['register', 'forgot'].includes(hash) ? hash : 'login');
   if (r.status === 503) setMsg(apiErrorMessage(503, r.json), 'error');
 }
 

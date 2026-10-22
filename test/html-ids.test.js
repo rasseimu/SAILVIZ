@@ -34,3 +34,14 @@ test('index.html に風速帯ノートのUI要素が存在する', () => {
     assert.ok(new RegExp(`id="${id}"`).test(html), `${id} が無い`);
   }
 });
+
+test('index.html にホームと組織管理への導線がある', () => {
+  const html = readFileSync(join(__dir, '..', 'index.html'), 'utf8');
+  for (const id of ['top-screen', 'top-recent', 'top-goal-text', 'top-goal-form', 'top-member-goals', 'top-guide', 'sb-home-logo', 'account-org']) {
+    assert.ok(new RegExp(`id="${id}"`).test(html), `${id} が無い`);
+  }
+  assert.ok(/data-nav="top"/.test(html), 'サイドバーのホームが無い');
+  // 組織管理はログアウトの上
+  assert.ok(html.indexOf('id="account-org"') < html.indexOf('id="account-logout"'), '組織管理がログアウトより下にある');
+  assert.ok(/id="account-org"[^>]*href="\/account#org"/.test(html), '組織管理のリンク先が違う');
+});
