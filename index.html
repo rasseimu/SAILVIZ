@@ -11,12 +11,15 @@
   <!-- 全画面共通のサイドバー(ログイン後のみ表示) -->
   <aside id="app-sidebar" aria-label="メインナビゲーション">
     <div class="sb-brand">
-      <img class="sb-logo" src="src/logo.png" alt="" />
-      <span class="sb-label sb-brand-name">SailViz</span>
+      <button id="sb-home-logo" type="button" class="sb-home-logo" title="ホームへ" aria-label="ホームへ">
+        <img class="sb-logo" src="src/logo.png" alt="" />
+        <span class="sb-label sb-brand-name">SailViz</span>
+      </button>
       <button id="sb-collapse" type="button" class="sb-collapse" title="サイドバーを折りたたむ" aria-label="サイドバーを折りたたむ">⟨</button>
     </div>
     <p class="sb-section sb-label">メニュー</p>
     <nav class="sb-nav">
+      <button type="button" class="sb-item" data-nav="top" title="ホーム"><span class="sb-ic">🏠</span><span class="sb-label">ホーム</span></button>
       <button type="button" class="sb-item" data-nav="home" title="練習データ"><span class="sb-ic">🗂</span><span class="sb-label">練習データ</span></button>
       <button type="button" class="sb-item" data-nav="dashboard" title="チューニングダッシュボード"><span class="sb-ic">🔧</span><span class="sb-label">チューニングダッシュボード</span></button>
       <button type="button" class="sb-item" data-nav="progress" title="進捗管理"><span class="sb-ic">📈</span><span class="sb-label">進捗管理</span></button>
@@ -28,6 +31,7 @@
       </button>
       <div id="account-menu" class="hidden">
         <button id="editModeBtn" type="button" class="menu-item">編集モード</button>
+        <a id="account-org" class="menu-item" href="/account#org">🏢 組織管理</a>
         <button id="account-logout" type="button" class="menu-item menu-danger">🚪 ログアウト</button>
       </div>
     </div>
@@ -191,6 +195,42 @@
       </menu>
     </form>
   </dialog>
+
+  <!-- ホーム(ログイン後の入口): 直近の練習・全体目標・使い方ガイド -->
+  <section id="top-screen">
+    <header id="top-bar">
+      <strong>ホーム</strong>
+    </header>
+    <div id="top-body">
+      <div class="hs-grid">
+        <section class="hs-card hs-recent">
+          <h2>直近の練習</h2>
+          <div id="top-recent"><p class="hs-note">読み込み中…</p></div>
+        </section>
+        <section class="hs-card hs-goals">
+          <div class="hs-card-head">
+            <h2>全体目標</h2>
+            <button type="button" id="top-goal-edit" class="hs-btn hs-btn-small writes-json">編集</button>
+          </div>
+          <p id="top-goal-text" class="hs-team-goal"></p>
+          <form id="top-goal-form" class="hs-goal-form" hidden>
+            <textarea id="top-goal-input" rows="3" maxlength="500" placeholder="例: 全日本インカレで総合入賞する"></textarea>
+            <div class="hs-actions">
+              <button type="submit" id="top-goal-save" class="hs-btn hs-btn-primary">保存</button>
+              <button type="button" id="top-goal-cancel" class="hs-btn">やめる</button>
+            </div>
+          </form>
+          <p id="top-goal-status" class="hs-note" hidden></p>
+          <h3>部員の目標</h3>
+          <div id="top-member-goals"></div>
+        </section>
+        <section class="hs-card hs-guide-card">
+          <h2>SailViz の使い方</h2>
+          <div id="top-guide"></div>
+        </section>
+      </div>
+    </div>
+  </section>
 
   <section id="home-screen">
     <header id="home-bar">

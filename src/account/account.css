@@ -50,6 +50,13 @@
 .ac-invite-row .ac-note, #ac-invite-created .ac-note { margin: 0; }
 #ac-invite-created { display: grid; gap: 8px; margin: 12px 0; }
 .ac-invite-url { font: 13px ui-monospace, Menlo, Consolas, monospace; width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--ac-border); border-radius: 8px; background: #f7f8fa; color: var(--ac-text); }
+.ac-org-list { list-style: none; padding-left: 0; display: grid; gap: 6px; }
+.ac-org-pick { font: inherit; font-size: 14px; width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 12px; border: 1px solid var(--ac-border); border-radius: 8px; background: #fff; color: var(--ac-text); cursor: pointer; text-align: left; }
+.ac-org-pick:hover { background: #eef4fd; }
+.ac-org-pick[aria-pressed="true"] { border-color: var(--ac-blue); background: #eef4fd; font-weight: 600; }
+.ac-org-pick-name { overflow-wrap: anywhere; }
+#ac-members .ac-badge { margin-left: 8px; }
 @media (max-width: 480px) {
   .ac-main { padding: 16px 12px 48px; }
   .ac-card { padding: 16px; }
