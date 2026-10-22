@@ -23,8 +23,9 @@ const baseProj = { version: 3, mode: 'absolute', accuracyFilter: true, crop: { s
 test('STORAGE=db は DB 版リポジトリを返し、sqlite ファイルを作る', { skip: skipMsg }, async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'sailviz-openrepo-'));
   const { repo, db } = openRepo({ storage: 'db', dataDir });
-  await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj);
-  const got = await repo.readProject('sailviz-20260901-0900.sailviz.json');
+  // DB 版は新しい器を createProject で作り、ID で引く。
+  const { id } = repo.createProject(baseProj, { name: 'sailviz-20260901-0900.sailviz.json' });
+  const got = await repo.readProject(id);
   assert.equal(got._rev, 1);
   const files = await readdir(dataDir);
   assert.ok(files.some((f) => f === 'sailviz.db'), 'sqlite file created');

@@ -55,7 +55,9 @@ function trackFingerprint(points) {
 }
 
 export function createDbRepo({ db, dataDir }) {
-  const getPd = db.prepare('SELECT * FROM practice_days WHERE legacy_name = ?');
+  // 練習は ID(practice_days.id)で引く。名前(legacy_name)は表示用で重複してよい(設計書 §5.5.1)。
+  const getPd = db.prepare('SELECT * FROM practice_days WHERE id = ?');
+  const item = (r) => ({ id: r.id, name: r.name, label: projectLabel(r.name) });
 
   function loadParts(pd) {
     const sessions = db.prepare('SELECT * FROM rec_sessions WHERE practice_day_id = ?').all(pd.id);
@@ -131,15 +133,22 @@ export function createDbRepo({ db, dataDir }) {
     }
   }
 
+  // roadmaps を読む。orgId が undefined なら全行、それ以外は org_id IS orgId の行だけ(null は組織なし)。
+  function selectRoadmaps(cols, orgId) {
+    if (orgId === undefined) return db.prepare(`SELECT ${cols} FROM roadmaps`).all();
+    return db.prepare(`SELECT ${cols} FROM roadmaps WHERE org_id IS ?`).all(orgId);
+  }
+
   return {
+    // 名前の降順。同名なら id 順。
     listProjects() {
-      return db.prepare('SELECT legacy_name FROM practice_days WHERE legacy_name IS NOT NULL ORDER BY legacy_name DESC')
+      return db.prepare('SELECT id, legacy_name AS name FROM practice_days WHERE legacy_name IS NOT NULL ORDER BY legacy_name DESC, id')
         .all()
-        .map((r) => ({ name: r.legacy_name, label: projectLabel(r.legacy_name) }));
+        .map(item);
     },
 
-    readProject(name) {
-      const pd = getPd.get(name);
+    readProject(id) {
+      const pd = getPd.get(id);
       if (!pd) throw new Error('not found');
       const assembled = assembleProject(loadParts(pd));
       return { ...assembled, _rev: pd.rev };
@@ -147,16 +156,16 @@ export function createDbRepo({ db, dataDir }) {
 
     // 互換 PUT が認可(policy)に使う情報。練習日の器の組織と、旧 JSON の tracks / reflections と
     // 同じ順の項目ごとの公開範囲・所有者。器が無ければ null。(S2.5-P2)
-    getProjectAccess(name) {
-      const pd = getPd.get(name);
+    getProjectAccess(id) {
+      const pd = getPd.get(id);
       if (!pd) return null;
       return accessOf(pd, loadParts(pd));
     },
 
     // 旧 JSON と access を「1回の読込み」で返す(同じ行から両方を作るので、tracks / reflections の
     // 並びと access の添字が必ず対応する)。器が無ければ投げる。
-    readProjectWithAccess(name) {
-      const pd = getPd.get(name);
+    readProjectWithAccess(id) {
+      const pd = getPd.get(id);
       if (!pd) throw new Error('not found');
       const parts = loadParts(pd);
       return { project: { ...assembleProject(parts), _rev: pd.rev }, access: accessOf(pd, parts) };
@@ -166,11 +175,11 @@ export function createDbRepo({ db, dataDir }) {
     findProjectsByPracticeDate(practiceDate) {
       const target = jstMidnightMs(Number(practiceDate));
       return db.prepare(
-        `SELECT legacy_name AS name, json_extract(web_state, '$.practiceDate') AS pdate
-           FROM practice_days WHERE legacy_name IS NOT NULL ORDER BY legacy_name DESC`,
+        `SELECT id, legacy_name AS name, json_extract(web_state, '$.practiceDate') AS pdate
+           FROM practice_days WHERE legacy_name IS NOT NULL ORDER BY legacy_name DESC, id`,
       ).all()
         .filter((r) => Number.isFinite(Number(r.pdate)) && jstMidnightMs(Number(r.pdate)) === target)
-        .map((r) => ({ name: r.name, label: projectLabel(r.name) }));
+        .map(item);
     },
 
     // 進捗の認可用: 全反省の(旧 JSON の)ID・公開範囲・作者・器の組織。
@@ -183,74 +192,92 @@ export function createDbRepo({ db, dataDir }) {
       })).filter((r) => r.id != null);
     },
 
-    // ロードマップの認可用: 人名ごとの組織・所有者。
-    listRoadmapAccess() {
-      return db.prepare('SELECT legacy_name, org_id, user_id FROM roadmaps').all()
+    // ロードマップの認可用: 人名ごとの組織・所有者。orgId を渡すとその組織の行だけ。
+    listRoadmapAccess({ orgId } = {}) {
+      return selectRoadmaps('legacy_name, org_id, user_id', orgId)
         .map((r) => ({ legacyName: r.legacy_name, orgId: r.org_id ?? null, userId: r.user_id ?? null }));
     },
 
-    // opts.orgId: 新しい器を作るときの組織(MIGRATION_ORG_ID)。
+    // 新しい器を作る。name は表示用の名前(重複してよい)、orgId は器の組織。返り値の id で以後引く。
+    // (managedReflection は既存行が無いので使わない。)
+    createProject(obj, { name, orgId = null } = {}) {
+      const incoming = { ...obj };
+      delete incoming._rev; // メタは保存しない
+      const pdId = genId('pd');
+      db.exec('BEGIN');
+      try {
+        const rows = decomposeProject(incoming, { legacyName: name, pdId, now: Date.now(), orgId });
+        rows.practiceDay.rev = 1;
+        insertAll(rows);
+        db.exec('COMMIT');
+      } catch (e) {
+        db.exec('ROLLBACK');
+        throw e;
+      }
+      return { id: pdId, name };
+    },
+
+    // 既存の器だけを更新する。無ければ code: 'not_found' を投げる(新しい器は createProject)。
     // opts.managedReflection(row): 渡すと、反省は「managed な行だけ」を incoming と突き合わせる
     //   (見えない・書けない反省には触らない)。突き合わせは旧 JSON の反省 id で行い、
     //   既存行の公開範囲・作者は変えない。渡さなければ従来どおり incoming で置き換える。
-    writeProject(name, obj, opts = {}) {
+    writeProject(id, obj, opts = {}) {
+      const existing = getPd.get(id);
+      if (!existing) {
+        const err = new Error('not found');
+        err.code = 'not_found';
+        throw err;
+      }
       const incoming = { ...obj };
       delete incoming._rev; // メタは保存しない
       const now = Date.now();
-      const existing = getPd.get(name);
       db.exec('BEGIN');
       try {
-        if (!existing) {
-          const rows = decomposeProject(incoming, { legacyName: name, pdId: genId('pd'), now, orgId: opts.orgId ?? null });
-          rows.practiceDay.rev = 1;
-          insertAll(rows);
-        } else {
-          const pdId = existing.id;
-          const decomp = decomposeProject(incoming, { legacyName: name, pdId, now });
-          // practice_day メタ
-          db.prepare('UPDATE practice_days SET web_state = ?, saved_at = ?, date = ?, rev = rev + 1, updated_at = ? WHERE id = ?')
-            .run(decomp.practiceDay.web_state, decomp.practiceDay.saved_at, decomp.practiceDay.date, now, pdId);
-          // トラック(②③): 旧データは track.id が一意でない(全艇 'Location.csv')ため、
-          // index でも id でも同定できない。点列の指紋(fingerprint)で incoming↔既存 を対応づける。
-          // これで並べ替え・中抜き削除でも「表示設定だけ反映・点列は不変」を正しく保てる。
-          const existingTracks = db.prepare(
-            `SELECT rs.id AS sid, t.points AS points FROM rec_sessions rs
-               JOIN tracks t ON t.session_id = rs.id WHERE rs.practice_day_id = ?`,
-          ).all(pdId);
-          const fpQueue = new Map(); // fingerprint -> [sessionId,...](同指紋は順に消費)
-          for (const et of existingTracks) {
-            const key = trackFingerprint(JSON.parse(et.points || 'null'));
-            if (!fpQueue.has(key)) fpQueue.set(key, []);
-            fpQueue.get(key).push(et.sid);
-          }
-          const incomingTracks = Array.isArray(incoming.tracks) ? incoming.tracks : [];
-          incomingTracks.forEach((t, i) => {
-            const key = trackFingerprint(t.points);
-            const q = fpQueue.get(key);
-            const matchId = q && q.length ? q.shift() : null;
-            if (matchId) {
-              // ③ 点列は書き換えず view(表示設定)だけ反映。position は配列順。
-              db.prepare('UPDATE tracks SET view = ? WHERE session_id = ?').run(decomp.tracks[i].view, matchId);
-              db.prepare('UPDATE rec_sessions SET position = ? WHERE id = ?').run(i, matchId);
-            } else {
-              // 新規トラック: 既存 ID と衝突しない一意 ID で点列込み挿入。
-              const newId = `${pdId}_t_${randomBytes(4).toString('hex')}`;
-              insertRow(db, 'rec_sessions', { ...decomp.sessions[i], id: newId });
-              insertRow(db, 'tracks', { ...decomp.tracks[i], session_id: newId });
-            }
-          });
-          // ② incoming に無い既存トラックは残す(何もしない)
-          if (typeof opts.managedReflection === 'function') {
-            syncManagedReflections(pdId, decomp.reflections, opts.managedReflection);
+        const pdId = existing.id;
+        const decomp = decomposeProject(incoming, { legacyName: existing.legacy_name, pdId, now });
+        // practice_day メタ
+        db.prepare('UPDATE practice_days SET web_state = ?, saved_at = ?, date = ?, rev = rev + 1, updated_at = ? WHERE id = ?')
+          .run(decomp.practiceDay.web_state, decomp.practiceDay.saved_at, decomp.practiceDay.date, now, pdId);
+        // トラック(②③): 旧データは track.id が一意でない(全艇 'Location.csv')ため、
+        // index でも id でも同定できない。点列の指紋(fingerprint)で incoming↔既存 を対応づける。
+        // これで並べ替え・中抜き削除でも「表示設定だけ反映・点列は不変」を正しく保てる。
+        const existingTracks = db.prepare(
+          `SELECT rs.id AS sid, t.points AS points FROM rec_sessions rs
+             JOIN tracks t ON t.session_id = rs.id WHERE rs.practice_day_id = ?`,
+        ).all(pdId);
+        const fpQueue = new Map(); // fingerprint -> [sessionId,...](同指紋は順に消費)
+        for (const et of existingTracks) {
+          const key = trackFingerprint(JSON.parse(et.points || 'null'));
+          if (!fpQueue.has(key)) fpQueue.set(key, []);
+          fpQueue.get(key).push(et.sid);
+        }
+        const incomingTracks = Array.isArray(incoming.tracks) ? incoming.tracks : [];
+        incomingTracks.forEach((t, i) => {
+          const key = trackFingerprint(t.points);
+          const q = fpQueue.get(key);
+          const matchId = q && q.length ? q.shift() : null;
+          if (matchId) {
+            // ③ 点列は書き換えず view(表示設定)だけ反映。position は配列順。
+            db.prepare('UPDATE tracks SET view = ? WHERE session_id = ?').run(decomp.tracks[i].view, matchId);
+            db.prepare('UPDATE rec_sessions SET position = ? WHERE id = ?').run(i, matchId);
           } else {
-            // 反省: incoming で置き換え
-            const incomingReflIds = new Set(decomp.reflections.map((r) => r.id));
-            for (const ex of db.prepare('SELECT id FROM reflections WHERE practice_day_id = ?').all(pdId)) {
-              if (!incomingReflIds.has(ex.id)) db.prepare('DELETE FROM reflections WHERE id = ?').run(ex.id);
-            }
-            for (const r of decomp.reflections) {
-              upsertRow(db, 'reflections', r, 'id');
-            }
+            // 新規トラック: 既存 ID と衝突しない一意 ID で点列込み挿入。
+            const newId = `${pdId}_t_${randomBytes(4).toString('hex')}`;
+            insertRow(db, 'rec_sessions', { ...decomp.sessions[i], id: newId });
+            insertRow(db, 'tracks', { ...decomp.tracks[i], session_id: newId });
+          }
+        });
+        // ② incoming に無い既存トラックは残す(何もしない)
+        if (typeof opts.managedReflection === 'function') {
+          syncManagedReflections(pdId, decomp.reflections, opts.managedReflection);
+        } else {
+          // 反省: incoming で置き換え
+          const incomingReflIds = new Set(decomp.reflections.map((r) => r.id));
+          for (const ex of db.prepare('SELECT id FROM reflections WHERE practice_day_id = ?').all(pdId)) {
+            if (!incomingReflIds.has(ex.id)) db.prepare('DELETE FROM reflections WHERE id = ?').run(ex.id);
+          }
+          for (const r of decomp.reflections) {
+            upsertRow(db, 'reflections', r, 'id');
           }
         }
         db.exec('COMMIT');
@@ -260,8 +287,8 @@ export function createDbRepo({ db, dataDir }) {
       }
     },
 
-    deleteProject(name) {
-      const pd = getPd.get(name);
+    deleteProject(id) {
+      const pd = getPd.get(id);
       if (!pd) return;
       db.exec('BEGIN');
       try {
@@ -277,7 +304,8 @@ export function createDbRepo({ db, dataDir }) {
       }
     },
 
-    readOverlay(name) {
+    // roadmap は opts.orgId を渡すと、その組織の行だけ(progress は絞らない)。
+    readOverlay(name, opts = {}) {
       if (name === 'progress') {
         return assembleProgress({
           progress: db.prepare('SELECT * FROM reflection_progress').all(),
@@ -285,12 +313,13 @@ export function createDbRepo({ db, dataDir }) {
         });
       }
       if (name === 'roadmap') {
-        return assembleRoadmap({ roadmaps: db.prepare('SELECT * FROM roadmaps').all() });
+        return assembleRoadmap({ roadmaps: selectRoadmaps('*', opts.orgId) });
       }
       return {};
     },
 
-    // opts.orgId: roadmap で新しい行を作るときの組織(MIGRATION_ORG_ID)。既存行の org_id は変えない。
+    // opts.orgId: roadmap で新しい行を作るときの組織(MIGRATION_ORG_ID・表示中の組織)。既存行の org_id は変えない。
+    // opts.scopeOrgId: roadmap で渡すと、突き合わせ・削除をその組織の行に限る(他組織の行に触らない)。
     writeOverlay(name, obj, opts = {}) {
       const now = Date.now();
       db.exec('BEGIN');
@@ -305,9 +334,10 @@ export function createDbRepo({ db, dataDir }) {
           const { roadmaps } = decomposeRoadmap(obj, { now });
           // 新しい行だけ opts.orgId を入れる。既存行は現在の org_id を渡して、COALESCE で組織が
           // 付け替わらないようにする(他組織・組織なしの行を取り込まない)。
-          const orgOf = new Map(db.prepare('SELECT legacy_name, org_id FROM roadmaps').all().map((r) => [r.legacy_name, r.org_id ?? null]));
+          // 範囲(scopeOrgId)があれば、突き合わせは (組織, 名前) で行う。
+          const orgOf = new Map(selectRoadmaps('legacy_name, org_id', opts.scopeOrgId).map((r) => [r.legacy_name, r.org_id ?? null]));
           for (const r of roadmaps) r.org_id = orgOf.has(r.legacy_name) ? orgOf.get(r.legacy_name) : (opts.orgId ?? null);
-          syncRoadmaps(db, roadmaps);
+          syncRoadmaps(db, roadmaps, opts.scopeOrgId === undefined ? {} : { scopeOrgId: opts.scopeOrgId });
         }
         db.exec('COMMIT');
       } catch (e) {
@@ -324,39 +354,39 @@ export function createDbRepo({ db, dataDir }) {
     // fileRepo と同じ: person=people[0] かつ proj.practiceDate 完全一致の器を探す。
     findReflectionByDate(person, practiceDate) {
       const rows = db.prepare(
-        `SELECT pd.legacy_name AS name
+        `SELECT pd.id AS id, pd.legacy_name AS name
            FROM reflections r JOIN practice_days pd ON pd.id = r.practice_day_id
           WHERE r.legacy_author_name = ?
             AND json_extract(pd.web_state, '$.practiceDate') = ?
           LIMIT 1`,
       ).all(person, practiceDate);
       if (!rows.length) return null;
-      return { name: rows[0].name, label: projectLabel(rows[0].name) };
+      return item(rows[0]);
     },
 
     // person が反省の著者で、practiceDate が完全一致する器をすべて返す(名前の降順)。
     // 呼び出し側が見える器を選ぶ(最初の1件が他組織だと取りこぼすため)。
     findReflectionsByDate(person, practiceDate) {
       return db.prepare(
-        `SELECT DISTINCT pd.legacy_name AS name
+        `SELECT DISTINCT pd.id AS id, pd.legacy_name AS name
            FROM reflections r JOIN practice_days pd ON pd.id = r.practice_day_id
           WHERE r.legacy_author_name = ?
             AND json_extract(pd.web_state, '$.practiceDate') = ?
-          ORDER BY pd.legacy_name DESC`,
-      ).all(person, practiceDate).map((r) => ({ name: r.name, label: projectLabel(r.name) }));
+          ORDER BY pd.legacy_name DESC, pd.id`,
+      ).all(person, practiceDate).map(item);
     },
 
     // fileRepo と同じ: practiceDate を持つ器のうち JST 日が一致する最初のものを返す(降順)。
     findProjectByPracticeDate(practiceDate) {
       const target = jstMidnightMs(Number(practiceDate));
       const rows = db.prepare(
-        `SELECT legacy_name AS name, json_extract(web_state, '$.practiceDate') AS pdate
-           FROM practice_days WHERE legacy_name IS NOT NULL ORDER BY legacy_name DESC`,
+        `SELECT id, legacy_name AS name, json_extract(web_state, '$.practiceDate') AS pdate
+           FROM practice_days WHERE legacy_name IS NOT NULL ORDER BY legacy_name DESC, id`,
       ).all();
       for (const r of rows) {
         const pd = Number(r.pdate);
         if (!Number.isFinite(pd)) continue;
-        if (jstMidnightMs(pd) === target) return { name: r.name, label: projectLabel(r.name) };
+        if (jstMidnightMs(pd) === target) return item(r);
       }
       return null;
     },

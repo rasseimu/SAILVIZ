@@ -61,3 +61,27 @@ test('実データ file→DB→file が全件内容一致', { skip: skipMsg }, a
   db.close();
   await rm(out, { recursive: true, force: true });
 });
+
+test('exportToFiles: 同名の器は上書きせず別名で書き出す', { skip: skipMsg }, async () => {
+  const { createDbRepo } = await import('../server/repos/dbRepo.js');
+  const out = await mkdtemp(join(tmpdir(), 'sailviz-export-dup-'));
+  const db = openDb(':memory:');
+  migrate(db, loadMigrations(MIG_DIR), 1000);
+  const repo = createDbRepo({ db, dataDir: out });
+  const NAME = 'sailviz-20260901-0900.sailviz.json';
+  const proj = (m) => ({ version: 3, mode: 'absolute', accuracyFilter: true, crop: { start: 0, end: 0 },
+    tracks: [], events: [], marks: [{ id: m }], pins: [], videos: [], reflections: [] });
+  const a = repo.createProject(proj('mA'), { name: NAME });
+  const b = repo.createProject(proj('mB'), { name: NAME });
+  const report = exportToFiles({ db, outDir: out });
+  assert.equal(report.projects, 2);
+  // 並びは id 順なので、id の小さい方がそのままの名前、もう一方が <名前>-<id>.sailviz.json
+  const [first, second] = [a, b].sort((x, y) => (x.id < y.id ? -1 : 1));
+  const secondName = `sailviz-20260901-0900-${second.id}.sailviz.json`;
+  assert.deepEqual(readdirSync(join(out, 'projects')).sort(), [NAME, secondName].sort());
+  const marksOf = (f) => JSON.parse(readFileSync(join(out, 'projects', f), 'utf8')).marks[0].id;
+  assert.equal(marksOf(NAME), first === a ? 'mA' : 'mB');
+  assert.equal(marksOf(secondName), second === a ? 'mA' : 'mB');
+  db.close();
+  await rm(out, { recursive: true, force: true });
+});

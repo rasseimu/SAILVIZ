@@ -1,6 +1,6 @@
 // server/db/exportToFiles.js
 // DB → ファイル の書き戻し(移行の戻し道)。practice_days を旧 JSON に組み立てて
-// outDir/projects/<legacy_name> に、progress/roadmap を outDir に書く。
+// outDir/projects/<legacy_name>(同名は <名前>-<id>.sailviz.json)に、progress/roadmap を outDir に書く。
 // 出力は旧 storage と同じく JSON.stringify(無整形)。_rev は付けない。
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -13,10 +13,14 @@ export function exportToFiles({ db, outDir }) {
   mkdirSync(join(outDir, 'projects'), { recursive: true });
   const report = { projects: 0, progress: 0, roadmap: 0 };
 
-  for (const { name } of repo.listProjects()) {
-    const { _rev, ...pure } = repo.readProject(name);
+  // 名前は重複してよい(設計書 §5.5.1)。同名の 2 つ目以降は上書きせず <名前>-<id>.sailviz.json に書く。
+  const written = new Set();
+  for (const { id, name } of repo.listProjects()) {
+    const { _rev, ...pure } = repo.readProject(id);
     void _rev;
-    writeFileSync(join(outDir, 'projects', name), JSON.stringify(pure), 'utf8');
+    const file = written.has(name) ? `${name.replace(/\.sailviz\.json$/, '')}-${id}.sailviz.json` : name;
+    written.add(name);
+    writeFileSync(join(outDir, 'projects', file), JSON.stringify(pure), 'utf8');
     report.projects += 1;
   }
 
