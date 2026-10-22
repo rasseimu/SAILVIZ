@@ -3,7 +3,7 @@
 //
 // 主体(subject):
 //   anonymous()                              未ログイン
-//   user(userId, orgIds)                     ログインユーザー + 所属(紐付け済み)組織
+//   user(userId, orgIds, activeOrgId)        ログインユーザー + 所属(紐付け済み)組織 + 表示中の組織(無ければ null)
 //   legacySharedPrincipal({orgId, canWrite}) 旧共有ログイン = MIGRATION_ORG_ID の組織メンバー(userId なし)
 // 対象(target):
 //   { kind, visibility?, ownerId?, crewIds?, orgId? }
@@ -12,7 +12,16 @@
 // 未知の kind・未知の公開範囲は拒否(deny by default)。
 
 export const anonymous = () => ({ kind: 'anonymous' });
-export const user = (userId, orgIds = []) => ({ kind: 'user', userId, orgIds: [...orgIds] });
+export const user = (userId, orgIds = [], activeOrgId = null) => ({ kind: 'user', userId, orgIds: [...orgIds], activeOrgId });
+
+// 表示中の組織。user は activeOrgId、共有の legacy は orgId、それ以外は null。
+// canRead / canWrite 自体は activeOrgId で絞らない(所属は orgIds で判定)。表示中の組織への絞り込みは呼び出し側。
+export const activeOrgOf = (s) => {
+  if (!s) return null;
+  if (s.kind === 'user') return s.activeOrgId ?? null;
+  if (s.kind === 'legacy' && s.shared === true) return s.orgId ?? null;
+  return null;
+};
 
 // 旧共有ログイン(閲覧ゲート + 書込トークン)の主体。S2.5 / S2.5-P2。
 //   orgId    芝浦の組織 ID(取込みと同じ MIGRATION_ORG_ID)。未設定なら null(空文字も null 扱い)。
@@ -74,7 +83,12 @@ export function canRead(subject, target) {
   }
 }
 
-// 書き込みは作成者だけ。例外: 練習日の議事録は組織メンバーなら誰でも作り直せる。
+// 書き込み(user 主体)。2026-10-22 利用者決定: 組織メンバーなら作成者に関係なく書ける(設計書 §5.4)。
+//   session・reflection: 作成者、または「組織メンバー かつ 読める かつ private でない」(他人の private は不可)
+//   roadmap・race:       作成者、または組織メンバー(ownerId null の行も書ける)
+//   minutes:             作成者または組織メンバー(従来どおり)
+//   voice:               作成者だけ
+// 共有ログインの規則は別(下の isSharedLegacy 分岐)。
 export function canWrite(subject, target) {
   if (!target) return false;
   if (isUnscopedLegacy(subject)) return false;
@@ -92,12 +106,14 @@ export function canWrite(subject, target) {
   switch (target.kind) {
     case 'session':
     case 'reflection':
+      return isOwner(subject, target)
+        || (isOrgMember(subject, target) && canRead(subject, target) && target.visibility !== 'private');
     case 'race':
-    case 'voice':
     case 'roadmap':
-      return isOwner(subject, target);
     case 'minutes':
       return isOwner(subject, target) || isOrgMember(subject, target);
+    case 'voice':
+      return isOwner(subject, target);
     default:
       return false;
   }

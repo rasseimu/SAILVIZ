@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  anonymous, user, legacySharedPrincipal, isMemberOfOrg,
+  anonymous, user, legacySharedPrincipal, isMemberOfOrg, activeOrgOf,
   canRead, canWrite, canReadReflectionExtras, canComment, canUpdateProgress,
   visibleDayItems, canSeeDayContainer,
 } from '../server/domain/policy.js';
@@ -64,15 +64,72 @@ test('orgId なしの対象は org 公開でも組織メンバー扱いになら
 
 // ---- 箇条書きのルール ----
 
-test('書き込みは作成者だけ (セッション・反省・ロードマップ・声の反省)', () => {
+test('書き込み: 作成者のみ(声の反省)。セッション・反省・ロードマップは作成者に加え組織メンバー(§5.4)', () => {
   for (const kind of ['session', 'reflection', 'roadmap', 'voice']) {
     const t = mk(kind, { visibility: 'public' });
     assert.equal(canWrite(ACTORS.creator, t), true, `${kind} 作成者`);
-    for (const c of ['crew', 'orgMember', 'otherLoggedIn', 'anon']) {
+    const memberOk = kind !== 'voice';
+    assert.equal(canWrite(ACTORS.orgMember, t), memberOk, `${kind} orgMember`);
+    for (const c of ['crew', 'otherLoggedIn', 'anon']) {
       assert.equal(canWrite(ACTORS[c], t), false, `${kind} ${c}`);
     }
     assert.equal(canWrite(legacy(), t), false, `${kind} 旧共有ログイン`);
   }
+});
+
+test('user 主体: 組織メンバーは作成者でない org・public の反省とセッションを書ける', () => {
+  for (const kind of ['reflection', 'session']) {
+    for (const visibility of ['org', 'public']) {
+      assert.equal(canWrite(ACTORS.orgMember, mk(kind, { visibility })), true, `${kind} ${visibility}`);
+    }
+  }
+});
+
+test('user 主体: private は作成者だけが書ける', () => {
+  for (const kind of ['reflection', 'session']) {
+    const t = mk(kind, { visibility: 'private' });
+    assert.equal(canWrite(ACTORS.creator, t), true, `${kind} 作成者`);
+    assert.equal(canWrite(ACTORS.orgMember, t), false, `${kind} メンバー`);
+  }
+});
+
+test('user 主体: roadmap・race はメンバーなら作成者なし(ownerId null)の行も書ける', () => {
+  for (const kind of ['roadmap', 'race']) {
+    const t = mk(kind, { ownerId: null });
+    assert.equal(canWrite(ACTORS.orgMember, t), true, `${kind} メンバー`);
+    assert.equal(canWrite(ACTORS.otherLoggedIn, t), false, `${kind} 他組織`);
+    assert.equal(canWrite(ACTORS.anon, t), false, `${kind} 未ログイン`);
+  }
+});
+
+test('user 主体: 他組織の public は読めても書けない', () => {
+  for (const kind of ['reflection', 'session']) {
+    const t = mk(kind, { visibility: 'public' });
+    assert.equal(canRead(ACTORS.otherLoggedIn, t), true);
+    assert.equal(canWrite(ACTORS.otherLoggedIn, t), false, kind);
+  }
+});
+
+test('voice は作成者だけ(メンバーでも不可)', () => {
+  const t = mk('voice');
+  assert.equal(canWrite(ACTORS.creator, t), true);
+  assert.equal(canWrite(ACTORS.orgMember, t), false);
+});
+
+test('user(): activeOrgId は既定 null で主体に載る。canRead/canWrite は activeOrgId で絞らない', () => {
+  assert.deepEqual(user('u1', [ORG]), { kind: 'user', userId: 'u1', orgIds: [ORG], activeOrgId: null });
+  const s = user('u1', [ORG, 'org-b'], 'org-b');
+  assert.equal(s.activeOrgId, 'org-b');
+  assert.equal(canWrite(s, mk('roadmap', { ownerId: null })), true);
+});
+
+test('activeOrgOf: user / legacy / anonymous', () => {
+  assert.equal(activeOrgOf(user('u1', [ORG], ORG)), ORG);
+  assert.equal(activeOrgOf(user('u1', [ORG])), null);
+  assert.equal(activeOrgOf(legacySharedPrincipal({ orgId: LEGACY_ORG_ID })), LEGACY_ORG_ID);
+  assert.equal(activeOrgOf(legacySharedPrincipal()), null);
+  assert.equal(activeOrgOf(anonymous()), null);
+  assert.equal(activeOrgOf(null), null);
 });
 
 test('乗員でも他人のセッションのメタは書けない', () => {

@@ -50,7 +50,7 @@ test('アカウントの Bearer → user(userId, 所属組織)。無効なトー
     listMembershipsOfUser: (id) => (id === 'u_1' ? [{ org_id: 'o_a' }, { org_id: 'o_b' }] : []),
   };
   const s = resolveSubject(req({ authorization: `Bearer ${tok}` }), { ...base, accounts });
-  assert.deepEqual(s, { kind: 'user', userId: 'u_1', orgIds: ['o_a', 'o_b'] });
+  assert.deepEqual(s, { kind: 'user', userId: 'u_1', orgIds: ['o_a', 'o_b'], activeOrgId: null });
   assert.equal(resolveSubject(req({ authorization: 'Bearer other' }), { ...base, accounts }), null);
   // 共有トークンが先に判定される
   assert.equal(resolveSubject(req({ authorization: `Bearer ${TOKEN}` }), { ...base, accounts }).kind, 'legacy');
