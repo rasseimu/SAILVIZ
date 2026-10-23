@@ -7,6 +7,7 @@ import {
   addComment, removeComment, hasAiComment, summarize, setCardDeleted,
 } from './progressstore.js';
 import { renderChart } from './chartview.js';
+import { icon } from './icons.js';
 import { generateAiComments } from './aicomment.js';
 import { generatePeerComments } from './peerlearning.js';
 import { geminiGenerate } from './gemini.js';
@@ -117,7 +118,7 @@ export function createProgress({
     const childBreakdownHtml = (ms) => {
       const rows = ms.filter((m) => (m.children || []).length).map((m) => {
         const items = m.children.map((c) =>
-          `<li class="pq-rm-child${c.done ? ' pq-rm-child-done' : ''}">${c.done ? '✓' : '▢'} ${esc(c.title)}</li>`).join('');
+          `<li class="pq-rm-child${c.done ? ' pq-rm-child-done' : ''}">${icon(c.done ? 'check-square' : 'square')} ${esc(c.title)}</li>`).join('');
         return `<div class="pq-rm-stage"><div class="pq-rm-stage-title">${esc(m.title)}</div><ul class="pq-rm-childlist">${items}</ul></div>`;
       }).join('');
       return rows ? `<div class="pq-rm-children">${rows}</div>` : '';
@@ -125,7 +126,7 @@ export function createProgress({
     const one = (name, withName) => {
       const e = roadmapData[name] || {};
       const ms = e.milestones || [];
-      const goal = e.goal ? `<span class="pq-rm-goal">🎯 ${esc(e.goal)}</span>` : '';
+      const goal = e.goal ? `<span class="pq-rm-goal">${icon('target')} ${esc(e.goal)}</span>` : '';
       const head = withName
         ? `<div class="pq-rm-name">${esc(name)}${goal}</div>`
         : (goal ? `<div class="pq-rm-name">${goal}</div>` : '');
@@ -149,7 +150,7 @@ export function createProgress({
         + '<button class="edit-cancel">取消</button>';
     }
     return `${prefix}<span class="et-text">${esc(text)}</span>`
-      + `<button class="edit-btn" data-refl="${esc(reflId)}" data-field="${field}" title="編集">✎</button>`;
+      + `<button class="edit-btn" data-refl="${esc(reflId)}" data-field="${field}" title="編集" aria-label="編集">${icon('edit-2')}</button>`;
   }
 
   // カード要素の属性(選択キー＋選択中クラス)。field ∈ {goal,issue,discovery}。
@@ -172,14 +173,14 @@ export function createProgress({
   // コメント吹き出しアイコン。クリックで入力欄を開く。非表示設定時は出さない。
   function commentIcon(field, reflId) {
     if (hideComments) return '';
-    return `<button class="comment-btn" data-cfield="${field}" data-crefl="${esc(reflId)}" title="コメント">💬</button>`;
+    return `<button class="comment-btn" data-cfield="${field}" data-crefl="${esc(reflId)}" title="コメント" aria-label="コメント">${icon('message-square')}</button>`;
   }
 
   // カード内容の下に積むコメント一覧＋(入力中なら)入力欄。field ∈ {goal,issue,discovery}。
   function commentSection(field, reflId, comments) {
     if (hideComments) return '';
     const list = (comments || []).map((c, i) => {
-      const badge = c.ai ? '<span class="comment-ai-badge" title="AI生成">🤖</span>' : '';
+      const badge = c.ai ? `<span class="comment-ai-badge" title="AI生成">${icon('cpu')}</span>` : '';
       // 出典: 新形式は refs 配列(複数可)、旧形式は単一 link/title。
       const refs = c.refs || (c.ai && (c.link || c.title) ? [{ link: c.link || null, title: c.title }] : []);
       let link = '';
@@ -233,7 +234,7 @@ export function createProgress({
       + `<button class="pq-gv-btn${goalView === 'roadmap' ? ' active' : ''}" data-goalview="roadmap">ロードマップ</button></span>`;
     const goalBody = goalView === 'roadmap'
       ? `<div class="pq-roadmap">${roadmapPanelHtml()}</div>`
-        + '<div class="pq-roadmap-edit"><button type="button" class="pq-roadmap-edit-btn" data-roadmap-edit>🎯 目標ロードマップを変更</button></div>'
+        + `<div class="pq-roadmap-edit"><button type="button" class="pq-roadmap-edit-btn" data-roadmap-edit>${icon('target')} 目標ロードマップを変更</button></div>`
       : `<div class="goal-cards">${goalsHtml || '<p>(目標なし)</p>'}</div>`;
 
     const loadingBanner = entriesLoading
@@ -263,7 +264,7 @@ export function createProgress({
       + (selected === 'all' ? `<span class="et-name">${esc(t.name)}：</span>` : '')
       + `<span class="trash-text">${esc(t.text)}</span>`
       + `<button class="card-restore" data-restore-field="${t.field}" data-restore-refl="${esc(t.reflId)}">復元</button></li>`).join('');
-    el.innerHTML = `<div class="pq-trash"><h3>🗑 ゴミ箱 (${items.length})</h3><ul class="trash-list">${rows}</ul></div>`;
+    el.innerHTML = `<div class="pq-trash"><h3>${icon('trash-2')} ゴミ箱 (${items.length})</h3><ul class="trash-list">${rows}</ul></div>`;
     el.querySelectorAll('.card-restore').forEach((btn) =>
       btn.addEventListener('click', () => {
         progress = setCardDeleted(progress, btn.dataset.restoreRefl, btn.dataset.restoreField, false);

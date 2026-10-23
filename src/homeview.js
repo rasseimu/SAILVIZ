@@ -3,6 +3,7 @@
 // 練習は /api/summaries の要約(summary.js の practiceSummary)、目標は roadmap オーバーレイを入力にする。
 import { formatKt, formatDuration, formatWindDeg } from './daysummaryview.js';
 import { roadmapProgress } from './roadmapstore.js';
+import { icon } from './icons.js';
 
 // 部全体の目標は roadmap オーバーレイの予約キーに置く(部員のキーはフルネームなので衝突しない)。
 // 形は部員エントリと同じ {goal, milestones} にして、DB の行分解(overlayRows.js)をそのまま通す。
@@ -72,14 +73,14 @@ export function recentPracticeHtml(item) {
       + `<div><span class="hs-best-label">ランニングVMG最高</span>${bestBoat(ds.comparison.bestDownwind)}</div>`
       + '</div>'
     : '';
-  return `<div class="hs-recent-title">⛵ ${escapeHtml(item.label || item.name || '')}</div>`
-    + (item.wind ? `<div class="hs-wind">💨 ${escapeHtml(item.wind)}</div>` : '')
+  return `<div class="hs-recent-title">${icon('navigation')} ${escapeHtml(item.label || item.name || '')}</div>`
+    + (item.wind ? `<div class="hs-wind">${icon('wind')} ${escapeHtml(item.wind)}</div>` : '')
     + `<div class="hs-stats">${stats.join('')}</div>`
     + best
     + (ds ? '' : '<p class="hs-note">この練習はまだサマリが保存されていません。開いて保存するとサマリが表示されます。</p>')
     + '<div class="hs-actions">'
     + `<button type="button" class="hs-btn hs-btn-primary" data-home-action="open">練習を開く</button>`
-    + (ds ? '<button type="button" class="hs-btn" data-home-action="summary">📊 サマリを見る</button>' : '')
+    + (ds ? `<button type="button" class="hs-btn" data-home-action="summary">${icon('bar-chart-2')} サマリを見る</button>` : '')
     + '</div>';
 }
 
@@ -102,28 +103,28 @@ export function memberGoalsHtml(roadmap, members) {
 
 // 使い方ガイド。nav は押したときに開く画面(data-home-nav。app.js の NAV_ACTIONS のキー)。
 export const GUIDE_STEPS = [
-  { icon: '🗂', title: '練習データを取り込む', nav: 'home',
-    text: '「練習データ」で「＋ 新規練習」を押し、各艇の GPS ログ(CSV)を読み込みます。動画フォルダを選ぶと、練習時間内の動画も自動で取り込めます。' },
-  { icon: '🗺', title: '軌跡を再生して振り返る', nav: 'home',
-    text: '地図上で全艇の軌跡を同時に再生できます。「🏆VMG」で区間ごとに速かった艇を強調し、「📊 サマリ」で練習全体の数字を確認します。' },
-  { icon: '📝', title: '反省を書いて保存する', nav: 'home',
-    text: '左の「＋ 反省を追加」で今日の目標・課題・発見を記録し、💾 保存で部内に共有します。議事録からの一括取込もできます。' },
-  { icon: '📈', title: '進捗と目標を管理する', nav: 'progress',
+  { icon: 'folder', title: '練習データを取り込む', nav: 'home',
+    text: '「練習データ」で「新規練習」を押し、各艇の GPS ログ(CSV)を読み込みます。動画フォルダを選ぶと、練習時間内の動画も自動で取り込めます。' },
+  { icon: 'map', title: '軌跡を再生して振り返る', nav: 'home',
+    text: '地図上で全艇の軌跡を同時に再生できます。「VMG」で区間ごとに速かった艇を強調し、「サマリ」で練習全体の数字を確認します。' },
+  { icon: 'edit-3', title: '反省を書いて保存する', nav: 'home',
+    text: '左の「反省を追加」で今日の目標・課題・発見を記録し、「保存」で部内に共有します。議事録からの一括取込もできます。' },
+  { icon: 'trending-up', title: '進捗と目標を管理する', nav: 'progress',
     text: '「進捗管理」で部員ごとの課題の変化やコメントを確認し、目標ロードマップで段階ごとの達成を管理します。' },
-  { icon: '🔧', title: 'セッティングを比べる', nav: 'dashboard',
+  { icon: 'tool', title: 'セッティングを比べる', nav: 'dashboard',
     text: '「チューニングダッシュボード」で艇ごとのリグ設定と風速を並べ、速かった日の設定を再現します。' },
-  { icon: '🏢', title: '組織とメンバーを管理する', href: '/account#org',
+  { icon: 'building-2', title: '組織とメンバーを管理する', href: '/account#org',
     text: '左下のアカウント → 「組織管理」で、メールアドレスの変更・組織の追加・招待リンクの発行ができます。' },
 ];
 
 export function guideHtml(steps = GUIDE_STEPS) {
   return '<ol class="hs-guide">' + steps.map((s, i) => {
     const target = s.href
-      ? `<a class="hs-guide-link" href="${escapeHtml(s.href)}">開く →</a>`
-      : `<button type="button" class="hs-guide-link" data-home-nav="${escapeHtml(s.nav)}">開く →</button>`;
+      ? `<a class="hs-guide-link" href="${escapeHtml(s.href)}">開く ${icon('arrow-right')}</a>`
+      : `<button type="button" class="hs-guide-link" data-home-nav="${escapeHtml(s.nav)}">開く ${icon('arrow-right')}</button>`;
     return '<li class="hs-guide-step">'
       + `<span class="hs-guide-num">${i + 1}</span>`
-      + `<div class="hs-guide-body"><div class="hs-guide-title">${escapeHtml(s.icon)} ${escapeHtml(s.title)}</div>`
+      + `<div class="hs-guide-body"><div class="hs-guide-title">${icon(s.icon)} ${escapeHtml(s.title)}</div>`
       + `<p>${escapeHtml(s.text)}</p>${target}</div>`
       + '</li>';
   }).join('') + '</ol>';
