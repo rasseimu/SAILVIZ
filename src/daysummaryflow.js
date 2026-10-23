@@ -43,8 +43,8 @@ export function daySummaryAfterPracticeLoad(savedSummary, tracks, opts) {
 
 // モーダルの導線ボタン。ホームから開いた(練習未読込)ときは先に読み込み、
 // 確認ダイアログのキャンセルや読込失敗なら画面遷移しない。戻り値は導線を実行したか。
-export async function runDaySummaryAction(action, { fromHomeName = null } = {}, deps) {
-  if (fromHomeName && !(await deps.loadPractice(fromHomeName))) return false;
+export async function runDaySummaryAction(action, { fromHomeId = null } = {}, deps) {
+  if (fromHomeId && !(await deps.loadPractice(fromHomeId))) return false;
   deps.showTrack();
   if (action === 'compare') deps.setVmgOn(true);
   else if (action === 'reflect') await deps.openReflectionEditor();

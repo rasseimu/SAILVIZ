@@ -5,8 +5,10 @@ import { createStore } from '../src/store.js';
 
 function fakeApi() {
   const db = { projects: {}, overlays: { progress: {}, roadmap: {} }, unlocked: false };
+  let seq = 0;
   return {
-    apiListProjects: async () => Object.keys(db.projects).map((name) => ({ name, label: name })),
+    apiListProjects: async () => Object.keys(db.projects).map((id) => ({ id, name: id, label: id })),
+    apiCreateProject: async (name, o) => { const id = `pd_${String(++seq).padStart(10, '0')}`; db.projects[id] = o; return { id, name }; },
     apiListSummaries: async () => [],
     apiGetProject: async (n) => db.projects[n],
     apiPutProject: async (n, o) => { db.projects[n] = o; },
@@ -24,6 +26,17 @@ test('writeProject/readProject via store', async () => {
   const store = createStore(fakeApi());
   await store.writeProject('a.sailviz.json', { version: 1 });
   assert.deepEqual(await store.readProject('a.sailviz.json'), { version: 1 });
+});
+
+test('createProject は { id, name } を返し、以後は id で読み書き・削除する', async () => {
+  const store = createStore(fakeApi());
+  const { id, name } = await store.createProject('a.sailviz.json', { version: 1 });
+  assert.equal(name, 'a.sailviz.json');
+  assert.equal(id, 'pd_0000000001');
+  await store.writeProject(id, { version: 2 });
+  assert.deepEqual(await store.readProject(id), { version: 2 });
+  await store.deleteProject(id);
+  assert.deepEqual(await store.listProjects(), []);
 });
 
 test('unlock updates isUnlocked', async () => {
