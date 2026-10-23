@@ -1,5 +1,6 @@
 // スマホ議事録入力ページの画面ロジック(DOM グルー)。純ロジックは import 先で検証済み。
-import { apiAuthStatus, apiUnlock, apiCommitMinutes } from './api.js';
+import { apiAuthStatus, apiUnlock, apiCommitMinutes, lockActiveOrg } from './api.js';
+import { getActiveOrgId } from './activeorg.js';
 import { geminiGenerate } from './gemini.js';
 import { buildMinutesSystemPrompt, parseAiMinutes, parseMinutes, parseMinutesDate } from './minutes.js';
 import { aiToRows, blocksToRows, toCommitRows } from './minutes-rows.js';
@@ -147,6 +148,8 @@ function init() {
   $('mn-commit-btn').addEventListener('click', doCommit);
   $('mn-date').value = todayJstDate();
   renderPreview();
+  // このページの組織は開いた時点の表示中の組織で固定する(途中で切り替わっても別組織へ送らない)。
+  lockActiveOrg(getActiveOrgId());
   refreshLock();
 }
 

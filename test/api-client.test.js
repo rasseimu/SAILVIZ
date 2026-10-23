@@ -30,6 +30,9 @@ function recordFetch(reply) {
 }
 const okJson = (body, status = 200) => ({ ok: true, status, json: async () => body });
 const orgHeader = (init) => (init.headers || {})['X-Sailviz-Org'];
+// 表示中の組織の固定はモジュールの状態なので、ページの読み込みを真似るときは api.js を読み直す。
+let freshSeq = 0;
+const freshApi = () => import(`../src/api.js?fresh=${++freshSeq}`);
 
 test('apiGetProject returns parsed json', async () => {
   globalThis.fetch = async (u) => ({ ok: true, status: 200, json: async () => ({ version: 1, u }) });
@@ -95,18 +98,21 @@ test('api: apiCreateProject は失敗で投げる', async () => {
   await assert.rejects(() => apiCreateProject('x.sailviz.json', {}), /409/);
 });
 
-test('403 org_forbidden で表示中の組織を消して me を読み直す', async () => {
+test('403 org_forbidden で表示中の組織を消し、読み込み直したページで me の先頭に戻る', async () => {
+  const page1 = await freshApi();
   setActiveOrgId('org_gone');
+  page1.lockActiveOrg('org_gone');
   recordFetch(() => ({ ok: false, status: 403, json: async () => ({ error: 'org_forbidden' }) }));
-  await assert.rejects(() => apiListProjects());
+  await assert.rejects(() => page1.apiListProjects());
   assert.equal(getActiveOrgId(), null); // api.js が消す
-  // 起動時と同じく me を読み、所属の先頭を表示中にする。以後の要求はその組織で送る。
+  // 読み込み直したページ(モジュールを読み直す)は起動時と同じく me を読み、所属の先頭を表示中にする。
+  const page2 = await freshApi();
   const calls = recordFetch((url) => (url === '/api/me'
     ? okJson({ user: { id: 'u_1' }, orgs: [{ id: 'org_a', name: 'A', isAdmin: false }] })
     : okJson([])));
-  const me = await apiMe();
-  assert.equal(resolveActiveOrg(me.orgs), 'org_a');
-  await apiListProjects();
+  const me = await page2.apiMe();
+  page2.lockActiveOrg(resolveActiveOrg(me.orgs));
+  await page2.apiListProjects();
   assert.equal(orgHeader(calls[1].init), 'org_a');
 });
 
@@ -122,4 +128,69 @@ test('api: apiMe は 401・503 で null を返す(共有ログイン・ファイ
   assert.equal(await apiMe(), null);
   recordFetch(() => ({ ok: false, status: 503, json: async () => ({ error: 'accounts_unavailable' }) }));
   assert.equal(await apiMe(), null);
+});
+
+// ---- 表示中の組織はページを読み込んだときに一度だけ決める(古い画面で別組織を上書きしない) ----
+
+test('api: 固定したあとに localStorage が変わっても、送るヘッダーは固定した組織のまま', async () => {
+  const api = await freshApi();
+  setActiveOrgId('org_a');
+  api.lockActiveOrg('org_a');
+  setActiveOrgId('org_b'); // 別タブ・組織管理ページで切り替えた
+  const calls = recordFetch(() => okJson({}));
+  await api.apiPutOverlay('roadmap', { teamGoal: 'x' });
+  await api.apiListProjects();
+  assert.equal(orgHeader(calls[0].init), 'org_a');
+  assert.equal(orgHeader(calls[1].init), 'org_a');
+});
+
+test('api: org_forbidden のあとは、このページから要求を送らない(ヘッダー無しで送り直さない)', async () => {
+  const api = await freshApi();
+  setActiveOrgId('org_gone');
+  api.lockActiveOrg('org_gone');
+  let calls = recordFetch(() => ({ ok: false, status: 403, json: async () => ({ error: 'org_forbidden' }) }));
+  await assert.rejects(() => api.apiListProjects());
+  assert.equal(getActiveOrgId(), null);
+  calls = recordFetch(() => okJson({}));
+  await assert.rejects(() => api.apiPutOverlay('roadmap', { teamGoal: 'x' }), /読み込み直して/);
+  await assert.rejects(() => api.apiPutProject('pd_0123456789', {}));
+  assert.equal(calls.length, 0);
+});
+
+test('api: 組織が無いページ(ファイル版・アカウント無し)はヘッダー無しで普通に動く', async () => {
+  const api = await freshApi();
+  api.lockActiveOrg(null);
+  const calls = recordFetch(() => okJson({}));
+  await api.apiPutOverlay('roadmap', {});
+  await api.apiListProjects();
+  assert.equal(calls.length, 2);
+  assert.equal(orgHeader(calls[0].init), undefined);
+  assert.equal(orgHeader(calls[1].init), undefined);
+});
+
+test('api: bfcache 復元・別タブの切替で、固定した組織と違えば読み込み直す', async () => {
+  const api = await freshApi();
+  const handlers = {};
+  let reloads = 0;
+  const addDesc = Object.getOwnPropertyDescriptor(globalThis, 'addEventListener');
+  const locDesc = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  Object.defineProperty(globalThis, 'addEventListener', { value: (t, fn) => { handlers[t] = fn; }, configurable: true, writable: true });
+  Object.defineProperty(globalThis, 'location', { value: { reload: () => { reloads++; } }, configurable: true, writable: true });
+  try {
+    setActiveOrgId('org_a');
+    api.lockActiveOrg('org_a');
+    handlers.pageshow({ persisted: true });
+    handlers.storage({ key: 'sailviz.activeOrg.v1' });
+    assert.equal(reloads, 0); // 同じ組織なら何もしない
+    setActiveOrgId('org_b');
+    handlers.pageshow({ persisted: false }); // 通常の表示は対象外
+    handlers.storage({ key: 'other.key' });
+    assert.equal(reloads, 0);
+    handlers.pageshow({ persisted: true });
+    handlers.storage({ key: 'sailviz.activeOrg.v1' });
+    assert.equal(reloads, 2);
+  } finally {
+    if (addDesc) Object.defineProperty(globalThis, 'addEventListener', addDesc); else delete globalThis.addEventListener;
+    if (locDesc) Object.defineProperty(globalThis, 'location', locDesc); else delete globalThis.location;
+  }
 });

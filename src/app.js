@@ -30,7 +30,8 @@ import {
 import { serializeProject, deserializeProject } from './project.js';
 import { uniqueProjectName } from './projectfs.js';
 import { store } from './store.js';
-import { resolveActiveOrg } from './activeorg.js';
+import { resolveActiveOrg, getActiveOrgId } from './activeorg.js';
+import { lockActiveOrg } from './api.js';
 import { earliestContentMs } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
 import { createDashboard } from './dashboard.js';
@@ -1146,6 +1147,9 @@ function enterApp() { showTop(); }
     const me = await store.me();
     if (me) resolveActiveOrg(me.orgs);
   } catch { /* 取れなくても今のまま動く */ }
+  // このページの組織をここで固定する(以後の読み書きはすべてこの組織。別タブ等で変わったら読み込み直す)。
+  // me が取れなかったときも覚えている組織で固定する(ヘッダー無しで送って所属の先頭へ書かない)。
+  lockActiveOrg(getActiveOrgId());
   if (sess.loggedIn) enterApp(); else showLanding();
 })();
 

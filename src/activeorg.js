@@ -1,7 +1,8 @@
 // 表示中の組織。組織 ID を localStorage に覚え、api.js が X-Sailviz-Org ヘッダーに載せる。
 // ファイル版・共有ログインでは何も覚えない(= ヘッダーを付けない)。
 // localStorage は無い・投げる(プライベートモード等)ことがあるので、読み書きは必ず try/catch で囲む。
-const KEY = 'sailviz.activeOrg.v1';
+export const ACTIVE_ORG_KEY = 'sailviz.activeOrg.v1';
+const KEY = ACTIVE_ORG_KEY;
 
 export function getActiveOrgId() {
   try { return globalThis.localStorage?.getItem(KEY) || null; } catch { return null; }
