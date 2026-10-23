@@ -61,3 +61,5 @@
   .ac-main { padding: 16px 12px 48px; }
   .ac-card { padding: 16px; }
 }
+.ac-org-switch { margin-bottom: 12px; }
+.ac-org-switch-btn[aria-pressed="true"] { background: var(--ac-blue); color: #fff; }
