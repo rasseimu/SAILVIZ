@@ -13,7 +13,7 @@ import { planBasemap, stitchBasemap } from './basemap.js';
 import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
 import { createWindStrip } from './windstripview.js';
-import { windDirAt, circMedianDeg } from './windaxis.js';
+import { windDirAt, circMedianDeg, detectManeuvers } from './windaxis.js';
 import { applyWindAxisOverrides, pushOverride } from './windaxisoverride.js';
 import { minuteWinnersDetailed } from './vmgminute.js';
 import { assessComparison, formatConfidenceLabel, windAxisReasonRows } from './analysisconfidence.js';
@@ -41,7 +41,8 @@ import { createProgress } from './progress.js';
 import { createRoadmap } from './roadmap.js';
 import { summarizeNeonShare } from './vmg.js';
 import { renderChart } from './chartview.js';
-import { speedChartDatasets, SPEED_SOURCES } from './speedchart.js';
+import { speedChartDatasets } from './speedchart.js';
+import { maneuverSpeedRows, topTacks } from './maneuverspeed.js';
 import {
   refreshDaySummary, daySummaryAfterGpsLoad, daySummaryAfterPracticeLoad, runDaySummaryAction,
 } from './daysummaryflow.js';
@@ -144,13 +145,32 @@ let vmgOn = false; // VMG勝者ネオン表示。表示のみ・保存しない(
 let vmgWinners = []; // [{boatId,color,lo,hi,pointOfSail,vmg}]（絶対epoch ms）
 let vmgAssessment = null; // assessComparison の結果(信頼度・理由・比較区間)。計算失敗時 null
 let vmgParticipation = null; // Map<track, {upwind, downwind}>(勝者が決まった断片への参加時間 ms)
+// タック/ジャイブ前後3秒の減速(maneuverspeed.js の行)と、減速の小さいタック上位3本。vmgOn時のみ算出。
+let maneuverRows = [];
+let tackTop = [];
+let maneuverPins = []; // 地図のピン: maneuverRows に上位3本の順位(rank)を付けたもの
+function recomputeManeuvers(visible) {
+  maneuverRows = [];
+  for (const tr of visible) {
+    try {
+      maneuverRows.push(...maneuverSpeedRows(tr, detectManeuvers(tr, { marks: state.marks }), windSeriesByTrack.get(tr)));
+    } catch { /* 検出失敗の艇は落とさず、マニューバなしとして扱う */ }
+  }
+  tackTop = topTacks(maneuverRows, 3);
+  maneuverPins = maneuverRows.map((r) => {
+    const i = tackTop.indexOf(r);
+    return i >= 0 ? { ...r, rank: i + 1 } : r;
+  });
+}
 function recomputeVmgWinners() {
   if (!vmgOn) {
     vmgWinners = []; vmgAssessment = null; vmgParticipation = null;
+    maneuverRows = []; tackTop = []; maneuverPins = [];
     renderVmgLegend();
     return;
   }
   const visible = state.tracks.filter((t) => t.visible);
+  recomputeManeuvers(visible);
   try {
     vmgAssessment = assessComparison(visible, windSeriesByTrack, {});
     const d = minuteWinnersDetailed(visible, windSeriesByTrack, {
@@ -163,6 +183,31 @@ function recomputeVmgWinners() {
     vmgWinners = []; vmgAssessment = null; vmgParticipation = null;
   }
   renderVmgLegend();
+}
+
+// 減速の小さいタック上位3本(VMG 凡例の下段)。行を押すとそのタックの3秒前へシーク(data-seek は絶対 epoch ms)。
+function tackTopHtml() {
+  const tacks = maneuverRows.filter((r) => r.kind === 'tack').length;
+  const gybes = maneuverRows.length - tacks;
+  let html = '<div class="vl-tacks"><div class="vl-tacks-title" title="GPS 座標の移動距離(前後±2秒)から求めた速度で、'
+    + 'タック時刻の前後3秒の「入りの速度 − 最低速度」が小さい順。タック/ジャイブの判別は推定風軸による'
+    + '(風軸が180°ずれているとタックとジャイブが入れ替わるため、その場合は風軸を手動設定してください)">'
+    + `${icon('award')} タック top3（前後3秒の減速が小さい順）</div>`
+    + `<div class="vl-note">検出 タック ${tacks}回／ジャイブ ${gybes}回（地図のピン T/G）</div>`;
+  if (!tackTop.length) return `${html}<div class="vl-note">前後3秒を切り出せるタックがありません。</div></div>`;
+  const body = tackTop.map((r, i) => {
+    const t = r.track;
+    const sw = `<span class="legend-swatch" style="background:${escapeHtml(t.color || '#888')}"></span>`;
+    const at = state.mode === 'elapsed' ? r.tMs - (t.tRange?.start ?? 0) : r.tMs;
+    return `<tr class="vl-tack-row" data-seek="${r.tMs}" data-track="${state.tracks.indexOf(t)}" title="押すとこのタックの3秒前へ移動">`
+      + `<td><span class="vl-rank">${i + 1}</span></td>`
+      + `<td class="vl-boat">${sw}<span class="vl-name">${escapeHtml(t.name || t.id || '')}</span></td>`
+      + `<td>${escapeHtml(formatClock(at, state.mode))}</td>`
+      + `<td>${r.entryKt.toFixed(1)}→${r.minKt.toFixed(1)}<span class="vl-sub">出 ${r.exitKt.toFixed(1)}</span></td>`
+      + `<td>−${r.dropKt.toFixed(1)}</td></tr>`;
+  }).join('');
+  return `${html}<table class="vl-table"><thead><tr><th></th><th>艇</th><th>時刻</th><th>入り→最低<br>[kt]</th><th>減速<br>[kt]</th></tr></thead>`
+    + `<tbody>${body}</tbody></table></div>`;
 }
 
 // 時間[ms]を「4分30秒」「45秒」の形で表す(比較区間の長さの表示用)。
@@ -245,6 +290,7 @@ function renderVmgLegend() {
     : '<tr><th>艇</th><th>風軸</th></tr>';
   html += `<table class="vl-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
   if (share) html += '<div class="vl-note">勝率の下の時間は参加時間。— は比較に参加していない走種。</div>';
+  html += tackTopHtml();
 
   el.className = '';
   el.innerHTML = html;
@@ -287,13 +333,12 @@ function updateSpeedChart(now) {
     if (show) placeSpeedPanel();
   }
   if (!show) { destroySpeedChart(); return; }
-  const source = $('speed-source').value;
-  const key = [range.start, range.end, state.mode, source,
+  const key = [range.start, range.end, state.mode,
     ...visible.map((t) => `${t.color}:${t.name}:${t.points.length}`)].join('|');
   if (speedChart && key === speedChartKey) { speedChart.draw(); return; }
   destroySpeedChart();
   speedChart = renderChart($('speed-canvas'), {
-    datasets: speedChartDatasets(visible, { range, mode: state.mode, source }),
+    datasets: speedChartDatasets(visible, { range, mode: state.mode }),
     from: range.start, to: range.end, fmtX: (v) => formatClock(v, state.mode), yBeginAtZero: true,
     plugins: [speedCursorPlugin],
   });
@@ -302,7 +347,6 @@ function updateSpeedChart(now) {
 
 const SPEED_PANEL_KEY = 'sailviz_speed_panel'; // {left, top, width, height}(#stage 内の px)。未移動なら無し
 const SPEED_PANEL_SHOW_KEY = 'sailviz_speed_panel_hidden';
-const SPEED_SOURCE_KEY = 'sailviz_speed_source'; // 速度の出どころ(speedchart.js の SPEED_SOURCES)
 const SPEED_PANEL_TOP_MIN = 50; // 回転コントロールの下
 let speedPanelPlaced = null; // 利用者が動かした/大きさを変えた位置。null の間は既定位置に追従
 let speedResizing = null; // パネル本体(右下ハンドル)を押したときの大きさ。離したときに変わっていれば利用者の操作として保存する
@@ -310,8 +354,6 @@ try {
   const saved = JSON.parse(globalThis.localStorage?.getItem(SPEED_PANEL_KEY) || 'null');
   if (saved && ['left', 'top', 'width', 'height'].every((k) => Number.isFinite(saved[k]))) speedPanelPlaced = saved;
   if (globalThis.localStorage?.getItem(SPEED_PANEL_SHOW_KEY) === '1') $('speed-panel-toggle').checked = false;
-  const src = globalThis.localStorage?.getItem(SPEED_SOURCE_KEY);
-  if (SPEED_SOURCES.includes(src)) $('speed-source').value = src;
 } catch { /* noop */ }
 
 // パネルを #stage 内に収める(はみ出す大きさは縮める)。#stage が非表示(大きさ0)の間は何もしない。
@@ -354,7 +396,7 @@ function saveSpeedPanelBox() {
 // ドラッグ移動(見出しバーをつかむ)。
 let speedDrag = null;
 $('speed-panel-bar').addEventListener('pointerdown', (e) => {
-  if (e.button !== 0 || e.target.closest('button, select')) return;
+  if (e.button !== 0 || e.target.closest('button')) return;
   const p = $('speed-panel');
   speedDrag = { id: e.pointerId, x: e.clientX, y: e.clientY, left: p.offsetLeft, top: p.offsetTop };
   e.currentTarget.setPointerCapture(e.pointerId);
@@ -400,10 +442,6 @@ function setSpeedPanelShown(on) {
 }
 $('speed-panel-toggle').addEventListener('change', (e) => setSpeedPanelShown(e.target.checked));
 $('speed-panel-close').addEventListener('click', () => setSpeedPanelShown(false));
-$('speed-source').addEventListener('change', (e) => {
-  try { globalThis.localStorage?.setItem(SPEED_SOURCE_KEY, e.target.value); } catch { /* noop */ }
-  updateSpeedChart(playback.getNow());
-});
 
 // elapsedモードでの軸オフセット(基準トラック開始)。軸時刻⇄絶対時刻の変換に使う。
 function currentBase() {
@@ -554,7 +592,7 @@ function draw() {
     transform: state.transform, tracks: state.tracks, events: state.events,
     marks: state.marks, videos: state.videos, activeVideoId: currentVideo?.id,
     now, mode: state.mode, crop: state.crop, referenceTrack: refTrack,
-    vmgWinners, basemap: state.basemap,
+    vmgWinners, maneuverPins, basemap: state.basemap,
   });
   timeline.render({ range, crop: state.crop, now, events: axisEvents, pending: pendingStart, videos: axisVideos, pins: axisPins });
   // 風軸ストリップ: 可視トラックの推定風向を軸時刻へ変換して重ね描き(色はマップと同じ)。
@@ -1372,6 +1410,14 @@ function setVmgLegendCollapsed(collapsed) {
 try {
   setVmgLegendCollapsed(globalThis.localStorage?.getItem(VMG_LEGEND_KEY) === '1');
 } catch { /* noop */ }
+// タック top3 の行: そのタックの3秒前へシーク(軸時刻へ変換。範囲外はクロップ端に寄る)。
+$('vmg-legend').addEventListener('click', (e) => {
+  const row = e.target.closest('.vl-tack-row');
+  if (!row) return;
+  const tr = state.tracks[+row.dataset.track];
+  const t = +row.dataset.seek - 3000;
+  playback.seek(state.mode === 'elapsed' ? t - (tr?.tRange?.start ?? 0) : t);
+});
 $('vmg-tab').addEventListener('click', () => {
   const collapsed = !$('vmg-dock').classList.contains('collapsed');
   setVmgLegendCollapsed(collapsed);

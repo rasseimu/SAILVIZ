@@ -1,6 +1,7 @@
 import { worldToScreen } from './viewport.js';
 import { project } from './projection.js';
-import { positionAt, speedAt, positionOnTracksAt } from './interpolate.js';
+import { positionAt, positionOnTracksAt } from './interpolate.js';
+import { windowedSpeedAt } from './speedchart.js';
 import { trackLookupTime } from './timeaxis.js';
 
 function toScreen(lat, lon, T) {
@@ -153,8 +154,35 @@ function drawVmgNeon(ctx, tr, T, lo, hi) {
   ctx.lineCap = 'butt';
 }
 
+// タック(T)/ジャイブ(G)のピン。針の先が地点。減速の小さいタック上位(rank 1〜3)は金色で順位を表示。
+function drawManeuverPin(ctx, s, p, color) {
+  const top = p.rank != null;
+  const r = top ? 8 : 6;
+  const cy = s.py - r - 6;
+  ctx.beginPath();
+  ctx.moveTo(s.px, s.py);
+  ctx.lineTo(s.px - r * 0.6, cy + r * 0.5);
+  ctx.lineTo(s.px + r * 0.6, cy + r * 0.5);
+  ctx.closePath();
+  ctx.fillStyle = top ? '#f1c40f' : color;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(s.px, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = top ? color : '#fff';
+  ctx.stroke();
+  ctx.fillStyle = top ? '#3d2e00' : '#fff';
+  ctx.font = `bold ${top ? 10 : 8}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(top ? String(p.rank) : (p.kind === 'tack' ? 'T' : 'G'), s.px, cy + 0.5);
+  ctx.textAlign = 'start';
+  ctx.textBaseline = 'alphabetic';
+}
+
 export function drawScene(ctx, state) {
-  const { transform: T, tracks, events, now, mode, crop, referenceTrack, marks = [], videos = [], activeVideoId = null, vmgWinners = [], basemap = null } = state;
+  const { transform: T, tracks, events, now, mode, crop, referenceTrack, marks = [], videos = [], activeVideoId = null, vmgWinners = [], maneuverPins = [], basemap = null } = state;
   ctx.clearRect(0, 0, T.w, T.h);
   if (!T.proj) return;
 
@@ -191,6 +219,15 @@ export function drawScene(ctx, state) {
     drawVmgNeon(ctx, tr, T, Math.max(win.lo, w.lo), Math.min(win.hi, w.hi));
   }
 
+  // タック/ジャイブのピン(ネオンの上・マークの下)。表示窓(実線区間)内のものだけ。
+  for (const p of maneuverPins) {
+    const tr = p.track;
+    if (!tr || !tr.visible) continue;
+    const win = trackWindow(tr, crop, mode);
+    if (p.tMs < win.lo || p.tMs > win.hi) continue;
+    drawManeuverPin(ctx, toScreen(p.lat, p.lon, T), p, tr.color);
+  }
+
   // コースマーク(ポリラインの上・現在地マーカーの下)
   for (const mk of marks) {
     drawMark(ctx, toScreen(mk.lat, mk.lon, T), mk);
@@ -216,8 +253,8 @@ export function drawScene(ctx, state) {
     ctx.lineWidth = 2;
     ctx.strokeStyle = '#000';
     ctx.stroke();
-    // 現在の移動速度(m/s)をマーカー右上に表示。GPS(playhead)に同期。
-    const speed = speedAt(tr.points, lookup);
+    // 現在の移動速度(m/s)をマーカー右上に表示。GPS(playhead)に同期。速度は GPS 座標±5秒(速度グラフと同じ)。
+    const speed = windowedSpeedAt(tr.points, lookup);
     if (speed != null) drawSpeedLabel(ctx, s, `${speed.toFixed(1)} m/s`, tr.color);
   }
 
