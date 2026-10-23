@@ -32,6 +32,7 @@ import { uniqueProjectName } from './projectfs.js';
 import { store } from './store.js';
 import { resolveActiveOrg, getActiveOrgId } from './activeorg.js';
 import { orgAvatar } from './orgavatar.js';
+import { icon } from './icons.js';
 import { lockActiveOrg } from './api.js';
 import { earliestContentMs } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
@@ -186,7 +187,7 @@ function renderVmgLegend() {
   const available = level !== 'unavailable';
   const label = a ? formatConfidenceLabel(a) : '比較不能：分析できませんでした';
 
-  let html = '<div class="vl-title">🏆 VMGネオン</div>'
+  let html = `<div class="vl-title">${icon('award')} VMGネオン</div>`
     + `<div class="vl-conf vl-conf-${escapeHtml(level)}">${escapeHtml(label)}</div>`;
   if (a) {
     // 合計は時刻の和集合。別の艇の組が同時刻に別の走種で比較されると、走種別の和は合計を上回る。
@@ -580,7 +581,7 @@ async function loadPractice(id, name = id) {
   draw();
   const n = state.videos.length;
   statusEl.textContent = n
-    ? `読込: ${name}。動画${n}本は未リンク（📁 動画フォルダ取込で再リンク）`
+    ? `読込: ${name}。動画${n}本は未リンク（動画フォルダ取込で再リンク）`
     : `読込: ${name}`;
   return true;
 }
@@ -794,9 +795,9 @@ function renderCard(card, item, summary) {
     ? `<div class="hc-meta"><span>トラック${summary.trackCount}</span>`
       + `<span>反省${summary.reflectionCount}</span>`
       + `<span>動画${summary.videoCount}</span></div>`
-      + (summary.wind ? `<div class="hc-wind">💨 ${escapeHtml(summary.wind)}</div>` : '')
+      + (summary.wind ? `<div class="hc-wind">${icon('wind')} ${escapeHtml(summary.wind)}</div>` : '')
     : '<div class="hc-meta">読込中…</div>';
-  card.innerHTML = `<div class="hc-title">${escapeHtml(title)}</div>${meta}`;
+  card.innerHTML = `<div class="hc-title">${icon('navigation')}${escapeHtml(title)}</div>${meta}`;
 }
 
 async function renderHome() {
@@ -806,7 +807,9 @@ async function renderHome() {
   // 動画フォルダ選択ボタン。動画走査専用(JSON保存には不要)。
   const pick = document.createElement('button');
   pick.className = 'btn';
-  pick.textContent = projectDir ? `📁 ${projectDir.name}（動画フォルダ・変更）` : '▶ 動画フォルダを選択（任意）';
+  pick.innerHTML = projectDir
+    ? `${icon('folder')} ${escapeHtml(projectDir.name)}（動画フォルダ・変更）`
+    : `${icon('folder')} 動画フォルダを選択（任意）`;
   pick.title = projectDir ? '動画フォルダを変更する' : '動画フォルダ取込に使うフォルダを選ぶ（任意）';
   pick.addEventListener('click', async () => { if (await chooseProjectDir()) renderHome(); });
   folderEl.appendChild(pick);
@@ -859,12 +862,12 @@ async function renderHome() {
     });
     wrap.appendChild(card);
     wrap.appendChild(del);
-    // 保存済みサマリがある練習だけ「📊 サマリ」を出す。本体を読まずにモーダルを開く。
+    // 保存済みサマリがある練習だけ「サマリ」を出す。本体を読まずにモーダルを開く。
     // 一覧APIで検証済みだが、表示側は形を前提にするのでここでも確かめる。
     if (isDaySummaryShape(it.daySummary)) {
       const dsBtn = document.createElement('button');
       dsBtn.className = 'home-card-ds';
-      dsBtn.textContent = '📊 サマリ';
+      dsBtn.innerHTML = `${icon('bar-chart-2')} サマリ`;
       dsBtn.title = '今日の練習サマリを開く';
       dsBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -878,11 +881,12 @@ async function renderHome() {
 
 // 取込ボタンの状態表示。state: idle|loading|success|error。
 // loading 以外は詳細を status にも出す。成功/失敗は数秒後に待機へ戻す。
-const FOLDER_BTN_IDLE = '📁 動画フォルダ取込';
+const FOLDER_BTN_IDLE = ['folder', '動画フォルダ取込'];
 let folderBtnTimer = null;
-function setFolderBtn(stateName, label) {
+// label は [アイコン名, 文字]。
+function setFolderBtn(stateName, [iconName, text]) {
   const btn = $('folder-import');
-  btn.textContent = label;
+  btn.innerHTML = `${icon(iconName)} ${escapeHtml(text)}`;
   btn.className = stateName === 'idle' ? 'btn' : `btn btn-${stateName}`;
   btn.disabled = stateName === 'loading';
   if (folderBtnTimer) { clearTimeout(folderBtnTimer); folderBtnTimer = null; }
@@ -894,22 +898,22 @@ function setFolderBtn(stateName, label) {
 // 同期フォルダ(Drive for Desktop 等)から GPS 範囲内の動画を自動取込。
 async function importFromVideoFolder() {
   if (!firstVisibleTrack()) {
-    setFolderBtn('error', '⚠️ 先にGPSを読込');
+    setFolderBtn('error', ['alert-triangle', '先にGPSを読込']);
     statusEl.textContent = '先にGPS軌跡を読み込んでください'; return;
   }
   if (!window.showDirectoryPicker) {
-    setFolderBtn('error', '⚠️ 非対応ブラウザ');
+    setFolderBtn('error', ['alert-triangle', '非対応ブラウザ']);
     statusEl.textContent = 'このブラウザは非対応です（Chrome/Edge で開いてください）'; return;
   }
   let dir;
   // startIn で反省データフォルダから開く(前回選んだ保存フォルダを優先)
   try { dir = await window.showDirectoryPicker({ startIn: projectDir || 'documents' }); } catch { return; } // キャンセルは何もしない
-  setFolderBtn('loading', '⏳ 走査中…');
+  setFolderBtn('loading', ['loader', '走査中…']);
   statusEl.textContent = '動画フォルダを走査中…';
   const range = globalRange(state.tracks, 'absolute');
   let res;
   try { res = await scanFolderVideos(dir, range); } catch (e) {
-    setFolderBtn('error', '⚠️ 失敗');
+    setFolderBtn('error', ['alert-triangle', '失敗']);
     statusEl.textContent = `フォルダ走査に失敗: ${e.message}`; return;
   }
   // 読込済みで未リンクの動画を、フォルダ内の同名ファイルで再リンク
@@ -930,7 +934,7 @@ async function importFromVideoFolder() {
     if (!present.has(m.file.name)) placeVideo(m.file, m.t, m.durationMs, null);
   }
   draw(); renderSidebar();
-  setFolderBtn('success', `✅ ${res.matched.length}本取込`);
+  setFolderBtn('success', ['check-circle', `${res.matched.length}本取込`]);
   statusEl.textContent = `${res.scanned}本中${res.matched.length}本を取込`
     + `（スキップ${res.skipped}本: 時刻不明${res.noTime ?? 0} / 範囲外${res.outOfRange ?? 0}）`
     + (relinked ? `（再リンク${relinked}本）` : '');
@@ -1028,7 +1032,7 @@ function renderSidebar() {
     const row = document.createElement('div');
     row.className = v === currentVideo ? 'track-row active' : 'track-row'; // 再生中はオレンジ
     row.innerHTML =
-      `<span>▶</span><span class="vid-name" data-play="${i}">${v.name}</span>` +
+      `${icon('play')}<span class="vid-name" data-play="${i}">${v.name}</span>` +
       `<button data-delvid="${i}">×</button>`;
     vl.appendChild(row);
   });
@@ -1205,7 +1209,7 @@ function setVmgLegendCollapsed(collapsed) {
   const tab = $('vmg-tab');
   tab.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
   tab.title = collapsed ? 'VMGネオン・勝率を開く' : 'VMGネオン・勝率を閉じる';
-  tab.querySelector('.vt-arrow').textContent = collapsed ? '◀' : '▶';
+  tab.querySelector('.vt-arrow').innerHTML = icon(collapsed ? 'chevron-left' : 'chevron-right');
 }
 try {
   setVmgLegendCollapsed(globalThis.localStorage?.getItem(VMG_LEGEND_KEY) === '1');
@@ -1289,9 +1293,15 @@ $('sb-home-logo').addEventListener('click', showTop); // サイドバーのア�
 $('roadmap-home-link').addEventListener('click', showProgress);
 $('home-new').addEventListener('click', startNewPractice);
 
+function setPlayBtn(playing) {
+  const btn = $('play-btn');
+  btn.innerHTML = icon(playing ? 'pause' : 'play');
+  btn.title = playing ? '一時停止' : '再生';
+  btn.setAttribute('aria-label', btn.title);
+}
 $('play-btn').addEventListener('click', () => {
   playback.toggle();
-  $('play-btn').textContent = playback.isPlaying() ? '⏸' : '▶';
+  setPlayBtn(playback.isPlaying());
 });
 $('speed-select').addEventListener('change', (e) => playback.setSpeed(+e.target.value));
 $('align-mode').addEventListener('change', (e) => { state.mode = e.target.value; recomputeView(); draw(); });
@@ -1467,7 +1477,7 @@ function openVideoPanel(v) {
   vid.src = v.url;
   $('video-panel').classList.remove('hidden');
   // 動画をmasterにするので app のクロックは止める
-  playback.pause(); $('play-btn').textContent = '▶';
+  playback.pause(); setPlayBtn(false);
   currentVideo = v;
   videoRotation = 0; // 表示のみ・毎回リセット
   // パネルで幅が変わってもユーザーの pan/zoom は保持(cx,cy,scale はそのまま、w/h だけ更新)。
@@ -1770,11 +1780,12 @@ function renderReflectionList() {
   state.reflections.forEach((r, i) => {
     const row = document.createElement('div'); row.className = 'refl-row';
     const snippet = (r.text || '(空)').replace(/\s+/g, ' ').slice(0, 40);
-    const meta = [r.practice?.date, windLabel(r.wind, { formatObs: formatObsTime }).replace('風: ', '🍃')]
+    const wind = windLabel(r.wind, { formatObs: formatObsTime }).replace('風: ', '');
+    const meta = [r.practice?.date && escapeHtml(r.practice.date), wind && `${icon('wind')} ${escapeHtml(wind)}`]
       .filter(Boolean).join(' ・ ');
     row.innerHTML =
       `<span class="refl-snippet" data-edit="${i}">${escapeHtml(snippet)}`
-      + `<div class="refl-meta">${escapeHtml(meta)}</div></span>`
+      + `<div class="refl-meta">${meta}</div></span>`
       + `<button class="refl-del" data-delrefl="${i}" title="削除">×</button>`;
     list.appendChild(row);
   });

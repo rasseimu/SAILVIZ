@@ -4,6 +4,7 @@
 // 現在地(現在の段階)は roadmapProgress の「最初の未達」で判定し、ステッパー上に「現在地」を表示する。
 // データは sailviz.roadmap オーバーレイ(localStorage ミラー＋保存フォルダ JSON)。反省(真実源)は触らない。
 import { memberList } from './members.js';
+import { icon } from './icons.js';
 import {
   loadRoadmap, saveRoadmap,
   setGoal, addMilestone, renameMilestone, removeMilestone,
@@ -31,7 +32,7 @@ export function stepperHtml(milestones = []) {
   const nodes = milestones.map((m, i) => {
     const state = m.done ? 'done' : (i === currentIndex ? 'current' : 'future');
     const here = i === currentIndex ? '<span class="rm-here">現在地</span>' : '';
-    const mark = m.done ? '✓' : (i + 1);
+    const mark = m.done ? icon('check') : (i + 1);
     const cp = childProgress(m);
     const count = cp.total ? `<span class="rm-child-count">${cp.done} / ${cp.total}</span>` : '';
     return `<li class="rm-step rm-${state}">${here}`
@@ -39,8 +40,8 @@ export function stepperHtml(milestones = []) {
       + `<span class="rm-step-title">${esc(m.title)}</span>${count}</li>`;
   }).join('');
   const goal = currentIndex >= milestones.length
-    ? '<li class="rm-step rm-goal"><span class="rm-here">達成！</span><span class="rm-dot">🏁</span><span class="rm-step-title">ゴール</span></li>'
-    : '<li class="rm-step rm-goal-future"><span class="rm-dot">🏁</span><span class="rm-step-title">ゴール</span></li>';
+    ? `<li class="rm-step rm-goal"><span class="rm-here">達成！</span><span class="rm-dot">${icon('flag')}</span><span class="rm-step-title">ゴール</span></li>`
+    : `<li class="rm-step rm-goal-future"><span class="rm-dot">${icon('flag')}</span><span class="rm-step-title">ゴール</span></li>`;
   return `<ol class="rm-stepper">${nodes}${goal}</ol>`;
 }
 
@@ -100,16 +101,16 @@ export function createRoadmap({
           + `<button class="rm-crename-save writes-json" data-mid="${esc(m.id)}" data-cid="${esc(c.id)}">保存</button>`
           + '<button class="rm-crename-cancel">取消</button>'
         : `<span class="rm-child-title${c.done ? ' rm-row-done' : ''}">${esc(c.title)}</span>`
-          + `<button class="rm-cedit" data-cid="${esc(c.id)}" title="名前を変更">✎</button>`;
+          + `<button class="rm-cedit" data-cid="${esc(c.id)}" title="名前を変更" aria-label="名前を変更">${icon('edit-2')}</button>`;
       return `<li class="rm-child-row">`
         + `<input type="checkbox" class="rm-ccheck writes-json" data-mid="${esc(m.id)}" data-cid="${esc(c.id)}" ${c.done ? 'checked' : ''} title="達成" />`
         + `${title}`
-        + `<button class="rm-cdel writes-json" data-mid="${esc(m.id)}" data-cid="${esc(c.id)}" title="削除">🗑</button>`
+        + `<button class="rm-cdel writes-json" data-mid="${esc(m.id)}" data-cid="${esc(c.id)}" title="削除" aria-label="削除">${icon('trash-2')}</button>`
         + `</li>`;
     }).join('');
     return `<ul class="rm-child-list">${rows}`
       + `<li class="rm-child-add"><input class="rm-cadd-input" data-mid="${esc(m.id)}" placeholder="小目標を追加" />`
-      + `<button class="rm-cadd-btn writes-json" data-mid="${esc(m.id)}">＋ 小目標</button></li></ul>`;
+      + `<button class="rm-cadd-btn writes-json" data-mid="${esc(m.id)}">${icon('plus')} 小目標</button></li></ul>`;
   }
 
   // 段階の編集リスト(達成トグル・改名・並べ替え・削除＋小目標)。
@@ -121,25 +122,25 @@ export function createRoadmap({
           + `<button class="rm-rename-save writes-json" data-id="${esc(m.id)}">保存</button>`
           + '<button class="rm-rename-cancel">取消</button>'
         : `<span class="rm-row-title${m.done ? ' rm-row-done' : ''}">${esc(m.title)}</span>`
-          + `<button class="rm-edit" data-id="${esc(m.id)}" title="名前を変更">✎</button>`;
+          + `<button class="rm-edit" data-id="${esc(m.id)}" title="名前を変更" aria-label="名前を変更">${icon('edit-2')}</button>`;
       // 子ありの段階は達成が子に連動(自動)。手動チェックではなく導出マークを出す。
       const check = hasChildren
-        ? `<span class="rm-check-auto" title="小目標の達成で自動完了">${m.done ? '✓' : '▢'}</span>`
+        ? `<span class="rm-check-auto" title="小目標の達成で自動完了">${icon(m.done ? 'check-square' : 'square')}</span>`
         : `<input type="checkbox" class="rm-check writes-json" data-id="${esc(m.id)}" ${m.done ? 'checked' : ''} title="達成" />`;
       return `<li class="rm-row">`
         + check
         + `${title}`
         + `<span class="rm-row-ctrl">`
-        + `<button class="rm-up writes-json" data-id="${esc(m.id)}" title="上へ" ${i === 0 ? 'disabled' : ''}>↑</button>`
-        + `<button class="rm-down writes-json" data-id="${esc(m.id)}" title="下へ" ${i === milestones.length - 1 ? 'disabled' : ''}>↓</button>`
-        + `<button class="rm-del writes-json" data-id="${esc(m.id)}" title="削除">🗑</button>`
+        + `<button class="rm-up writes-json" data-id="${esc(m.id)}" title="上へ" aria-label="上へ" ${i === 0 ? 'disabled' : ''}>${icon('arrow-up')}</button>`
+        + `<button class="rm-down writes-json" data-id="${esc(m.id)}" title="下へ" aria-label="下へ" ${i === milestones.length - 1 ? 'disabled' : ''}>${icon('arrow-down')}</button>`
+        + `<button class="rm-del writes-json" data-id="${esc(m.id)}" title="削除" aria-label="削除">${icon('trash-2')}</button>`
         + `</span>`
         + childListHtml(m)
         + `</li>`;
     }).join('');
     return `<ul class="rm-editor">${rows}</ul>`
       + `<div class="rm-add"><input class="rm-add-input" placeholder="新しい段階を追加" />`
-      + `<button class="rm-add-btn writes-json">＋ 追加</button></div>`;
+      + `<button class="rm-add-btn writes-json">${icon('plus')} 追加</button></div>`;
   }
 
   function renderBody() {
