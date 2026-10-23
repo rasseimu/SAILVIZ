@@ -30,6 +30,8 @@ import {
 import { serializeProject, deserializeProject } from './project.js';
 import { uniqueProjectName } from './projectfs.js';
 import { store } from './store.js';
+import { resolveActiveOrg, getActiveOrgId } from './activeorg.js';
+import { lockActiveOrg } from './api.js';
 import { earliestContentMs } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
 import { createDashboard } from './dashboard.js';
@@ -69,7 +71,8 @@ const state = {
   pins: [], // タイムライン上に自由に刺すピン(絶対時刻)。クリックでcrop開始を移動。
   reflections: loadReflections(),
   practiceDate: null,      // ページ(練習)の日時(絶対ms)。ダイアログで取得。保存対象。
-  currentFileName: null,   // 現在ロード/保存中のファイル名。後付け紐付けで同一ファイル上書き。
+  currentProjectId: null,  // 現在ロード/保存中の練習 ID。後付け紐付けで同じ練習に上書きする。
+  currentProjectName: null, // その練習の名前(ファイル名)。表示用。
   mode: 'absolute',
   accuracyFilter: true,
   crop: { start: 0, end: 0 },
@@ -510,17 +513,19 @@ async function saveProject() {
   // 作り直しに失敗したら null になり、GPS と食い違う古いサマリは保存しない。
   const ds = applyDaySummary(refreshDaySummary(currentDaySummary(), state.tracks, daySummaryOpts()));
   const obj = serializeProject(state, { savedAt: new Date().toISOString() });
-  // 既存ファイルを開いている/一度保存済みなら同名に上書き(後付けGPSでファイルを増やさない)。
-  // 新規は練習日時(ユーザー指定→データ時刻→now)から採番し、衝突は分単位でずらす。
-  let name = state.currentFileName;
-  if (!name) {
-    const baseMs = state.practiceDate ?? earliestContentMs(obj) ?? Date.now();
-    const existing = (await store.listProjects()).map((f) => f.name);
-    name = uniqueProjectName(baseMs, existing);
-    state.currentFileName = name;
-  }
+  // 既存の練習を開いている/一度保存済みなら同じ ID に上書き(後付けGPSで練習を増やさない)。
+  // 新規は練習日時(ユーザー指定→データ時刻→now)から名前を採番し(衝突は分単位でずらす)、作って ID を受け取る。
+  let name = state.currentProjectName;
   try {
-    await store.writeProject(name, obj);
+    if (state.currentProjectId) {
+      await store.writeProject(state.currentProjectId, obj);
+    } else {
+      const baseMs = state.practiceDate ?? earliestContentMs(obj) ?? Date.now();
+      const existing = (await store.listProjects()).map((f) => f.name);
+      const created = await store.createProject(uniqueProjectName(baseMs, existing), obj);
+      state.currentProjectId = created.id;
+      state.currentProjectName = name = created.name;
+    }
   } catch (e) {
     statusEl.textContent = `保存に失敗: ${e.message}`; return;
   }
@@ -531,14 +536,14 @@ async function saveProject() {
     : `保存しました: ${name}`;
 }
 
-// 選択した練習ファイルを読み込み、state を置換する。成否を boolean で返す。
-async function loadPractice(name) {
+// 選択した練習を ID で読み込み、state を置換する。name は表示用(一覧の名前)。成否を boolean で返す。
+async function loadPractice(id, name = id) {
   if (state.tracks.length && !window.confirm('現在の内容を破棄して読み込みますか？')) {
     return false;
   }
   let data;
   try {
-    data = deserializeProject(await store.readProject(name));
+    data = deserializeProject(await store.readProject(id));
   } catch (e) {
     statusEl.textContent = `読込に失敗: ${e.message}`;
     return false;
@@ -558,7 +563,8 @@ async function loadPractice(name) {
   // 黙って作り直す(次の保存で永続化)。
   applyDaySummary(daySummaryAfterPracticeLoad(data.daySummary, state.tracks, daySummaryOpts()));
   setBasemap(data.basemap || null); // 保存済み背景地図を復元(なければ消す)
-  state.currentFileName = name;
+  state.currentProjectId = id;
+  state.currentProjectName = name;
   saveReflections(state.reflections); // localStorage にも反映
   $('align-mode').value = state.mode;
   $('accuracy-filter').checked = state.accuracyFilter;
@@ -581,14 +587,14 @@ async function loadPractice(name) {
 // 状態遷移(作り直す・自動表示する・保存する)は daysummaryflow.js でテスト済み。
 // ここはその結果を state と DOM に反映するだけにする。
 
-// 開いているサマリの文脈。fromHomeName があればホームカードから開いた(練習は未読込)。
+// 開いているサマリの文脈。fromHome({ id, name })があればホームカードから開いた(練習は未読込)。
 let dsContext = null;
 
-function openDaySummary(summary, { fromHomeName = null } = {}) {
-  dsContext = { fromHomeName };
+function openDaySummary(summary, { fromHome = null } = {}) {
+  dsContext = { fromHome };
   $('ds-modal-inner').innerHTML = renderDaySummaryHtml(summary, {
-    canRecompute: !fromHomeName && state.tracks.length > 0,
-    unsaved: !fromHomeName && !state.daySummarySaved,
+    canRecompute: !fromHome && state.tracks.length > 0,
+    unsaved: !fromHome && !state.daySummarySaved,
   });
   $('ds-modal').hidden = false;
 }
@@ -632,10 +638,10 @@ $('ds-modal').addEventListener('click', async (e) => {
     return;
   }
   // 導線: ホームから開いた場合は先に練習を読み込む(確認ダイアログでキャンセルなら何もしない)
-  const fromHomeName = dsContext?.fromHomeName ?? null;
+  const fromHome = dsContext?.fromHome ?? null;
   closeDaySummary();
-  await runDaySummaryAction(action, { fromHomeName },
-    { loadPractice, showTrack, setVmgOn, openReflectionEditor });
+  await runDaySummaryAction(action, { fromHomeId: fromHome?.id ?? null },
+    { loadPractice: (id) => loadPractice(id, fromHome?.name), showTrack, setVmgOn, openReflectionEditor });
 });
 
 // ================= ホーム(直近の練習・全体目標・使い方ガイド) =================
@@ -712,8 +718,8 @@ $('top-screen').addEventListener('click', (e) => {
   if (!btn) return;
   const action = btn.dataset.homeAction;
   if (action === 'practices') showHome();
-  else if (action === 'open' && topRecent) openPractice(topRecent.name);
-  else if (action === 'summary' && topRecent?.daySummary) openDaySummary(topRecent.daySummary, { fromHomeName: topRecent.name });
+  else if (action === 'open' && topRecent) openPractice(topRecent.id, topRecent.name);
+  else if (action === 'summary' && topRecent?.daySummary) openDaySummary(topRecent.daySummary, { fromHome: topRecent });
 });
 
 // ================= 練習データ(カード型ランチャー) =================
@@ -762,7 +768,8 @@ function resetState() {
   state.daySummary = null;
   state.daySummarySaved = false;
   state.basemap = null; // 新規練習では背景地図もクリア(次の初回取込で再取得)
-  state.currentFileName = null;
+  state.currentProjectId = null;
+  state.currentProjectName = null;
   saveReflections(state.reflections);
   recomputeView(); renderSidebar(); draw();
 }
@@ -773,8 +780,8 @@ function startNewPractice() {
   showTrack();
 }
 
-async function openPractice(name) {
-  if (await loadPractice(name)) showTrack();
+async function openPractice(id, name) {
+  if (await loadPractice(id, name)) showTrack();
 }
 
 // カードの中身(ラベル＋要約 or 読込中プレースホルダ)を描画。
@@ -827,7 +834,7 @@ async function renderHome() {
     const card = document.createElement('button');
     card.className = 'home-card';
     renderCard(card, it, it);
-    card.addEventListener('click', () => openPractice(it.name));
+    card.addEventListener('click', () => openPractice(it.id, it.name));
     // 角の赤バツ削除(編集モード時のみ有効=writes-json)。カードを開かないよう伝播を止める。
     const del = document.createElement('button');
     del.className = 'home-card-del writes-json';
@@ -839,7 +846,9 @@ async function renderHome() {
       const label = it.label || it.name;
       if (!window.confirm(`練習「${label}」を削除しますか？この操作は元に戻せません。`)) return;
       try {
-        await store.deleteProject(it.name);
+        await store.deleteProject(it.id);
+        // 開いている練習を消したら、次の保存は新規として作り直す(消えた ID に上書きしない)。
+        if (state.currentProjectId === it.id) { state.currentProjectId = null; state.currentProjectName = null; }
         invalidateProjectEntriesCache();
         renderHome();
       } catch (err) {
@@ -857,7 +866,7 @@ async function renderHome() {
       dsBtn.title = '今日の練習サマリを開く';
       dsBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        openDaySummary(it.daySummary, { fromHomeName: it.name });
+        openDaySummary(it.daySummary, { fromHome: it });
       });
       wrap.appendChild(dsBtn);
     }
@@ -1132,6 +1141,15 @@ function enterApp() { showTop(); }
   } catch { /* 復元失敗は無視 */ }
   let sess = { loggedIn: false };
   try { sess = await store.session(); } catch { /* 未ログイン扱い */ }
+  // アカウントでログインしていれば、表示中の組織を所属から決める(覚えている ID が外れていれば先頭)。
+  // 未ログイン(401)・共有ログイン・ファイル版(503)は何もしない=ヘッダー無しのまま。
+  try {
+    const me = await store.me();
+    if (me) resolveActiveOrg(me.orgs);
+  } catch { /* 取れなくても今のまま動く */ }
+  // このページの組織をここで固定する(以後の読み書きはすべてこの組織。別タブ等で変わったら読み込み直す)。
+  // me が取れなかったときも覚えている組織で固定する(ヘッダー無しで送って所属の先頭へ書かない)。
+  lockActiveOrg(getActiveOrgId());
   if (sess.loggedIn) enterApp(); else showLanding();
 })();
 
@@ -1591,16 +1609,16 @@ const NOTE_LABELS = {
   slowFactor: '遅かった要因', fastFactor: '速かった要因',
 };
 
-// 保存済み全練習を deserialize して {name, project}[] で返す。
+// 保存済み全練習を deserialize して {id, name, project}[] で返す。
 // ダッシュボードと進捗画面で共有。読み込みは並列化し、結果をキャッシュする
 // (保存/削除時に invalidateProjectEntriesCache で破棄)。呼び出し側が push で
 // 加工する(進捗画面の現在練習など)ため、キャッシュは複製して返す。
 let projectEntriesCache = null;
 async function loadProjectEntries() {
   if (projectEntriesCache) return [...projectEntriesCache];
-  const names = (await store.listProjects()).map((f) => f.name);
-  const settled = await Promise.all(names.map(async (name) => {
-    try { return { name, project: deserializeProject(await store.readProject(name)) }; }
+  const list = await store.listProjects();
+  const settled = await Promise.all(list.map(async ({ id, name }) => {
+    try { return { id, name, project: deserializeProject(await store.readProject(id)) }; }
     catch { return null; } // 壊れたファイルはスキップ
   }));
   projectEntriesCache = settled.filter(Boolean);

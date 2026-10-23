@@ -12,9 +12,10 @@ const ORG = 'o_main';
 const W = legacySharedPrincipal({ orgId: ORG, canWrite: true });
 const R = legacySharedPrincipal({ orgId: ORG, canWrite: false });
 const NOORG = legacySharedPrincipal({ orgId: null, canWrite: true });
-const MEMBER = user('u_member', [ORG]);
-const OUTSIDER = user('u_out', ['o_other']);
-const OWNER = user('u_owner', ['o_other']);
+// ログインユーザーは表示中の組織(所属の先頭)を持つ。
+const MEMBER = user('u_member', [ORG], ORG);
+const OUTSIDER = user('u_out', ['o_other'], 'o_other');
+const OWNER = user('u_owner', ['o_other'], 'o_other');
 
 const trk = (visibility, over = {}) => ({ kind: 'practice', visibility, ownerId: null, crewIds: [], ...over });
 const rfl = (id, visibility, over = {}) => ({ id, visibility, ownerId: null, ...over });
@@ -66,25 +67,28 @@ test('(b) 組織未設定の共有ログインは何も見えない (空の器�
   assert.equal(canSeeProject(NOORG, { orgId: null, tracks: [trk('org')], reflections: [] }), false);
 });
 
-test('(1) ログインユーザー: 自分の private・乗った private・組織の org が見える', () => {
+test('(1) ログインユーザー: 表示中の組織の器で、自分の private・乗った private・組織の org が見える', () => {
   const access = {
     orgId: ORG,
     tracks: [trk('private', { ownerId: 'u_owner' }), trk('private', { crewIds: ['u_owner'] }), trk('org'), trk('private')],
     reflections: [rfl('r0', 'private', { ownerId: 'u_owner' }), rfl('r1', 'private', { ownerId: 'u_x' })],
   };
-  const o = filterProject(OWNER, proj(4, 2), access);
-  assert.deepEqual(o.tracks.map((t) => t.id), ['t0', 't1']); // org は他組織なので見えない
+  // 表示中でない組織の器は、自分の private があっても出さない(設計書 §5.3)
+  assert.equal(filterProject(OWNER, proj(4, 2), access), null);
+  const o = filterProject(user('u_owner', [ORG], ORG), proj(4, 2), access);
+  assert.deepEqual(o.tracks.map((t) => t.id), ['t0', 't1', 't2']);
   assert.deepEqual(o.reflections.map((r) => r.id), ['r0']);
   const m = filterProject(MEMBER, proj(4, 2), access);
   assert.deepEqual(m.tracks.map((t) => t.id), ['t2']);
   assert.deepEqual(m.reflections, []);
 });
 
-test('互換 API で書けるのは組織設定済みで書込権限のある共有ログインだけ', () => {
+test('互換 API で書けるのは組織設定済みで書込権限のある共有ログインと、表示中の組織があるユーザー', () => {
   assert.equal(isCompatWriter(W), true);
   assert.equal(isCompatWriter(R), false);
   assert.equal(isCompatWriter(NOORG), false);
-  assert.equal(isCompatWriter(MEMBER), false);
+  assert.equal(isCompatWriter(MEMBER), true);
+  assert.equal(isCompatWriter(user('u_zzz', [])), false);
   assert.equal(isCompatWriter(anonymous()), false);
   assert.equal(isCompatWriter(null), false);
 });
@@ -95,7 +99,7 @@ test('(3) PUT: 新しい器は書ける・既存の器は自組織のものだ�
   assert.equal(canPutDay(W, { orgId: 'o_other', tracks: [], reflections: [] }), false);
   assert.equal(canPutDay(W, { orgId: null, tracks: [], reflections: [] }), false);
   assert.equal(canPutDay(NOORG, null), false);
-  assert.equal(canPutDay(MEMBER, null), false);
+  assert.equal(canPutDay(user('u_zzz', []), null), false);
 });
 
 test('(3) PUT で管理する反省は、見えて書ける行だけ', () => {
@@ -114,7 +118,8 @@ test('(3) DELETE: 中身が全部書けるときだけ。見えない項目が�
   assert.equal(canDeleteDay(W, { orgId: ORG, tracks: [], reflections: [] }), true);
   assert.equal(canDeleteDay(W, { orgId: 'o_other', tracks: [], reflections: [] }), false);
   assert.equal(canDeleteDay(R, ok), false);
-  assert.equal(canDeleteDay(MEMBER, ok), false);
+  assert.equal(canDeleteDay(MEMBER, ok), true);
+  assert.equal(canDeleteDay(OUTSIDER, ok), false);
   assert.equal(canDeleteDay(W, null), false);
 });
 
@@ -136,14 +141,15 @@ const PROG = {
   orphan: { issueStage: 9 },
 };
 
-test('(4) progress 読み取り: 見える反省の進捗だけ。孤立した進捗は共有ログインにだけ', () => {
+test('(4) progress 読み取り: 見える反省の進捗だけ。孤立した進捗は共有ログインにだけ。user は表示中の組織だけ', () => {
   assert.deepEqual(Object.keys(filterProgressRead(W, PROG, idx)).sort(), ['orphan', 'rA', 'rO']);
   assert.deepEqual(Object.keys(filterProgressRead(R, PROG, idx)).sort(), ['orphan', 'rA', 'rO']);
   assert.deepEqual(Object.keys(filterProgressRead(NOORG, PROG, idx)), []);
-  assert.deepEqual(Object.keys(filterProgressRead(MEMBER, PROG, idx)).sort(), ['rA', 'rO']);
+  // user は他組織の public (rO) も出さない
+  assert.deepEqual(Object.keys(filterProgressRead(MEMBER, PROG, idx)).sort(), ['rA']);
   // 他組織 (o_other) のメンバー: 自分の組織の org と public は見えるが、孤立した進捗や o_main の org は見えない
   assert.deepEqual(Object.keys(filterProgressRead(OUTSIDER, PROG, idx)).sort(), ['rO', 'rOO']);
-  assert.deepEqual(Object.keys(filterProgressRead(user('u_zzz', []), PROG, idx)).sort(), ['rO']);
+  assert.deepEqual(Object.keys(filterProgressRead(user('u_zzz', []), PROG, idx)), []);
 });
 
 test('(4)(c) progress 書き込み: 見えない反省 (private・ID 重複の一方が private) の進捗は元のまま', () => {
@@ -205,7 +211,7 @@ test('(e) roadmap 読み取り: 組織メンバーだけ。他組織・組織な
   assert.deepEqual(Object.keys(filterRoadmapRead(MEMBER, RM, RM_ACCESS)).sort(), ['A', 'B']);
   assert.deepEqual(Object.keys(filterRoadmapRead(OUTSIDER, RM, RM_ACCESS)).sort(), ['C', 'E'], '他組織のメンバーは自組織の行だけ');
   assert.deepEqual(Object.keys(filterRoadmapRead(user('u_zzz', []), RM, RM_ACCESS)), [], '組織に入っていないユーザーは何も見えない');
-  assert.deepEqual(Object.keys(filterRoadmapRead(user('u_out', []), RM, RM_ACCESS)), ['E'], '本人の行は見える');
+  assert.deepEqual(Object.keys(filterRoadmapRead(user('u_out', []), RM, RM_ACCESS)), [], '表示中の組織が無ければ本人の行も出さない');
   assert.deepEqual(Object.keys(filterRoadmapRead(anonymous(), RM, RM_ACCESS)), []);
 });
 
@@ -223,4 +229,91 @@ test('(4) roadmap 書き込み: トークンの無い共有ログイン・組織
   for (const s of [R, NOORG]) {
     assert.deepEqual(mergeRoadmapWrite(s, RM, { A: { goal: 'x' }, N: { goal: 'n' } }, RM_ACCESS), RM);
   }
+});
+
+// ---- 表示中の組織(activeOrgId)への絞り込み ----
+const OA = 'o_a'; const OB = 'o_b';
+const XA = user('u_x', [OA, OB], OA); // A と B に所属し、A を表示中
+const XB = user('u_x', [OA, OB], OB);
+const FORBIDDEN = { ...user('u_x', [OA], null), orgForbidden: true };
+
+test('isCompatWriter: activeOrgId のある user は書き手、orgForbidden は書き手でない', () => {
+  assert.equal(isCompatWriter(XA), true);
+  assert.equal(isCompatWriter(user('u_x', [OA], null)), false);
+  assert.equal(isCompatWriter(FORBIDDEN), false);
+  assert.equal(isCompatWriter({ ...user('u_x', [OA], OA), orgForbidden: true }), false);
+});
+
+test('canSeeProject: user は表示中でない組織の器を(public でも)見ない', () => {
+  const inB = { orgId: OB, tracks: [trk('public')], reflections: [rfl('r0', 'public')] };
+  assert.equal(canSeeProject(XA, inB), false);
+  assert.equal(filterProject(XA, proj(1, 1), inB), null);
+  assert.equal(canSeeProject(XB, inB), true);
+  const other = { orgId: 'o_other', tracks: [trk('public')], reflections: [] };
+  assert.equal(canSeeProject(XA, other), false, '他組織の public も出さない');
+  assert.equal(canSeeProject(XA, { orgId: OB, tracks: [], reflections: [] }), false, '空の器も表示中の組織だけ');
+  assert.equal(canSeeProject(XA, { orgId: OA, tracks: [], reflections: [] }), true);
+  assert.equal(canSeeProject(FORBIDDEN, { orgId: OA, tracks: [trk('org')], reflections: [] }), false);
+  // 共有ログインは今までどおり他組織の public が見える
+  assert.equal(canSeeProject(W, other), true);
+});
+
+test('canPutDay / canDeleteDay: user は表示中の組織の器だけ', () => {
+  const dayA = { orgId: OA, tracks: [trk('org')], reflections: [rfl('r0', 'org')] };
+  const dayB = { orgId: OB, tracks: [trk('org')], reflections: [rfl('r0', 'org')] };
+  assert.equal(canPutDay(XA, null), true, '新しい器は書ける');
+  assert.equal(canPutDay(XA, dayA), true);
+  assert.equal(canPutDay(XA, dayB), false, '所属していても表示中でない組織は書かない');
+  assert.equal(canPutDay(FORBIDDEN, null), false);
+  assert.equal(canDeleteDay(XA, dayA), true, '作成者でなくても表示中の組織なら消せる');
+  assert.equal(canDeleteDay(XA, dayB), false);
+  assert.equal(canDeleteDay(XB, dayB), true);
+  assert.equal(canDeleteDay(XA, { ...dayA, reflections: [rfl('r0', 'private', { ownerId: 'u_y' })] }), false);
+  assert.equal(managedReflectionPredicate(XA, OA)({ id: 'a', visibility: 'org', ownerId: null }), true);
+  assert.equal(managedReflectionPredicate(XA, OB)({ id: 'a', visibility: 'org', ownerId: null }), false);
+});
+
+const idx2 = buildReflectionIndex([
+  { id: 'rA', visibility: 'org', ownerId: 'u_y', orgId: OA },
+  { id: 'rB', visibility: 'org', ownerId: 'u_y', orgId: OB },
+  { id: 'rDup', visibility: 'org', ownerId: null, orgId: OA }, // 同じ反省 ID が A と B にある
+  { id: 'rDup', visibility: 'org', ownerId: null, orgId: OB },
+]);
+const PROG2 = { rA: { issueStage: 1 }, rB: { issueStage: 2 }, rDup: { issueStage: 3 }, orphan: { issueStage: 4 } };
+
+test('mergeProgressWrite: 表示中の組織の外にも同じ反省 ID があれば書かない', () => {
+  const out = mergeProgressWrite(XA, PROG2, { rA: { issueStage: 1 }, rDup: { issueStage: 99 } }, idx2);
+  assert.deepEqual(out.rDup, PROG2.rDup, 'B にもある rDup は変わらない');
+  assert.deepEqual(out.rB, PROG2.rB, 'incoming に無い B の進捗は消さない');
+  assert.deepEqual(out.orphan, PROG2.orphan, '孤立した進捗も user は消さない');
+  // incoming に無くても、外にある ID は消えない
+  const out2 = mergeProgressWrite(XA, PROG2, {}, idx2);
+  assert.deepEqual(Object.keys(out2).sort(), ['orphan', 'rB', 'rDup']);
+  assert.deepEqual(Object.keys(filterProgressRead(XA, PROG2, idx2)), ['rA']);
+});
+
+test('mergeProgressWrite: 表示中の組織の反省の進捗は作成者でなくても書ける', () => {
+  const out = mergeProgressWrite(XA, PROG2, { rA: { issueStage: 7, comments: { goal: [{ text: 'c', ts: 1 }] } } }, idx2);
+  assert.equal(out.rA.issueStage, 7);
+  assert.equal(out.rA.comments.goal.length, 1);
+  const outB = mergeProgressWrite(XB, PROG2, { rB: { issueStage: 8 }, rA: { issueStage: 9 } }, idx2);
+  assert.equal(outB.rB.issueStage, 8);
+  assert.deepEqual(outB.rA, PROG2.rA, '表示中でない A は変わらない');
+});
+
+test('filterRoadmapRead / mergeRoadmapWrite: user は表示中の組織の行だけ読み書きし、新しい名前は書き手として作れる', () => {
+  const access = [
+    { legacyName: 'a1', orgId: OA, userId: null },
+    { legacyName: 'a2', orgId: OA, userId: 'u_y' },
+    { legacyName: 'b1', orgId: OB, userId: 'u_x' }, // 本人の行でも表示中でなければ出さない
+  ];
+  const rm = { a1: { goal: '1' }, a2: { goal: '2' }, b1: { goal: '3' } };
+  assert.deepEqual(Object.keys(filterRoadmapRead(XA, rm, access)).sort(), ['a1', 'a2']);
+  assert.deepEqual(Object.keys(filterRoadmapRead(XB, rm, access)), ['b1']);
+  const out = mergeRoadmapWrite(XA, rm, { a1: { goal: 'x' }, b1: { goal: '乗っ取り' }, N: { goal: 'new' } }, access);
+  assert.equal(out.a1.goal, 'x');
+  assert.equal('a2' in out, false, '表示中の組織の行は全置き換えで消える');
+  assert.equal(out.b1.goal, '3', '表示中でない組織の行は元のまま');
+  assert.equal(out.N.goal, 'new');
+  assert.deepEqual(mergeRoadmapWrite(FORBIDDEN, rm, { a1: { goal: 'x' }, N: { goal: 'n' } }, access), rm);
 });

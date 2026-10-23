@@ -5,8 +5,9 @@
 import {
   pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm, membersView,
   soleAdminOrgs, unloadedAdminOrgs, frozenSuccessionNotices, isOrgAdmin, unloadedNotice, displayName, buildDeleteBody, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView, resendFailureView, accountExtrasFromMeta, SESSION_EXPIRED_MESSAGE,
-  pickOrg, orgRoleLabel, checkEmailChange,
+  pickOrg, orgRoleLabel, checkEmailChange, orgSwitchItems,
 } from './logic.js';
+import { resolveActiveOrg, setActiveOrgId } from '../activeorg.js';
 
 // 凍結した入口(名簿・招待の期限と回数・後任の選択)。サーバが meta を差し込んだときだけ出す(FZ1。FEATURE_ACCOUNT_EXTRAS=1)。
 const EXTRAS = accountExtrasFromMeta(document.querySelector('meta[name="sailviz-features"]')?.content);
@@ -68,6 +69,13 @@ let me = null; // GET /api/me の応答。未ログインは null
 async function loadMe() {
   const r = await api('GET', '/api/me');
   me = r.status === 200 ? r.json : null;
+  if (me) {
+    // アプリと同じ「表示中の組織」に揃える。me.org(=orgs[0])は表示中の組織で置き換える(me.orgs は退会の後任判定のため全部残す)。
+    const activeId = resolveActiveOrg(me.orgs);
+    const active = (me.orgs || []).find((o) => o.id === activeId);
+    if (active) me.org = active;
+    orgAdminSelected = activeId;
+  }
   return r;
 }
 
@@ -376,9 +384,25 @@ async function renderAccount() {
 
 // ---- 組織(名簿は凍結中。FZ1) ----
 // 名簿の提出・一覧は出さず、招待リンクの管理(管理者のみ)とメンバー一覧だけを出す。管理者かどうかは /api/me の orgs[].isAdmin で見る。
+// 表示中の組織の切り替え。所属が 1 つだけなら出さない。押したら覚えて、その組織で組織の画面を描き直す。
+function orgSwitchBar() {
+  const items = orgSwitchItems(me.orgs, me.org?.id);
+  if (!items.length) return null;
+  return h('div', { id: 'ac-org-switch', class: 'ac-row ac-org-switch' }, ...items.map((it) => {
+    const btn = h('button', { class: 'ac-btn ac-btn-ghost ac-org-switch-btn', type: 'button', 'data-org-id': it.id, 'aria-pressed': String(it.active) }, it.name);
+    btn.addEventListener('click', () => {
+      setActiveOrgId(it.id);
+      me.org = me.orgs.find((o) => o.id === it.id);
+      orgAdminSelected = it.id;
+      renderOrgHome(encodeURIComponent(it.id));
+    });
+    return btn;
+  }));
+}
+
 async function renderOrgHome(orgId) {
   const title = h('h1', {}, `組織: ${me.org.name}`);
-  mount(h('section', { class: 'ac-card' }, title));
+  mount(...[orgSwitchBar()].filter(Boolean), h('section', { class: 'ac-card' }, title));
   const mr = await api('GET', `/api/orgs/${orgId}/members`);
   if (!title.isConnected) return; // 待っている間に別の描画が画面を差し替えた
   const isAdmin = isOrgAdmin(me.orgs, me.org.id);
@@ -394,7 +418,7 @@ async function renderOrgHome(orgId) {
 }
 
 // ---- 組織管理(#org): メールアドレスの変更・所属組織の切替とメンバー・招待リンク・組織の追加 ----
-let orgAdminSelected = null; // 表示中の組織 ID(ページ内の切替。再読込では先頭の組織に戻る)
+let orgAdminSelected = null; // 表示中の組織 ID(loadMe が resolveActiveOrg で決める。切替で覚え直す)
 
 function emailCard() {
   const verified = me.emailVerified === true;
@@ -435,7 +459,7 @@ function orgListCard(current) {
       const selected = current && o.id === current.id;
       const btn = h('button', { class: 'ac-org-pick', type: 'button', 'aria-pressed': String(Boolean(selected)), 'data-org': o.id },
         h('span', { class: 'ac-org-pick-name' }, o.name), h('span', { class: 'ac-badge', 'data-ok': String(o.isAdmin === true) }, orgRoleLabel(o.isAdmin)));
-      btn.addEventListener('click', () => { orgAdminSelected = o.id; renderOrgAdmin(); });
+      btn.addEventListener('click', () => { orgAdminSelected = o.id; setActiveOrgId(o.id); me.org = o; renderOrgAdmin(); });
       return h('li', {}, btn);
     })));
 }

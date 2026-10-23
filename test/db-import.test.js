@@ -113,7 +113,9 @@ test('取込後の往復: readProject が元ファイルと一致(_rev 除く)',
   importFromFiles({ db, dataDir, now: 1 });
   const { createDbRepo } = await import('../server/repos/dbRepo.js');
   const repo = createDbRepo({ db, dataDir });
-  const got = await repo.readProject('sailviz-20260901-0900.sailviz.json');
+  // 練習は ID で引く(名前は表示用)。
+  const { id } = (await repo.listProjects()).find((p) => p.name === 'sailviz-20260901-0900.sailviz.json');
+  const got = await repo.readProject(id);
   const { _rev, ...pure } = got;
   const { readFileSync } = await import('node:fs');
   const original = JSON.parse(readFileSync(join(dataDir, 'projects', 'sailviz-20260901-0900.sailviz.json'), 'utf8'));

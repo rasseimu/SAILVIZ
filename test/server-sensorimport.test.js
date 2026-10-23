@@ -70,9 +70,9 @@ test('preview: person/csv 欠落は 400', async () => {
 test('commit: 既存プロジェクトの tracks/sensorLogs に反映', async () => {
   // 対象プロジェクトを用意
   const name = 'sailviz-20260908-0906-m1.sailviz.json';
-  await fetch(`${base}/api/projects/${name}`, {
-    method: 'PUT', headers: bearer,
-    body: JSON.stringify({ version: 1, practiceDate: t0, reflections: [{ people: ['山田 太郎'] }] }),
+  await fetch(`${base}/api/projects`, {
+    method: 'POST', headers: bearer,
+    body: JSON.stringify({ name, project: { version: 1, practiceDate: t0, reflections: [{ people: ['山田 太郎'] }] } }),
   });
   // プレビュー
   const pv = await (await fetch(`${base}/api/sensor-imports`, {
@@ -82,10 +82,10 @@ test('commit: 既存プロジェクトの tracks/sensorLogs に反映', async ()
   // コミット
   const r = await fetch(`${base}/api/sensor-imports/${pv.importId}/commit`, {
     method: 'POST', headers: bearer,
-    body: JSON.stringify({ name, boatNumber: '4649' }),
+    body: JSON.stringify({ id: name, boatNumber: '4649' }),
   });
   assert.equal(r.status, 200);
-  assert.equal((await r.json()).name, name);
+  assert.equal((await r.json()).id, name, 'ファイル版の id はファイル名');
   // 反映確認
   const proj = await (await fetch(`${base}/api/projects/${name}`)).json();
   assert.equal(proj.tracks.length, 1);
@@ -96,9 +96,9 @@ test('commit: 既存プロジェクトの tracks/sensorLogs に反映', async ()
 
 test('commit: 速度の外れ値で除いた点の区間が excludedIntervals(speed)として保存される', async () => {
   const name = 'sailviz-20260908-0906-m2.sailviz.json';
-  await fetch(`${base}/api/projects/${name}`, {
-    method: 'PUT', headers: bearer,
-    body: JSON.stringify({ version: 1, practiceDate: t0 }),
+  await fetch(`${base}/api/projects`, {
+    method: 'POST', headers: bearer,
+    body: JSON.stringify({ name, project: { version: 1, practiceDate: t0 } }),
   });
   // 合成座標。10秒目だけ約1.1km 北へ跳ぶ(前後から 25 m/s 超)ので読込時に除かれる
   const csv = [
@@ -113,7 +113,7 @@ test('commit: 速度の外れ値で除いた点の区間が excludedIntervals(sp
   })).json();
   const r = await fetch(`${base}/api/sensor-imports/${pv.importId}/commit`, {
     method: 'POST', headers: bearer,
-    body: JSON.stringify({ name, boatNumber: '4650' }),
+    body: JSON.stringify({ id: name, boatNumber: '4650' }),
   });
   assert.equal(r.status, 200);
   const proj = await (await fetch(`${base}/api/projects/${name}`)).json();
@@ -122,7 +122,7 @@ test('commit: 速度の外れ値で除いた点の区間が excludedIntervals(sp
   assert.deepEqual(proj.tracks[0].excludedIntervals, [{ lo: t0, hi: t0 + 20000, code: 'speed' }]);
 });
 
-test('commit: 未認証は 401 / name 欠如は 400 / 不明 importId は 404', async () => {
+test('commit: 未認証は 401 / id 欠如は 400 / 不明 importId は 404', async () => {
   const noauth = await fetch(`${base}/api/sensor-imports/imp_x/commit`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
   });
@@ -132,23 +132,23 @@ test('commit: 未認証は 401 / name 欠如は 400 / 不明 importId は 404', 
   });
   assert.equal(bad.status, 400);
   const missing = await fetch(`${base}/api/sensor-imports/imp_notexist/commit`, {
-    method: 'POST', headers: bearer, body: JSON.stringify({ name: 'sailviz-20260101-0900.sailviz.json', boatNumber: '1' }),
+    method: 'POST', headers: bearer, body: JSON.stringify({ id: 'sailviz-20260101-0900.sailviz.json', boatNumber: '1' }),
   });
   assert.equal(missing.status, 404);
 });
 
 test('uploads GET: コミット済み CSV を text/csv で配信', async () => {
-  const name = 'sailviz-20260908-0906-m2.sailviz.json';
-  await fetch(`${base}/api/projects/${name}`, {
-    method: 'PUT', headers: bearer,
-    body: JSON.stringify({ version: 1, practiceDate: t0, reflections: [{ people: ['佐藤 花子'] }] }),
+  const name = 'sailviz-20260908-0906-m3.sailviz.json';
+  await fetch(`${base}/api/projects`, {
+    method: 'POST', headers: bearer,
+    body: JSON.stringify({ name, project: { version: 1, practiceDate: t0, reflections: [{ people: ['佐藤 花子'] }] } }),
   });
   const pv = await (await fetch(`${base}/api/sensor-imports`, {
     method: 'POST', headers: bearer,
     body: JSON.stringify({ person: '佐藤 花子', filename: 'Location.csv', csv: CSV }),
   })).json();
   await fetch(`${base}/api/sensor-imports/${pv.importId}/commit`, {
-    method: 'POST', headers: bearer, body: JSON.stringify({ name, boatNumber: '7' }),
+    method: 'POST', headers: bearer, body: JSON.stringify({ id: name, boatNumber: '7' }),
   });
   const proj = await (await fetch(`${base}/api/projects/${name}`)).json();
   const file = proj.sensorLogs[0].filename;

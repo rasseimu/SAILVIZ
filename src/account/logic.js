@@ -238,3 +238,11 @@ export function checkEmailChange(current, next) {
   if (v.toLowerCase() === String(current || '').trim().toLowerCase()) return bad('今と同じメールアドレスです');
   return { ok: true, email: v };
 }
+
+// 表示中の組織の切り替えボタン用。所属が 1 つ以下なら切り替える先が無いので空(ボタンを出さない)。
+// 切り替えは表示だけの選択で、データの所属・権限は変わらない。
+export function orgSwitchItems(orgs, activeId) {
+  const list = (Array.isArray(orgs) ? orgs : []).filter((o) => o && o.id);
+  if (list.length <= 1) return [];
+  return list.map((o) => ({ id: o.id, name: o.name, active: o.id === activeId }));
+}

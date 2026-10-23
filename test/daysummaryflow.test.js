@@ -181,13 +181,13 @@ function recorder(loadResult) {
 
 test('導線: ホームから開いて読込をキャンセルしたら軌跡画面へ行かない', async () => {
   const { log, deps } = recorder(false);
-  assert.equal(await runDaySummaryAction('reflect', { fromHomeName: 'x.json' }, deps), false);
+  assert.equal(await runDaySummaryAction('reflect', { fromHomeId: 'x.json' }, deps), false);
   assert.deepEqual(log, ['load:x.json']);
 });
 
 test('導線: ホームから開いたら、読み込んでから比較(VMG ON)する', async () => {
   const { log, deps } = recorder(true);
-  assert.equal(await runDaySummaryAction('compare', { fromHomeName: 'x.json' }, deps), true);
+  assert.equal(await runDaySummaryAction('compare', { fromHomeId: 'x.json' }, deps), true);
   assert.deepEqual(log, ['load:x.json', 'track', 'vmg:true']);
 });
 

@@ -2,8 +2,9 @@
 // アカウント画面(S2.7)の純関数: ページ判定・トークン取り出し・エラー文言・名簿の CSV 変換。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
-  pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm, membersView,
+  pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm, membersView, orgSwitchItems,
 } from '../src/account/logic.js';
 
 test('pageModeForPath: パスで画面を決める', () => {
@@ -92,4 +93,25 @@ test('checkRegisterForm: 必須項目と同意', () => {
   assert.equal(checkRegisterForm({ ...ok, name: ' ' }).ok, false);
   assert.equal(checkRegisterForm({ ...ok, affiliationText: '' }).ok, false);
   assert.equal(checkRegisterForm({ ...ok, password: 'short' }).ok, false);
+});
+
+test('orgSwitchItems: 所属 1 つなら空', () => {
+  assert.deepEqual(orgSwitchItems([{ id: 'o1', name: '部A' }], 'o1'), []);
+  assert.deepEqual(orgSwitchItems([], null), []);
+  assert.deepEqual(orgSwitchItems(null, null), []);
+});
+
+test('orgSwitchItems: 表示中に active', () => {
+  const orgs = [{ id: 'o1', name: '部A', isAdmin: true }, { id: 'o2', name: '部B', isAdmin: false }];
+  assert.deepEqual(orgSwitchItems(orgs, 'o2'), [{ id: 'o1', name: '部A', active: false }, { id: 'o2', name: '部B', active: true }]);
+});
+
+// このリポジトリのアカウント画面テストは DOM を使わない(account-roster-note.test.js と同じ流儀)ので、画面コードの配線を文字列で確かめる。
+test('組織の画面: 切り替えボタン群を先頭に出し、押すと覚えて描き直す', () => {
+  const main = readFileSync(new URL('../src/account/main.js', import.meta.url), 'utf8');
+  assert.match(main, /id: 'ac-org-switch'/);
+  assert.match(main, /'data-org-id': it\.id, 'aria-pressed': String\(it\.active\)/);
+  assert.match(main, /setActiveOrgId\(it\.id\);[\s\S]*renderOrgHome\(encodeURIComponent\(it\.id\)\)/);
+  assert.match(main, /mount\(\.\.\.\[orgSwitchBar\(\)\]\.filter\(Boolean\), /);
+  assert.match(main, /resolveActiveOrg\(me\.orgs\)/);
 });

@@ -51,6 +51,13 @@ const loginCookie = async (base) => {
   return r.headers.get('set-cookie').split(';')[0];
 };
 const rows = (sql, ...a) => db.prepare(sql).all(...a);
+// 練習 ID(practice_days.id)。このファイルの器の名前は重ならないので名前から引ける。
+// 見つからなければ投げる(仕込みの失敗を 403/404 の確認で見逃さない)。
+const pid = (name) => {
+  const id = rows('SELECT id FROM practice_days WHERE legacy_name = ?', name)[0]?.id;
+  if (!id) throw new Error(`器が見つからない(仕込みの失敗): ${name}`);
+  return id;
+};
 
 before(async () => {
   if (!hasSqlite) return;
@@ -81,13 +88,13 @@ before(async () => {
   ({ s: serverB, base: baseB } = await listen(apiNoOrg));
   cookie = await loginCookie(baseA);
 
-  // --- 種まき: 共有ログイン(トークン)の互換 PUT で器を作る(org_id = MIGRATION_ORG_ID が付く)---
-  const put = (name, p) => call(baseA, 'PUT', `/api/projects/${name}`, { body: p, auth: TOKEN });
-  assert.equal((await put(D1, proj({ tracks: [trk('a', 1000)], reflections: [refl('rOrg', '見える目標'), refl('rPriv', '秘密の目標')] }))).status, 200);
-  assert.equal((await put(D2, proj({ tracks: [trk('b', 2000)], reflections: [refl('rP2', '秘密2')] }))).status, 200);
-  assert.equal((await put(D4, proj({ reflections: [refl('rAll', '全部見える')] }))).status, 200);
+  // --- 種まき: 共有ログイン(トークン)の互換 POST で器を作る(org_id = MIGRATION_ORG_ID が付く)---
+  const post = (name, p) => call(baseA, 'POST', '/api/projects', { body: { name, project: p }, auth: TOKEN });
+  assert.equal((await post(D1, proj({ tracks: [trk('a', 1000)], reflections: [refl('rOrg', '見える目標'), refl('rPriv', '秘密の目標')] }))).status, 201);
+  assert.equal((await post(D2, proj({ tracks: [trk('b', 2000)], reflections: [refl('rP2', '秘密2')] }))).status, 201);
+  assert.equal((await post(D4, proj({ reflections: [refl('rAll', '全部見える')] }))).status, 201);
   // 他組織の器は repo 直書き
-  repo.writeProject(D3, proj({ tracks: [trk('c', 3000)], reflections: [refl('rOtherOrg', '他組織org'), refl('rOtherPub', '他組織public')] }), { orgId: OTHER });
+  repo.createProject(proj({ tracks: [trk('c', 3000)], reflections: [refl('rOtherOrg', '他組織org'), refl('rOtherPub', '他組織public')] }), { name: D3, orgId: OTHER });
   // 公開範囲を変える(アプリ・新 API が後から設定する想定)
   const setVis = (bodyId, vis, author = null) => {
     for (const r of rows('SELECT id, body FROM reflections')) {
@@ -123,12 +130,12 @@ test('(2) 共有ログインの一覧: 見える中身のある器だけ。priva
 });
 
 test('(2) 共有ログインの GET: 見える中身だけ返す。見えない器は 404', { skip }, async () => {
-  const d1 = (await call(baseA, 'GET', `/api/projects/${D1}`, { ck: cookie })).json;
+  const d1 = (await call(baseA, 'GET', `/api/projects/${pid(D1)}`, { ck: cookie })).json;
   assert.deepEqual(d1.reflections.map((r) => r.id), ['rOrg']);
   assert.equal(d1.tracks.length, 1);
   assert.equal(d1._rev, 1);
-  assert.equal((await call(baseA, 'GET', `/api/projects/${D2}`, { ck: cookie })).status, 404);
-  const d3 = (await call(baseA, 'GET', `/api/projects/${D3}`, { ck: cookie })).json;
+  assert.equal((await call(baseA, 'GET', `/api/projects/${pid(D2)}`, { ck: cookie })).status, 404);
+  const d3 = (await call(baseA, 'GET', `/api/projects/${pid(D3)}`, { ck: cookie })).json;
   assert.deepEqual(d3.reflections.map((r) => r.id), ['rOtherPub'], '他組織は public だけ');
 });
 
@@ -138,22 +145,31 @@ test('(2) summaries も見える中身だけで数える・見えない器は出
 });
 
 test('(1)(2) ログインユーザー(Bearer): 組織メンバーは org まで、作成者は自分の private も、他組織は public だけ', { skip }, async () => {
-  const ids = async (tok, name) => (await call(baseA, 'GET', `/api/projects/${name}`, { auth: tok })).json?.reflections?.map((r) => r.id);
+  const ids = async (tok, name) => (await call(baseA, 'GET', `/api/projects/${pid(name)}`, { auth: tok })).json?.reflections?.map((r) => r.id);
   assert.deepEqual(await ids(memberTok, D1), ['rOrg']);
   assert.deepEqual(await ids(ownerTok, D1), ['rOrg', 'rPriv'], '作成者は自分の private も');
-  assert.equal((await call(baseA, 'GET', `/api/projects/${D2}`, { auth: memberTok })).status, 404);
+  assert.equal((await call(baseA, 'GET', `/api/projects/${pid(D2)}`, { auth: memberTok })).status, 404);
   assert.deepEqual(await ids(ownerTok, D2), ['rP2']);
   // 他組織のメンバー: D1 の org は見えない(public も無い)ので 404、D3 は自組織の器なので全部
-  assert.equal((await call(baseA, 'GET', `/api/projects/${D1}`, { auth: outsiderTok })).status, 404);
+  assert.equal((await call(baseA, 'GET', `/api/projects/${pid(D1)}`, { auth: outsiderTok })).status, 404);
   assert.deepEqual(await ids(outsiderTok, D3), ['rOtherOrg', 'rOtherPub']);
   const list = (await call(baseA, 'GET', '/api/projects', { auth: outsiderTok })).json.map((p) => p.name);
   assert.deepEqual(list, [D3]);
 });
 
-test('(1) ログインユーザーの互換 PUT・DELETE・オーバーレイ PUT は 403 (読み取り専用)', { skip }, async () => {
-  assert.equal((await call(baseA, 'PUT', `/api/projects/${D4}`, { auth: ownerTok, body: proj() })).status, 403);
-  assert.equal((await call(baseA, 'DELETE', `/api/projects/${D4}`, { auth: ownerTok })).status, 403);
-  assert.equal((await call(baseA, 'PUT', '/api/overlays/progress', { auth: ownerTok, body: {} })).status, 403);
+// 設計書 §5.4 で動きが変わった: ログインユーザーは表示中の組織の器なら書ける。他組織の器は 403。
+test('(1) ログインユーザーの互換 PUT・DELETE は表示中の組織の器なら通り、他組織の器は 403', { skip }, async () => {
+  const body = proj({ reflections: [refl('rAll', '全部見える')] });
+  assert.equal((await call(baseA, 'PUT', `/api/projects/${pid(D4)}`, { auth: ownerTok, body })).status, 200);
+  assert.equal((await call(baseA, 'PUT', `/api/projects/${pid(D3)}`, { auth: ownerTok, body: proj() })).status, 403, '他組織の器');
+  assert.equal((await call(baseA, 'DELETE', `/api/projects/${pid(D3)}`, { auth: ownerTok })).status, 403, '他組織の器');
+  assert.equal(rows('SELECT 1 FROM practice_days WHERE legacy_name = ?', D3).length, 1);
+  // 消せる器(全部書ける)は消せる
+  const c = await call(baseA, 'POST', '/api/projects', { auth: ownerTok, body: { name: 'sailviz-20260111-0900.sailviz.json', project: proj() } });
+  assert.equal(c.status, 201);
+  assert.equal((await call(baseA, 'DELETE', `/api/projects/${c.json.id}`, { auth: ownerTok })).status, 200);
+  assert.equal(rows('SELECT 1 FROM practice_days WHERE id = ?', c.json.id).length, 0);
+  // 取込み CSV は今までどおり共有ログインだけ
   assert.equal((await call(baseA, 'GET', '/api/uploads/imp_x/raw.csv', { auth: ownerTok })).status, 403);
 });
 
@@ -161,13 +177,13 @@ test('(1) ログインユーザーの互換 PUT・DELETE・オーバーレイ PU
 test('(3) 共有ログインの PUT: private の反省・その公開範囲と作者は消えない・変わらない', { skip }, async () => {
   const before = rows("SELECT id, visibility, author_user_id FROM reflections WHERE body LIKE '%rPriv%'")[0];
   const body = proj({ tracks: [trk('a', 1000)], reflections: [refl('rOrg', '書き換えた目標'), refl('rNew', '新しい反省')] });
-  assert.equal((await call(baseA, 'PUT', `/api/projects/${D1}`, { ck: cookie, body })).status, 200);
+  assert.equal((await call(baseA, 'PUT', `/api/projects/${pid(D1)}`, { ck: cookie, body })).status, 200);
   const after = rows("SELECT id, visibility, author_user_id FROM reflections WHERE body LIKE '%rPriv%'")[0];
   assert.deepEqual(after, before, 'private の反省の行はそのまま');
-  const shared = (await call(baseA, 'GET', `/api/projects/${D1}`, { ck: cookie })).json.reflections;
+  const shared = (await call(baseA, 'GET', `/api/projects/${pid(D1)}`, { ck: cookie })).json.reflections;
   assert.deepEqual(shared.map((r) => r.id).sort(), ['rNew', 'rOrg']);
   assert.equal(shared.find((r) => r.id === 'rOrg').notes.goal, '書き換えた目標');
-  const own = (await call(baseA, 'GET', `/api/projects/${D1}`, { auth: ownerTok })).json.reflections;
+  const own = (await call(baseA, 'GET', `/api/projects/${pid(D1)}`, { auth: ownerTok })).json.reflections;
   assert.deepEqual(own.map((r) => r.id).sort(), ['rNew', 'rOrg', 'rPriv']);
   assert.equal(own.find((r) => r.id === 'rPriv').notes.goal, '秘密の目標');
 });
@@ -176,7 +192,7 @@ test('(3) PUT で既存の反省の公開範囲・作者が初期化されない
   const r0 = rows("SELECT id FROM reflections WHERE body LIKE '%\"rOrg\"%'")[0];
   db.prepare("UPDATE reflections SET visibility = 'public', author_user_id = 'u_x' WHERE id = ?").run(r0.id);
   const body = proj({ tracks: [trk('a', 1000)], reflections: [refl('rOrg', 'もう一度'), refl('rNew', '新しい反省')] });
-  assert.equal((await call(baseA, 'PUT', `/api/projects/${D1}`, { ck: cookie, body })).status, 200);
+  assert.equal((await call(baseA, 'PUT', `/api/projects/${pid(D1)}`, { ck: cookie, body })).status, 200);
   const r1 = rows('SELECT visibility, author_user_id FROM reflections WHERE id = ?', r0.id)[0];
   assert.deepEqual({ ...r1 }, { visibility: 'public', author_user_id: 'u_x' });
   db.prepare("UPDATE reflections SET visibility = 'org', author_user_id = NULL WHERE id = ?").run(r0.id);
@@ -184,13 +200,13 @@ test('(3) PUT で既存の反省の公開範囲・作者が初期化されない
 
 test('(3) PUT で反省を送らなかった(消した)場合、見える反省だけが消える', { skip }, async () => {
   const body = proj({ tracks: [trk('a', 1000)], reflections: [refl('rOrg', 'もう一度')] });
-  await call(baseA, 'PUT', `/api/projects/${D1}`, { ck: cookie, body });
-  const own = (await call(baseA, 'GET', `/api/projects/${D1}`, { auth: ownerTok })).json.reflections;
+  await call(baseA, 'PUT', `/api/projects/${pid(D1)}`, { ck: cookie, body });
+  const own = (await call(baseA, 'GET', `/api/projects/${pid(D1)}`, { auth: ownerTok })).json.reflections;
   assert.deepEqual(own.map((r) => r.id).sort(), ['rOrg', 'rPriv'], 'rNew は消え、見えない rPriv は残る');
 });
 
 test('(3) 互換 PUT は他組織の器・見えない private の器の軌跡も壊さない: 他組織の器への PUT は 403', { skip }, async () => {
-  assert.equal((await call(baseA, 'PUT', `/api/projects/${D3}`, { ck: cookie, body: proj() })).status, 403);
+  assert.equal((await call(baseA, 'PUT', `/api/projects/${pid(D3)}`, { ck: cookie, body: proj() })).status, 403);
   assert.equal(rows("SELECT 1 FROM reflections WHERE body LIKE '%rOtherOrg%'").length, 1);
 });
 
@@ -204,17 +220,18 @@ test('(3) 書込権限なし(共有トークン/閲覧ゲート無効)の PUT �
   const { s, base } = await listen(apiOpen);
   try {
     assert.equal((await call(base, 'GET', '/api/projects')).status, 200);
-    assert.equal((await call(base, 'PUT', `/api/projects/${D4}`, { body: proj() })).status, 401);
-    assert.equal((await call(base, 'PUT', `/api/projects/${D4}`, { body: proj({ reflections: [refl('rAll', '全部見える')] }), auth: TOKEN })).status, 200);
+    assert.equal((await call(base, 'PUT', `/api/projects/${pid(D4)}`, { body: proj() })).status, 401);
+    assert.equal((await call(base, 'PUT', `/api/projects/${pid(D4)}`, { body: proj({ reflections: [refl('rAll', '全部見える')] }), auth: TOKEN })).status, 200);
   } finally { await new Promise((r) => s.close(r)); }
 });
 
 test('(3) DELETE: 見えない中身がある器は 403、全部見える器は消せる', { skip }, async () => {
-  assert.equal((await call(baseA, 'DELETE', `/api/projects/${D1}`, { ck: cookie })).status, 403);
-  assert.equal((await call(baseA, 'DELETE', `/api/projects/${D3}`, { ck: cookie })).status, 403);
+  assert.equal((await call(baseA, 'DELETE', `/api/projects/${pid(D1)}`, { ck: cookie })).status, 403);
+  assert.equal((await call(baseA, 'DELETE', `/api/projects/${pid(D3)}`, { ck: cookie })).status, 403);
   assert.equal(rows('SELECT 1 FROM practice_days WHERE legacy_name = ?', D1).length, 1);
-  assert.equal((await call(baseA, 'PUT', '/api/projects/sailviz-20260110-0900.sailviz.json', { ck: cookie, body: proj({ reflections: [refl('rDel', 'x')] }) })).status, 200);
-  assert.equal((await call(baseA, 'DELETE', '/api/projects/sailviz-20260110-0900.sailviz.json', { ck: cookie })).status, 200);
+  const c = await call(baseA, 'POST', '/api/projects', { ck: cookie, body: { name: 'sailviz-20260110-0900.sailviz.json', project: proj({ reflections: [refl('rDel', 'x')] }) } });
+  assert.equal(c.status, 201);
+  assert.equal((await call(baseA, 'DELETE', `/api/projects/${c.json.id}`, { ck: cookie })).status, 200);
   assert.equal(rows("SELECT 1 FROM practice_days WHERE legacy_name = 'sailviz-20260110-0900.sailviz.json'").length, 0);
 });
 
@@ -258,16 +275,20 @@ test('(4)(e) roadmap: 組織メンバーだけ読める。他組織・組織な�
   assert.equal((await call(baseA, 'GET', '/api/overlays/roadmap')).status, 401, '未ログイン');
   const put = await call(baseA, 'PUT', '/api/overlays/roadmap', { ck: cookie, body: { 部員甲: { goal: '甲の新目標', milestones: [] }, 部員丁: { goal: '丁', milestones: [] }, 部員乙: { goal: '上書き', milestones: [] } } });
   assert.equal(put.status, 200);
-  const rs = Object.fromEntries(rows('SELECT legacy_name, goal, org_id FROM roadmaps').map((r) => [r.legacy_name, r]));
-  assert.equal(rs['部員甲'].goal, '甲の新目標');
-  assert.equal(rs['部員乙'].goal, '乙の目標', '他組織は上書きされない');
-  assert.equal(rs['部員乙'].org_id, OTHER);
-  assert.equal(rs['部員丙'].goal, '丙の目標', '組織なしの行は残る');
-  assert.equal(rs['部員丙'].org_id, null, '組織が付け替わらない');
-  assert.equal(rs['部員丁'].org_id, ORG, '新しい行は MIGRATION_ORG_ID の組織');
+  // 行は (組織, 名前) で突き合わせる(設計書 §5.6)。他組織と同じ名前は自組織の別の行になる。
+  const rs = Object.fromEntries(rows('SELECT legacy_name, goal, org_id FROM roadmaps').map((r) => [`${r.org_id}:${r.legacy_name}`, r]));
+  const r = (org, nm) => rs[`${org}:${nm}`];
+  assert.equal(r(ORG, '部員甲').goal, '甲の新目標');
+  assert.equal(r(OTHER, '部員乙').goal, '乙の目標', '他組織は上書きされない');
+  assert.equal(r(ORG, '部員乙').goal, '上書き', '同じ名前は自組織の別の行');
+  assert.equal(rows('SELECT 1 FROM roadmaps').length, 5);
+  assert.equal(r(null, '部員丙').goal, '丙の目標', '組織なしの行は残り、組織が付け替わらない');
+  assert.equal(r(ORG, '部員丁').goal, '丁', '新しい行は MIGRATION_ORG_ID の組織');
   // 組織メンバーのユーザー(Bearer)も同じ範囲を読める。他組織のメンバーには見えない
-  assert.deepEqual(Object.keys((await call(baseA, 'GET', '/api/overlays/roadmap', { auth: memberTok })).json).sort(), ['部員丁', '部員甲']);
-  assert.deepEqual(Object.keys((await call(baseA, 'GET', '/api/overlays/roadmap', { auth: outsiderTok })).json), ['部員乙']);
+  assert.deepEqual(Object.keys((await call(baseA, 'GET', '/api/overlays/roadmap', { auth: memberTok })).json).sort(), ['部員丁', '部員乙', '部員甲']);
+  const theirs = (await call(baseA, 'GET', '/api/overlays/roadmap', { auth: outsiderTok })).json;
+  assert.deepEqual(Object.keys(theirs), ['部員乙']);
+  assert.equal(theirs['部員乙'].goal, '乙の目標');
 });
 
 // ---- (b) MIGRATION_ORG_ID 未設定 ----
@@ -275,14 +296,14 @@ test('(b) MIGRATION_ORG_ID 未設定: 共有ログインは何も読めない・
   const ck = await loginCookie(baseB);
   assert.deepEqual((await call(baseB, 'GET', '/api/projects', { ck })).json, []);
   assert.deepEqual((await call(baseB, 'GET', '/api/summaries', { ck })).json, []);
-  assert.equal((await call(baseB, 'GET', `/api/projects/${D4}`, { ck })).status, 404);
-  assert.equal((await call(baseB, 'GET', `/api/projects/${D3}`, { ck })).status, 404, '他組織の public も読めない');
+  assert.equal((await call(baseB, 'GET', `/api/projects/${pid(D4)}`, { ck })).status, 404);
+  assert.equal((await call(baseB, 'GET', `/api/projects/${pid(D3)}`, { ck })).status, 404, '他組織の public も読めない');
   assert.deepEqual((await call(baseB, 'GET', '/api/overlays/progress', { ck })).json, {});
   assert.deepEqual((await call(baseB, 'GET', '/api/overlays/roadmap', { ck })).json, {});
   assert.equal((await call(baseB, 'GET', '/api/uploads/imp_x/raw.csv', { ck })).status, 403);
   for (const [m, p, b] of [
-    ['PUT', `/api/projects/${D4}`, proj()], ['PUT', '/api/projects/sailviz-20260120-0900.sailviz.json', proj()],
-    ['DELETE', `/api/projects/${D4}`], ['PUT', '/api/overlays/progress', {}], ['PUT', '/api/overlays/roadmap', {}],
+    ['PUT', `/api/projects/${pid(D4)}`, proj()], ['POST', '/api/projects', { name: 'sailviz-20260120-0900.sailviz.json', project: proj() }],
+    ['DELETE', `/api/projects/${pid(D4)}`], ['PUT', '/api/overlays/progress', {}], ['PUT', '/api/overlays/roadmap', {}],
     ['POST', '/api/sensor-imports', { person: 'x', csv: 'x' }], ['POST', '/api/minutes-imports/commit', { practiceDate: 1, rows: [] }],
   ]) {
     assert.equal((await call(baseB, m, p, { ck, body: b })).status, 403, `${m} ${p}`);
@@ -301,22 +322,25 @@ test('取込み: minutes-imports commit は自組織の器に書き、他組織�
   const rowsBody = [{ fullName: memberList()[0].fullName, goal: '議事録の目標' }]; // 名簿は同梱のものを使う(実名をテストに書かない)
   const r = await call(baseA, 'POST', '/api/minutes-imports/commit', { ck: cookie, body: { practiceDate: day, rows: rowsBody } });
   assert.equal(r.status, 200, JSON.stringify(r.json));
-  assert.notEqual(r.json.name, D3, '他組織の器には書かない');
+  assert.notEqual(r.json.id, pid(D3), '他組織の器には書かない');
   assert.equal(r.json.created, true);
-  assert.equal(rows('SELECT org_id FROM practice_days WHERE legacy_name = ?', r.json.name)[0].org_id, ORG);
+  assert.equal(rows('SELECT org_id FROM practice_days WHERE id = ?', r.json.id)[0].org_id, ORG);
   // 自組織の器があれば、そこへ追記される
   const r2 = await call(baseA, 'POST', '/api/minutes-imports/commit', { ck: cookie, body: { practiceDate: day, rows: rowsBody } });
-  assert.equal(r2.json.name, r.json.name);
+  assert.equal(r2.json.id, r.json.id);
   assert.equal(r2.json.created, false);
 });
 
 test('P1: 閲覧 Cookie とアカウントの sailviz_session Cookie が両方あっても旧共有ログイン(書込可)として扱う。Bearer は user', { skip }, async () => {
   const both = `${cookie}; sailviz_session=${ownerTok}`;
-  assert.equal((await call(baseA, 'PUT', `/api/projects/${D4}`, { ck: both, body: proj({ reflections: [refl('rAll', '全部見える')] }) })).status, 200);
-  // セッション Cookie だけなら user(読み取り専用)
-  assert.equal((await call(baseA, 'PUT', `/api/projects/${D4}`, { ck: `sailviz_session=${ownerTok}`, body: proj() })).status, 403);
+  assert.equal((await call(baseA, 'PUT', `/api/projects/${pid(D4)}`, { ck: both, body: proj({ reflections: [refl('rAll', '全部見える')] }) })).status, 200);
+  // ユーザーも書けるようになった(§5.4)ので、どちらの主体かは「作成者の private が見えるか」で見分ける。
+  const reflIds = async (opts) => (await call(baseA, 'GET', `/api/projects/${pid(D1)}`, opts)).json.reflections.map((r) => r.id).sort();
+  assert.deepEqual(await reflIds({ ck: both }), ['rOrg'], '両方の Cookie は共有ログイン(private は見えない)');
+  // セッション Cookie だけなら user(作成者なので private も見える)
+  assert.deepEqual(await reflIds({ ck: `sailviz_session=${ownerTok}` }), ['rOrg', 'rPriv']);
   // Bearer は閲覧 Cookie があっても user
-  assert.equal((await call(baseA, 'PUT', `/api/projects/${D4}`, { ck: cookie, auth: ownerTok, body: proj() })).status, 403);
+  assert.deepEqual(await reflIds({ ck: cookie, auth: ownerTok }), ['rOrg', 'rPriv']);
   // 新 API の /api/me は Cookie のアカウントのまま
   const me = await call(baseA, 'GET', '/api/me', { ck: both });
   assert.equal(me.status, 200);
@@ -328,12 +352,12 @@ test('P1: 閲覧 Cookie とアカウントの sailviz_session Cookie が両方�
 
 test('P3-3: sensor-imports commit の colorIndex は見えない軌跡も数える (色が重ならない)', { skip }, async () => {
   const DAY = 'sailviz-20260301-0900.sailviz.json';
-  repo.writeProject(DAY, proj({ practiceDate: Date.UTC(2026, 2, 1, 3, 0, 0), tracks: [trk('p1', 1000), trk('p2', 2000)] }), { orgId: ORG });
+  repo.createProject(proj({ practiceDate: Date.UTC(2026, 2, 1, 3, 0, 0), tracks: [trk('p1', 1000), trk('p2', 2000)] }), { name: DAY, orgId: ORG });
   db.prepare("UPDATE rec_sessions SET visibility = 'private', owner_user_id = 'u_x' WHERE practice_day_id = (SELECT id FROM practice_days WHERE legacy_name = ?) AND position = 0").run(DAY);
   const csv = ['time,latitude,longitude,speed,bearing,horizontalAccuracy', ...Array.from({ length: 5 }, (_, i) => `${(Date.UTC(2026, 2, 1, 3, 0, i)) * 1e6},10.0,100.0,2,90,4`)].join('\n') + '\n';
   const up = await call(baseA, 'POST', '/api/sensor-imports', { ck: cookie, body: { person: 'テスト部員A', csv } });
   assert.equal(up.status, 200, JSON.stringify(up.json));
-  const c = await call(baseA, 'POST', `/api/sensor-imports/${encodeURIComponent(up.json.importId)}/commit`, { ck: cookie, body: { name: DAY, boatNumber: '1234' } });
+  const c = await call(baseA, 'POST', `/api/sensor-imports/${encodeURIComponent(up.json.importId)}/commit`, { ck: cookie, body: { id: pid(DAY), boatNumber: '1234' } });
   assert.equal(c.status, 200, JSON.stringify(c.json));
   const colors = rows('SELECT view FROM tracks t JOIN rec_sessions s ON s.id = t.session_id JOIN practice_days p ON p.id = s.practice_day_id WHERE p.legacy_name = ?', DAY).map((r) => JSON.parse(r.view).color);
   assert.equal(colors.length, 3);
@@ -347,44 +371,44 @@ test('P3-5: sensor-imports は同じ日・同じ人の反省が複数の器に�
   const day = Date.UTC(2026, 2, 31, 15, 0, 0); // JST 0 時(取込みの practiceDate と完全一致する)
   const mine = 'sailviz-20260401-0900.sailviz.json', theirs = 'sailviz-20260401-1000.sailviz.json';
   const person = 'テスト部員B';
-  repo.writeProject(theirs, proj({ practiceDate: day, reflections: [{ ...refl('rB2', '他'), people: [person] }] }), { orgId: OTHER });
-  repo.writeProject(mine, proj({ practiceDate: day, reflections: [{ ...refl('rB1', '自'), people: [person] }] }), { orgId: ORG });
+  repo.createProject(proj({ practiceDate: day, reflections: [{ ...refl('rB2', '他'), people: [person] }] }), { name: theirs, orgId: OTHER });
+  repo.createProject(proj({ practiceDate: day, reflections: [{ ...refl('rB1', '自'), people: [person] }] }), { name: mine, orgId: ORG });
   const csv = ['time,latitude,longitude,speed,bearing,horizontalAccuracy', ...Array.from({ length: 5 }, (_, i) => `${(Date.UTC(2026, 3, 1, 3, 0, i)) * 1e6},10.0,100.0,2,90,4`)].join('\n') + '\n';
   const up = await call(baseA, 'POST', '/api/sensor-imports', { ck: cookie, body: { person, csv } });
   assert.equal(up.status, 200, JSON.stringify(up.json));
-  assert.equal(up.json.matched?.name, mine);
+  assert.equal(up.json.matched?.id, pid(mine));
 });
 
 test('P2-1: minutes-imports commit は id の無い見えない反省を組織に見える行として複製しない', { skip }, async () => {
   const DAY = 'sailviz-20260201-0900.sailviz.json';
   const base = Date.UTC(2026, 1, 1, 3, 0, 0);
-  repo.writeProject(DAY, proj({ practiceDate: base, reflections: [{ people: ['テスト部員A'], createdAt: 1, notes: { goal: '無id秘密' } }] }), { orgId: ORG });
+  repo.createProject(proj({ practiceDate: base, reflections: [{ people: ['テスト部員A'], createdAt: 1, notes: { goal: '無id秘密' } }] }), { name: DAY, orgId: ORG });
   db.prepare("UPDATE reflections SET visibility = 'private', author_user_id = 'u_x' WHERE practice_day_id = (SELECT id FROM practice_days WHERE legacy_name = ?)").run(DAY);
   const { memberList } = await import('../src/members.js');
   const r = await call(baseA, 'POST', '/api/minutes-imports/commit', { ck: cookie, body: { practiceDate: base, rows: [{ fullName: memberList()[0].fullName, goal: '議事録2' }] } });
   assert.equal(r.status, 200, JSON.stringify(r.json));
-  assert.equal(r.json.name, DAY);
+  assert.equal(r.json.id, pid(DAY));
   const secret = rows("SELECT visibility, author_user_id FROM reflections WHERE body LIKE '%無id秘密%'");
   assert.equal(secret.length, 1, '見えない反省が複製されない');
   assert.deepEqual({ ...secret[0] }, { visibility: 'private', author_user_id: 'u_x' });
-  const visible = (await call(baseA, 'GET', `/api/projects/${DAY}`, { ck: cookie })).json.reflections;
+  const visible = (await call(baseA, 'GET', `/api/projects/${pid(DAY)}`, { ck: cookie })).json.reflections;
   assert.equal(visible.some((x) => JSON.stringify(x).includes('無id秘密')), false);
 });
 
 test('P2-3: minutes-imports commit は日付の合う器を全部たどり、書ける器を使う(先頭が他組織でも)', { skip }, async () => {
   const mine = 'sailviz-20260205-0900.sailviz.json', theirs = 'sailviz-20260205-1000.sailviz.json'; // 降順の先頭は他組織
   const day = Date.UTC(2026, 1, 5, 3, 0, 0);
-  repo.writeProject(mine, proj({ practiceDate: day, reflections: [refl('rM', '自組織')] }), { orgId: ORG });
-  repo.writeProject(theirs, proj({ practiceDate: day, reflections: [refl('rT', '他組織')] }), { orgId: OTHER });
+  repo.createProject(proj({ practiceDate: day, reflections: [refl('rM', '自組織')] }), { name: mine, orgId: ORG });
+  repo.createProject(proj({ practiceDate: day, reflections: [refl('rT', '他組織')] }), { name: theirs, orgId: OTHER });
   const { memberList } = await import('../src/members.js');
   const r = await call(baseA, 'POST', '/api/minutes-imports/commit', { ck: cookie, body: { practiceDate: day, rows: [{ fullName: memberList()[0].fullName, goal: '議事録3' }] } });
   assert.equal(r.status, 200, JSON.stringify(r.json));
-  assert.equal(r.json.name, mine);
+  assert.equal(r.json.id, pid(mine));
   assert.equal(r.json.created, false);
 });
 
 test('P2-2: readProjectWithAccess は JSON と access を同じ並びで返す', { skip }, async () => {
-  const { project, access } = repo.readProjectWithAccess(D1);
+  const { project, access } = repo.readProjectWithAccess(pid(D1));
   assert.equal(project.reflections.length, access.reflections.length);
   assert.deepEqual(project.reflections.map((r) => r.id), access.reflections.map((r) => r.id));
   assert.equal(project.tracks.length, access.tracks.length);
@@ -397,7 +421,7 @@ test('取込み: sensor-imports commit は他組織の器を 404 にする', { s
     body: { person: 'テスト部員A', csv: ['time,latitude,longitude,speed,bearing,horizontalAccuracy', ...Array.from({ length: 5 }, (_, i) => `${(Date.UTC(2026, 0, 3, 3, 0, i)) * 1e6},10.0,100.0,2,90,4`)].join('\n') + '\n' },
   });
   assert.equal(up.status, 200, JSON.stringify(up.json));
-  const c = await call(baseA, 'POST', `/api/sensor-imports/${encodeURIComponent(up.json.importId)}/commit`, { ck: cookie, body: { name: D3, boatNumber: '9999' } });
+  const c = await call(baseA, 'POST', `/api/sensor-imports/${encodeURIComponent(up.json.importId)}/commit`, { ck: cookie, body: { id: pid(D3), boatNumber: '9999' } });
   assert.equal(c.status, 404);
 });
 
@@ -405,16 +429,16 @@ test('S2.5-P4: sensor-imports の matched は PUT できる器を選ぶ (他組�
   const day = Date.UTC(2026, 3, 1, 15, 0, 0); // JST 2026-04-02 0 時
   const mine = 'sailviz-20260402-0900.sailviz.json', theirs = 'sailviz-20260402-1000.sailviz.json'; // 降順の先頭は他組織
   const person = 'テスト部員C';
-  repo.writeProject(mine, proj({ practiceDate: day, reflections: [{ ...refl('rC1', '自'), people: [person] }] }), { orgId: ORG });
-  repo.writeProject(theirs, proj({ practiceDate: day, reflections: [{ ...refl('rC2', '他'), people: [person] }] }), { orgId: OTHER });
+  repo.createProject(proj({ practiceDate: day, reflections: [{ ...refl('rC1', '自'), people: [person] }] }), { name: mine, orgId: ORG });
+  repo.createProject(proj({ practiceDate: day, reflections: [{ ...refl('rC2', '他'), people: [person] }] }), { name: theirs, orgId: OTHER });
   db.prepare("UPDATE reflections SET visibility = 'public' WHERE practice_day_id = (SELECT id FROM practice_days WHERE legacy_name = ?)").run(theirs);
   // 前提: 他組織の器は共有ログインに見える(が PUT はできない)
-  assert.equal((await call(baseA, 'GET', `/api/projects/${theirs}`, { ck: cookie })).status, 200);
-  assert.equal((await call(baseA, 'PUT', `/api/projects/${theirs}`, { ck: cookie, body: proj() })).status, 403);
+  assert.equal((await call(baseA, 'GET', `/api/projects/${pid(theirs)}`, { ck: cookie })).status, 200);
+  assert.equal((await call(baseA, 'PUT', `/api/projects/${pid(theirs)}`, { ck: cookie, body: proj() })).status, 403);
   const csv = ['time,latitude,longitude,speed,bearing,horizontalAccuracy', ...Array.from({ length: 5 }, (_, i) => `${(Date.UTC(2026, 3, 2, 3, 0, i)) * 1e6},10.0,100.0,2,90,4`)].join('\n') + '\n';
   const up = await call(baseA, 'POST', '/api/sensor-imports', { ck: cookie, body: { person, csv } });
   assert.equal(up.status, 200, JSON.stringify(up.json));
-  assert.equal(up.json.matched?.name, mine);
-  const c = await call(baseA, 'POST', `/api/sensor-imports/${encodeURIComponent(up.json.importId)}/commit`, { ck: cookie, body: { name: up.json.matched.name, boatNumber: '1234' } });
+  assert.equal(up.json.matched?.id, pid(mine));
+  const c = await call(baseA, 'POST', `/api/sensor-imports/${encodeURIComponent(up.json.importId)}/commit`, { ck: cookie, body: { id: up.json.matched.id, boatNumber: '1234' } });
   assert.equal(c.status, 200, JSON.stringify(c.json));
 });

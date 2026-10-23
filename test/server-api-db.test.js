@@ -20,6 +20,13 @@ let server, base, dataDir, db;
 const TOKEN = 's3cret';
 const NAME = 'sailviz-20260101-0900.sailviz.json';
 const bearer = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+let nameId; // NAME の器の練習 ID(POST で作ったときに受け取る)
+// 新しい器は POST /api/projects で作る。返り値の id で以後引く。
+const create = async (name, project) => {
+  const r = await fetch(`${base}/api/projects`, { method: 'POST', headers: bearer, body: JSON.stringify({ name, project }) });
+  assert.equal(r.status, 201);
+  return (await r.json()).id;
+};
 
 let openDb, migrate, loadMigrations, createDbRepo;
 if (hasSqlite) {
@@ -58,20 +65,30 @@ test('PUT 認証必須(401)', { skip: skipMsg }, async () => {
   assert.equal(r.status, 401);
 });
 
-test('PUT→GET→list が DB 版で動く', { skip: skipMsg }, async () => {
-  const put = await fetch(`${base}/api/projects/${NAME}`, { method: 'PUT', headers: bearer, body: JSON.stringify(proj()) });
+test('POST→PUT→GET→list が DB 版で動く', { skip: skipMsg }, async () => {
+  nameId = await create(NAME, proj());
+  assert.match(nameId, /^pd_[0-9a-f]{10}$/);
+  const put = await fetch(`${base}/api/projects/${nameId}`, { method: 'PUT', headers: bearer, body: JSON.stringify(proj({ version: 2 })) });
   assert.equal(put.status, 200);
-  const got = await (await fetch(`${base}/api/projects/${NAME}`)).json();
-  assert.equal(got.version, 1);
-  assert.equal(got._rev, 1);
+  const got = await (await fetch(`${base}/api/projects/${nameId}`)).json();
+  assert.equal(got.version, 2);
+  assert.equal(got._rev, 2);
   const list = await (await fetch(`${base}/api/projects`)).json();
-  assert.ok(list.some((p) => p.name === NAME));
+  assert.ok(list.some((p) => p.id === nameId && p.name === NAME));
+});
+
+test('PUT は既存の器だけ(無い ID・名前は 404)', { skip: skipMsg }, async () => {
+  for (const id of ['pd_0000000000', 'sailviz-20260109-0900.sailviz.json']) {
+    const r = await fetch(`${base}/api/projects/${id}`, { method: 'PUT', headers: bearer, body: JSON.stringify(proj()) });
+    assert.equal(r.status, 404, id);
+  }
+  assert.equal((await fetch(`${base}/api/projects/pd_XYZ`)).status, 400, 'ID の形でなければ 400');
 });
 
 test('summaries が DB 版で軽量行を返す', { skip: skipMsg }, async () => {
   const rows = await (await fetch(`${base}/api/summaries`)).json();
   assert.ok(Array.isArray(rows));
-  assert.ok(rows.find((r) => r.name === NAME));
+  assert.equal(rows.find((r) => r.name === NAME)?.id, nameId);
 });
 
 test('overlay put/get が DB 版で動く', { skip: skipMsg }, async () => {
@@ -84,10 +101,10 @@ test('overlay put/get が DB 版で動く', { skip: skipMsg }, async () => {
 
 test('削除ルール②: 古い画面からの PUT で新しく届いた軌跡が消えない(HTTP 経路)', { skip: skipMsg }, async () => {
   const n = 'sailviz-20260202-0900.sailviz.json';
-  await fetch(`${base}/api/projects/${n}`, { method: 'PUT', headers: bearer, body: JSON.stringify(proj({ tracks: [trk('a'), trk('b')] })) });
+  const id = await create(n, proj({ tracks: [trk('a'), trk('b')] }));
   // クライアントが b を知らずに a だけで保存
-  await fetch(`${base}/api/projects/${n}`, { method: 'PUT', headers: bearer, body: JSON.stringify(proj({ tracks: [trk('a')] })) });
-  const got = await (await fetch(`${base}/api/projects/${n}`)).json();
+  await fetch(`${base}/api/projects/${id}`, { method: 'PUT', headers: bearer, body: JSON.stringify(proj({ tracks: [trk('a')] })) });
+  const got = await (await fetch(`${base}/api/projects/${id}`)).json();
   assert.deepEqual(got.tracks.map((t) => t.id).sort(), ['a', 'b']);
 });
 

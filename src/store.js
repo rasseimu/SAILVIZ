@@ -6,9 +6,11 @@ export function createStore(api) {
   return {
     listProjects: () => api.apiListProjects(),
     listSummaries: () => api.apiListSummaries(),
-    readProject: (name) => api.apiGetProject(name),
-    writeProject: (name, obj) => api.apiPutProject(name, obj),
-    deleteProject: (name) => api.apiDeleteProject(name),
+    // 練習は ID で読み書きする。新規だけ名前(採番済みのファイル名)を渡して作り、{ id, name } を受け取る。
+    createProject: (name, obj) => api.apiCreateProject(name, obj),
+    readProject: (id) => api.apiGetProject(id),
+    writeProject: (id, obj) => api.apiPutProject(id, obj),
+    deleteProject: (id) => api.apiDeleteProject(id),
     readProgress: () => api.apiGetOverlay('progress'),
     writeProgress: (obj) => api.apiPutOverlay('progress', obj),
     readRoadmap: () => api.apiGetOverlay('roadmap'),
@@ -20,6 +22,7 @@ export function createStore(api) {
     session: () => api.apiSession(),
     login: (user, pw) => api.apiLogin(user, pw),
     logout: () => api.apiLogout(),
+    me: () => api.apiMe(),
   };
 }
 

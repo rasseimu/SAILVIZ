@@ -4,6 +4,8 @@
 // roadmaps は消さずに legacy_name で突き合わせて同期する(roadmapSync.js。付け替え済みの user_id・org_id を保つ)。
 // 同じ legacy_name の器は子ごと消してから入れ直す。ただし成功すると meta に「取込み済み」の印を書き、
 // 印があれば再実行を拒否する(S2.6-P8)。やり直しは forceReimport(CLI は --force-reimport)だけ。
+// 注意: --force-reimport は器・ロードマップを組織を見ずに名前だけで突き合わせ、同名の器は最初の 1 つしか置き換えない。
+//       複数の組織にデータが入ったあとは他組織のデータを壊すので使わない。
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';

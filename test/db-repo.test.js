@@ -44,8 +44,8 @@ test('write→read 往復(assemble + _rev 付与)', { skip: skipMsg }, async () 
   const { repo, dataDir } = await freshRepo();
   const proj = baseProj({ tracks: [track('t1', { tRange: { start: 1, end: 2 } })],
     reflections: [{ id: 'r1', createdAt: 1, text: 'x', people: ['村瀬 礼'], notes: {} }] });
-  await repo.writeProject('sailviz-20260901-0900.sailviz.json', proj);
-  const got = await repo.readProject('sailviz-20260901-0900.sailviz.json');
+  const id = (await repo.createProject(proj, { name: 'sailviz-20260901-0900.sailviz.json' })).id;
+  const got = await repo.readProject(id);
   assert.equal(got._rev, 1);
   const { _rev, ...pure } = got;
   assert.deepStrictEqual(pure, proj);
@@ -54,8 +54,8 @@ test('write→read 往復(assemble + _rev 付与)', { skip: skipMsg }, async () 
 
 test('listProjects が書いた器を返す(降順)', { skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
-  await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj());
-  await repo.writeProject('sailviz-20260902-0900.sailviz.json', baseProj());
+  await repo.createProject(baseProj(), { name: 'sailviz-20260901-0900.sailviz.json' });
+  await repo.createProject(baseProj(), { name: 'sailviz-20260902-0900.sailviz.json' });
   assert.deepEqual((await repo.listProjects()).map((p) => p.name), ['sailviz-20260902-0900.sailviz.json', 'sailviz-20260901-0900.sailviz.json']);
   await rm(dataDir, { recursive: true, force: true });
 });
@@ -63,10 +63,10 @@ test('listProjects が書いた器を返す(降順)', { skip: skipMsg }, async (
 test('削除ルール②: _rev 無し PUT で既存トラックを消さない(新しく届いた軌跡が残る)', { skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
   // 初期2トラック
-  await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj({ tracks: [track('t1'), track('t2')] }));
+  const id = (await repo.createProject(baseProj({ tracks: [track('t1'), track('t2')] }), { name: 'sailviz-20260901-0900.sailviz.json' })).id;
   // クライアントが t2 を含まない JSON を _rev 無しで PUT
-  await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj({ tracks: [track('t1')] }));
-  const got = await repo.readProject('sailviz-20260901-0900.sailviz.json');
+  await repo.writeProject(id, baseProj({ tracks: [track('t1')] }));
+  const got = await repo.readProject(id);
   const ids = got.tracks.map((t) => t.id).sort();
   assert.deepEqual(ids, ['t1', 't2'], 't2 は消えない');
   await rm(dataDir, { recursive: true, force: true });
@@ -76,10 +76,10 @@ test('削除ルール③: 表示設定の編集は in-place 更新(複製せず�
   // Web は GPS 点列を編集しない。同じ点列で view(visible/name)だけ変えて保存する。
   // トラックは点列の指紋で同定され、既存行を上書き更新する(複製しない・点列列は触らない)。
   const { repo, dataDir } = await freshRepo();
-  await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj({ tracks: [track('t1')] }));
+  const id = (await repo.createProject(baseProj({ tracks: [track('t1')] }), { name: 'sailviz-20260901-0900.sailviz.json' })).id;
   const edited = { ...track('t1'), visible: false, name: 'renamed' }; // 点列は同じ
-  await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj({ tracks: [edited] }));
-  const got = await repo.readProject('sailviz-20260901-0900.sailviz.json');
+  await repo.writeProject(id, baseProj({ tracks: [edited] }));
+  const got = await repo.readProject(id);
   assert.equal(got.tracks.length, 1, '複製されない(in-place 更新)');
   const t = got.tracks[0];
   assert.equal(t.visible, false, '表示設定は反映');
@@ -90,9 +90,9 @@ test('削除ルール③: 表示設定の編集は in-place 更新(複製せず�
 
 test('新規トラックは追加される(点列込み)', { skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
-  await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj({ tracks: [track('t1')] }));
-  await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj({ tracks: [track('t1'), track('t2')] }));
-  const got = await repo.readProject('sailviz-20260901-0900.sailviz.json');
+  const id = (await repo.createProject(baseProj({ tracks: [track('t1')] }), { name: 'sailviz-20260901-0900.sailviz.json' })).id;
+  await repo.writeProject(id, baseProj({ tracks: [track('t1'), track('t2')] }));
+  const got = await repo.readProject(id);
   assert.deepEqual(got.tracks.map((t) => t.id).sort(), ['t1', 't2']);
   await rm(dataDir, { recursive: true, force: true });
 });
@@ -100,9 +100,9 @@ test('新規トラックは追加される(点列込み)', { skip: skipMsg }, as
 test('反省は入れ替わる(Web の編集を尊重: 消したものは消える)', { skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
   const r = (id) => ({ id, createdAt: 1, text: id, people: [], notes: {} });
-  await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj({ reflections: [r('r1'), r('r2')] }));
-  await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj({ reflections: [r('r1')] }));
-  const got = await repo.readProject('sailviz-20260901-0900.sailviz.json');
+  const id = (await repo.createProject(baseProj({ reflections: [r('r1'), r('r2')] }), { name: 'sailviz-20260901-0900.sailviz.json' })).id;
+  await repo.writeProject(id, baseProj({ reflections: [r('r1')] }));
+  const got = await repo.readProject(id);
   assert.deepEqual(got.reflections.map((x) => x.id), ['r1']);
   await rm(dataDir, { recursive: true, force: true });
 });
@@ -113,19 +113,19 @@ test('反省の更新保存は UPSERT: 内容更新・件数不変・rowid 不�
   // reflections.id は器×索引の合成 ID(`${pdId}_r${i}`)。同じ位置の反省は同じ行を更新する。
   const r = (id, text) => ({ id, createdAt: 1, text, people: [], notes: {} });
   const rows = () => db.prepare('SELECT rowid AS n, id, position FROM reflections ORDER BY position').all();
-  await repo.writeProject(NAME, baseProj({ reflections: [r('a', 'a'), r('b', 'b')] }));
-  await repo.writeProject(NAME, baseProj({ reflections: [r('a', 'a2'), r('b', 'b2')] })); // 既存行あり
+  const id = (await repo.createProject(baseProj({ reflections: [r('a', 'a'), r('b', 'b')] }), { name: NAME })).id;
+  await repo.writeProject(id, baseProj({ reflections: [r('a', 'a2'), r('b', 'b2')] })); // 既存行あり
   const before = rows();
-  await repo.writeProject(NAME, baseProj({ reflections: [r('a', 'a3'), r('b', 'b3'), r('c', 'c3')] }));
+  await repo.writeProject(id, baseProj({ reflections: [r('a', 'a3'), r('b', 'b3'), r('c', 'c3')] }));
   const mid = rows();
   assert.equal(mid.length, 3);
   assert.deepEqual(mid.slice(0, 2).map((x) => x.n), before.map((x) => x.n), '既存行は作り直されない(rowid 不変)');
-  assert.deepEqual((await repo.readProject(NAME)).reflections.map((x) => x.text), ['a3', 'b3', 'c3']);
-  await repo.writeProject(NAME, baseProj({ reflections: [r('a', 'a4')] })); // 同期削除
+  assert.deepEqual((await repo.readProject(id)).reflections.map((x) => x.text), ['a3', 'b3', 'c3']);
+  await repo.writeProject(id, baseProj({ reflections: [r('a', 'a4')] })); // 同期削除
   const after = rows();
   assert.equal(after.length, 1);
   assert.equal(after[0].n, before[0].n);
-  assert.deepEqual((await repo.readProject(NAME)).reflections.map((x) => x.text), ['a4']);
+  assert.deepEqual((await repo.readProject(id)).reflections.map((x) => x.text), ['a4']);
   await rm(dataDir, { recursive: true, force: true });
 });
 
@@ -143,8 +143,8 @@ test('overlay progress/roadmap 往復', { skip: skipMsg }, async () => {
 
 test('deleteProject で器が消える', { skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
-  await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj());
-  await repo.deleteProject('sailviz-20260901-0900.sailviz.json');
+  const id = (await repo.createProject(baseProj(), { name: 'sailviz-20260901-0900.sailviz.json' })).id;
+  await repo.deleteProject(id);
   assert.deepEqual(await repo.listProjects(), []);
   await rm(dataDir, { recursive: true, force: true });
 });
@@ -152,10 +152,11 @@ test('deleteProject で器が消える', { skip: skipMsg }, async () => {
 test('findProjectByPracticeDate は practiceDate を持つ器だけ JST 日で照合', { skip: skipMsg }, async () => {
   const { repo, dataDir } = await freshRepo();
   const pd = Date.UTC(2026, 8, 3, 1, 0, 0); // JST 2026-09-03
-  await repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj({ practiceDate: pd }));
-  await repo.writeProject('sailviz-20260902-0900.sailviz.json', baseProj()); // practiceDate 無し
+  const id = (await repo.createProject(baseProj({ practiceDate: pd }), { name: 'sailviz-20260901-0900.sailviz.json' })).id;
+  await repo.createProject(baseProj(), { name: 'sailviz-20260902-0900.sailviz.json' }); // practiceDate 無し
   const found = await repo.findProjectByPracticeDate(pd);
   assert.equal(found.name, 'sailviz-20260901-0900.sailviz.json');
+  assert.equal(found.id, id);
   assert.equal(await repo.findProjectByPracticeDate(Date.UTC(2020, 0, 1)), null);
   await rm(dataDir, { recursive: true, force: true });
 });
@@ -166,10 +167,10 @@ test('中抜き削除で残トラックの color↔points が崩れない(id 重
   const t = (lat, color) => ({ id: 'Location.csv', name: `b${lat}`, color, visible: true,
     points: [{ t: lat, lat, lon: 0, speed: 0 }], bounds: { minLat: lat, maxLat: lat, minLon: 0, maxLon: 0 } });
   const NAME = 'sailviz-20260901-0900.sailviz.json';
-  await repo.writeProject(NAME, baseProj({ tracks: [t(0, '#000'), t(1, '#111'), t(2, '#222')] }));
+  const id = (await repo.createProject(baseProj({ tracks: [t(0, '#000'), t(1, '#111'), t(2, '#222')] }), { name: NAME })).id;
   // 真ん中(lat=1)を削除して PUT(Web の splice 相当)。rule② で残るが、各トラックの色↔点列は保たれること。
-  await repo.writeProject(NAME, baseProj({ tracks: [t(0, '#000'), t(2, '#222')] }));
-  const got = await repo.readProject(NAME);
+  await repo.writeProject(id, baseProj({ tracks: [t(0, '#000'), t(2, '#222')] }));
+  const got = await repo.readProject(id);
   const byLat = new Map(got.tracks.map((tr) => [tr.points[0].lat, tr.color]));
   assert.equal(byLat.get(0), '#000');
   assert.equal(byLat.get(1), '#111', 'lat=1 の色が別トラックの色に化けない');
@@ -182,9 +183,9 @@ test('トラック並べ替え PUT で points↔view がズレない', { skip: s
   const t = (lat, color) => ({ id: 'Location.csv', name: `b${lat}`, color, visible: true,
     points: [{ t: lat, lat, lon: 0, speed: 0 }], bounds: { minLat: lat, maxLat: lat, minLon: 0, maxLon: 0 } });
   const NAME = 'sailviz-20260901-0900.sailviz.json';
-  await repo.writeProject(NAME, baseProj({ tracks: [t(0, '#000'), t(1, '#111')] }));
-  await repo.writeProject(NAME, baseProj({ tracks: [t(1, '#111'), t(0, '#000')] })); // 並べ替え
-  const got = await repo.readProject(NAME);
+  const id = (await repo.createProject(baseProj({ tracks: [t(0, '#000'), t(1, '#111')] }), { name: NAME })).id;
+  await repo.writeProject(id, baseProj({ tracks: [t(1, '#111'), t(0, '#000')] })); // 並べ替え
+  const got = await repo.readProject(id);
   const byLat = new Map(got.tracks.map((tr) => [tr.points[0].lat, tr.color]));
   assert.equal(byLat.get(0), '#000');
   assert.equal(byLat.get(1), '#111');
@@ -197,5 +198,108 @@ test('uploads はファイルに委譲(save/read/rename)', { skip: skipMsg }, as
   assert.equal(await repo.readUpload('imp_x', 'raw.csv'), 'a,b\n1,2\n');
   await repo.renameUpload('imp_x', 'raw.csv', '4321_20260101-0900.csv');
   assert.equal(await repo.readUpload('imp_x', '4321_20260101-0900.csv'), 'a,b\n1,2\n');
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+// --- 練習を ID で引く(設計書 §5.5.1)---
+
+test('listProjects は id・name・label を返す', { skip: skipMsg }, async () => {
+  const { repo, dataDir } = await freshRepo();
+  const NAME = 'sailviz-20260901-0900.sailviz.json';
+  const { id, name } = await repo.createProject(baseProj(), { name: NAME });
+  assert.match(id, /^pd_[0-9a-f]{10}$/);
+  assert.equal(name, NAME);
+  const list = await repo.listProjects();
+  assert.equal(list.length, 1);
+  assert.deepEqual(Object.keys(list[0]).sort(), ['id', 'label', 'name']);
+  assert.equal(list[0].id, id);
+  assert.equal(list[0].name, NAME);
+  assert.equal(typeof list[0].label, 'string');
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test('同じ名前の器を 2 つ作れて、ID で別々に読める', { skip: skipMsg }, async () => {
+  const { repo, dataDir } = await freshRepo();
+  const NAME = 'sailviz-20260901-0900.sailviz.json';
+  const a = await repo.createProject(baseProj({ marks: [{ id: 'mA' }] }), { name: NAME });
+  const b = await repo.createProject(baseProj({ marks: [{ id: 'mB' }] }), { name: NAME });
+  assert.notEqual(a.id, b.id);
+  assert.deepEqual((await repo.readProject(a.id)).marks, [{ id: 'mA' }]);
+  assert.deepEqual((await repo.readProject(b.id)).marks, [{ id: 'mB' }]);
+  // 片方を書き換えても他方は変わらない
+  await repo.writeProject(a.id, baseProj({ marks: [{ id: 'mA2' }] }));
+  assert.deepEqual((await repo.readProject(b.id)).marks, [{ id: 'mB' }]);
+  // 並びは名前の降順、同名なら id 順
+  const list = await repo.listProjects();
+  assert.deepEqual(list.map((p) => p.id), [a.id, b.id].sort());
+  assert.ok(list.every((p) => p.name === NAME));
+  // 片方を消しても他方は残る
+  await repo.deleteProject(a.id);
+  assert.deepEqual((await repo.listProjects()).map((p) => p.id), [b.id]);
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test('writeProject は無い ID で not_found を投げる', { skip: skipMsg }, async () => {
+  const { repo, dataDir } = await freshRepo();
+  assert.throws(() => repo.writeProject('pd_0000000000', baseProj()), (e) => e.code === 'not_found');
+  // 名前を渡しても新しい器は作らない
+  assert.throws(() => repo.writeProject('sailviz-20260901-0900.sailviz.json', baseProj()), (e) => e.code === 'not_found');
+  assert.deepEqual(await repo.listProjects(), []);
+  assert.throws(() => repo.readProject('pd_0000000000'));
+  assert.equal(repo.getProjectAccess('pd_0000000000'), null);
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test('createProject は orgId の器を作り id を返す', { skip: skipMsg }, async () => {
+  const { repo, db, dataDir } = await freshRepo();
+  db.prepare("INSERT INTO orgs (id, name, created_at) VALUES ('org_a', 'A', 1)").run();
+  const NAME = 'sailviz-20260901-0900.sailviz.json';
+  const { id, name } = await repo.createProject(baseProj(), { name: NAME, orgId: 'org_a' });
+  assert.equal(name, NAME);
+  const row = db.prepare('SELECT org_id, legacy_name, rev FROM practice_days WHERE id = ?').get(id);
+  assert.deepEqual({ ...row }, { org_id: 'org_a', legacy_name: NAME, rev: 1 });
+  assert.equal(repo.getProjectAccess(id).orgId, 'org_a');
+  assert.equal(repo.readProjectWithAccess(id).access.orgId, 'org_a');
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test('findProjectsByPracticeDate は id を返す', { skip: skipMsg }, async () => {
+  const { repo, dataDir } = await freshRepo();
+  const pd = Date.UTC(2026, 8, 3, 1, 0, 0); // JST 2026-09-03
+  const NAME = 'sailviz-20260903-0900.sailviz.json';
+  const a = await repo.createProject(baseProj({ practiceDate: pd }), { name: NAME });
+  const b = await repo.createProject(baseProj({ practiceDate: pd }), { name: NAME });
+  await repo.createProject(baseProj(), { name: 'sailviz-20260904-0900.sailviz.json' });
+  const found = repo.findProjectsByPracticeDate(pd);
+  assert.deepEqual(found.map((x) => x.id), [a.id, b.id].sort());
+  assert.ok(found.every((x) => x.name === NAME && typeof x.label === 'string'));
+  // 反省の著者で引くものも id を返す
+  const refl = baseProj({ practiceDate: pd, reflections: [{ id: 'r1', createdAt: 1, text: 'x', people: ['テスト 太郎'], notes: {} }] });
+  const c = await repo.createProject(refl, { name: 'sailviz-20260903-1000.sailviz.json' });
+  assert.equal(repo.findReflectionByDate('テスト 太郎', pd).id, c.id);
+  assert.deepEqual(repo.findReflectionsByDate('テスト 太郎', pd).map((x) => x.id), [c.id]);
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+// --- ロードマップを組織の中で同期する(設計書 §5.6)---
+
+test('roadmap: 2 組織の __team__ は別々に保存され、片方の PUT で他方が変わらない', { skip: skipMsg }, async () => {
+  const { repo, db, dataDir } = await freshRepo();
+  db.prepare("INSERT INTO orgs (id, name, created_at) VALUES ('org_a', 'A', 1), ('org_b', 'B', 1)").run();
+  const A = 'org_a'; const B = 'org_b';
+  repo.writeOverlay('roadmap', { __team__: { goal: 'A の目標' }, 甲: { goal: 'a1' } }, { orgId: A, scopeOrgId: A });
+  repo.writeOverlay('roadmap', { __team__: { goal: 'B の目標' }, 乙: { goal: 'b1' } }, { orgId: B, scopeOrgId: B });
+  const bBefore = repo.readOverlay('roadmap', { orgId: B });
+  assert.deepEqual(bBefore, { __team__: { goal: 'B の目標' }, 乙: { goal: 'b1' } });
+  assert.deepEqual(repo.readOverlay('roadmap', { orgId: A }), { __team__: { goal: 'A の目標' }, 甲: { goal: 'a1' } });
+  assert.equal(db.prepare("SELECT count(*) c FROM roadmaps WHERE legacy_name = '__team__'").get().c, 2);
+  // A の全置き換え(甲を消し、__team__ を更新)は B の行に触らない
+  repo.writeOverlay('roadmap', { __team__: { goal: 'A の目標2' } }, { orgId: A, scopeOrgId: A });
+  assert.deepEqual(repo.readOverlay('roadmap', { orgId: A }), { __team__: { goal: 'A の目標2' } });
+  assert.deepEqual(repo.readOverlay('roadmap', { orgId: B }), bBefore);
+  // 認可用の一覧も同じ絞り込み
+  assert.deepEqual(repo.listRoadmapAccess({ orgId: B }).map((r) => [r.legacyName, r.orgId]).sort(),
+    [['__team__', B], ['乙', B]]);
+  assert.equal(repo.listRoadmapAccess().length, 3);
   await rm(dataDir, { recursive: true, force: true });
 });

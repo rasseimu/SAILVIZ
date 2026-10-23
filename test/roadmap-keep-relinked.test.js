@@ -130,3 +130,31 @@ test('取込み 2 回目(forceReimport): roadmaps の行数・id・内容が変�
   assert.deepEqual(dump(), first);
   assert.equal(first.length, 2);
 });
+
+test('syncRoadmaps: scopeOrgId なしは今と同じ(組織をまたいで legacy_name で突き合わせ・削除)', { skip }, () => {
+  const { db, accounts, org } = setup();
+  const other = accounts.createOrg({ name: '別部', now: 2 });
+  syncRoadmaps(db, [{ id: 'rm_legacy_0', legacy_name: '旧A', goal: 'a', org_id: org.id },
+    { id: 'rm_legacy_1', legacy_name: '旧B', goal: 'b', org_id: other.id }]);
+  // scopeOrgId なし: 組織を問わず 旧A を更新し、入力に無い 旧B(別組織)も消す
+  syncRoadmaps(db, [{ id: 'rm_legacy_0', legacy_name: '旧A', goal: 'a2', org_id: other.id }]);
+  const after = rows(db);
+  assert.deepEqual(after.map((r) => [r.legacy_name, r.org_id, r.goal]), [['旧A', org.id, 'a2']]);
+});
+
+test('syncRoadmaps: scopeOrgId ありは、その組織の行だけを突き合わせ・削除する(付け替え済みは残す)', { skip }, () => {
+  const { db, accounts, org, userId } = setup();
+  const other = accounts.createOrg({ name: '別部', now: 2 });
+  syncRoadmaps(db, [{ id: 'rm_legacy_0', legacy_name: '__team__', goal: 'A', org_id: org.id },
+    { id: 'rm_legacy_1', legacy_name: '旧A', goal: 'a', org_id: org.id }]);
+  syncRoadmaps(db, [{ id: 'rm_legacy_0', legacy_name: '__team__', goal: 'B', org_id: other.id },
+    { id: 'rm_legacy_1', legacy_name: '旧B', goal: 'b', org_id: other.id }], { scopeOrgId: other.id });
+  assert.equal(rows(db).length, 4, '別組織の同名 __team__ は別の行になる');
+  accounts.reattachLegacy({ orgId: org.id, userId, legacyName: '旧A' });
+  // org の全置き換え(空): 未付け替えの __team__ は消え、付け替え済みの 旧A と other の行は残る
+  syncRoadmaps(db, [], { scopeOrgId: org.id });
+  const after = rows(db);
+  assert.deepEqual(after.map((r) => [r.legacy_name, r.org_id, r.goal]).sort(),
+    [['__team__', other.id, 'B'], ['旧A', org.id, 'a'], ['旧B', other.id, 'b']].sort());
+  assert.equal(after.find((r) => r.legacy_name === '旧A').user_id, userId);
+});

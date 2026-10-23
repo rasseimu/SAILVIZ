@@ -43,14 +43,38 @@ test('write requires auth', async () => {
 test('unlock then write then read', async () => {
   const name = 'sailviz-20260101-0900.sailviz.json';
   const bearer = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+  // 新規は POST /api/projects。ファイル版の id はファイル名そのもの。
+  const post = await fetch(`${base}/api/projects`, {
+    method: 'POST', headers: bearer, body: JSON.stringify({ name, project: { version: 1, tracks: [] } }),
+  });
+  assert.equal(post.status, 201);
+  assert.deepEqual(await post.json(), { id: name, name });
   const put = await fetch(`${base}/api/projects/${name}`, {
-    method: 'PUT', headers: bearer, body: JSON.stringify({ version: 1, tracks: [] }),
+    method: 'PUT', headers: bearer, body: JSON.stringify({ version: 2, tracks: [] }),
   });
   assert.equal(put.status, 200);
   const got = await (await fetch(`${base}/api/projects/${name}`)).json();
-  assert.equal(got.version, 1);
+  assert.equal(got.version, 2);
   const list = await (await fetch(`${base}/api/projects`)).json();
-  assert.equal(list.some((p) => p.name === name), true);
+  assert.equal(list.some((p) => p.id === name && p.name === name), true);
+});
+
+test('file: PUT は既存のファイルだけ(無ければ 404)、POST の同名は 409', async () => {
+  const bearer = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+  const missing = await fetch(`${base}/api/projects/sailviz-20260109-0900.sailviz.json`, {
+    method: 'PUT', headers: bearer, body: JSON.stringify({ version: 1 }),
+  });
+  assert.equal(missing.status, 404);
+  const dup = await fetch(`${base}/api/projects`, {
+    method: 'POST', headers: bearer,
+    body: JSON.stringify({ name: 'sailviz-20260101-0900.sailviz.json', project: { version: 1 } }),
+  });
+  assert.equal(dup.status, 409);
+  assert.deepEqual(await dup.json(), { error: 'exists' });
+  const bad = await fetch(`${base}/api/projects`, {
+    method: 'POST', headers: bearer, body: JSON.stringify({ name: '../x', project: {} }),
+  });
+  assert.equal(bad.status, 400);
 });
 
 test('unlock endpoint validates password', async () => {
@@ -77,12 +101,14 @@ test('summaries rows include daySummary saved with the project', async () => {
   const name = 'sailviz-20260102-0900.sailviz.json';
   const bearer = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
   const ds = JSON.parse(readFileSync(new URL('./fixtures/day-summary-v1.json', import.meta.url), 'utf8'));
-  const put = await fetch(`${base}/api/projects/${name}`, {
-    method: 'PUT', headers: bearer, body: JSON.stringify({ version: 1, tracks: [], daySummary: ds }),
+  const post = await fetch(`${base}/api/projects`, {
+    method: 'POST', headers: bearer, body: JSON.stringify({ name, project: { version: 1, tracks: [], daySummary: ds } }),
   });
-  assert.equal(put.status, 200);
+  assert.equal(post.status, 201);
   const rows = await (await fetch(`${base}/api/summaries`)).json();
-  assert.deepEqual(rows.find((r) => r.name === name)?.daySummary, ds);
+  const row = rows.find((r) => r.name === name);
+  assert.equal(row?.id, name);
+  assert.deepEqual(row?.daySummary, ds);
 });
 
 test('overlay put/get', async () => {
