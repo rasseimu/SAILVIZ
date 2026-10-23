@@ -4,7 +4,8 @@
 // 算出不能を 0 で埋めない(表示側 daysummaryview.js が reason を文言に変える)。
 import { haversineMeters } from './gps.js';
 import { speedAt } from './interpolate.js';
-import { circDiffDeg, circMedianDeg, detectManeuvers } from './windaxis.js';
+import { circDiffDeg, circMedianDeg } from './windaxis.js';
+import { detectManeuverEvents } from './maneuverdetect.js';
 import { applyWindAxisOverrides } from './windaxisoverride.js';
 import { boatMinuteVmg } from './vmgminute.js';
 import { DAY_SUMMARY_VERSION } from './daysummaryschema.js';
@@ -184,12 +185,13 @@ export function computeComparison(tracks, windSeriesByTrack) {
   };
 }
 
-function countManeuvers(track, marks) {
+// タック/ジャイブの回数。地図のピン・VMG 欄の top3 と同じ検出(maneuverdetect.js: 風軸があれば舷の入れ替わりから)。
+function countManeuvers(track, marks, windSeries) {
   let ms;
-  try { ms = detectManeuvers(track, { marks }); } catch { ms = []; }
+  try { ms = detectManeuverEvents(track, windSeries, { marks }); } catch { ms = []; }
   return {
-    tacks: ms.filter((m) => m.type === 'tack').length,
-    gybes: ms.filter((m) => m.type === 'gybe').length,
+    tacks: ms.filter((m) => m.kind === 'tack').length,
+    gybes: ms.filter((m) => m.kind === 'gybe').length,
   };
 }
 
@@ -234,7 +236,7 @@ export function computeDaySummary(tracks, { marks = [], now = Date.now() } = {})
     const series = windSeriesOf(track, marks);
     windSeriesByTrack.set(track, series);
     const poor = quality.level === 'poor' || pts.length < 2;
-    const m = poor ? null : countManeuvers(track, marks);
+    const m = poor ? null : countManeuvers(track, marks, series);
     if (!poor) {
       usableBoatCount++;
       usableTacks += m.tacks;
