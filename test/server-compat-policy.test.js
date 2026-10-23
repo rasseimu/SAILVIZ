@@ -51,8 +51,13 @@ const loginCookie = async (base) => {
   return r.headers.get('set-cookie').split(';')[0];
 };
 const rows = (sql, ...a) => db.prepare(sql).all(...a);
-// 練習 ID(practice_days.id)。このファイルの器の名前は重ならないので名前から引ける。無ければ書式だけ正しい無い ID。
-const pid = (name) => rows('SELECT id FROM practice_days WHERE legacy_name = ?', name)[0]?.id ?? 'pd_0000000000';
+// 練習 ID(practice_days.id)。このファイルの器の名前は重ならないので名前から引ける。
+// 見つからなければ投げる(仕込みの失敗を 403/404 の確認で見逃さない)。
+const pid = (name) => {
+  const id = rows('SELECT id FROM practice_days WHERE legacy_name = ?', name)[0]?.id;
+  if (!id) throw new Error(`器が見つからない(仕込みの失敗): ${name}`);
+  return id;
+};
 
 before(async () => {
   if (!hasSqlite) return;
