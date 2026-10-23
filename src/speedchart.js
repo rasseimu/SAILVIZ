@@ -27,6 +27,25 @@ export function windowedSpeedsMps(points, { halfWindowMs = 5000 } = {}) {
   return out;
 }
 
+// 座標の1点差分による点ごとの速度(m/s)。直前の点との距離 / 時間。先頭・dt<=0 は null。
+// 位置誤差の影響をそのまま受けるため、記録 speed との突き合わせ(比較表示)用。
+export function diffSpeedsMps(points) {
+  return points.map((p, i) => {
+    const q = points[i - 1];
+    const dtSec = q ? (p.t - q.t) / 1000 : 0;
+    return dtSec > 0 ? haversineMeters(q, p) / dtSec : null;
+  });
+}
+
+// 速度の出どころ。record = 記録 speed(無効値は座標±5秒で補完)、position = 座標±5秒、diff = 座標の1点差分。
+// both = record(実線) と position(破線) を重ねる(speedChartDatasets のみ)。
+export const SPEED_SOURCES = ['record', 'position', 'diff', 'both'];
+export function speedsBySource(points, source = 'record') {
+  if (source === 'position') return windowedSpeedsMps(points);
+  if (source === 'diff') return diffSpeedsMps(points);
+  return pointSpeedsMps(points);
+}
+
 // 点ごとの速度(m/s)。記録済み speed が有効(有限・0以上)ならそれを使い、
 // 無効(null・負値など)なら windowedSpeedsMps の座標由来の値で補う。
 export function pointSpeedsMps(points, opts) {
@@ -46,9 +65,9 @@ export function bucketMsFor(range, { maxPoints = 300, minBucketMs = 2000 } = {})
 
 // トラック1本の速度系列(kt)。軸範囲 range を bucketMs ごとに区切り、区間内の点速度を平均する。
 // 点の無い区間は y=null(線を途切れさせ、欠測を 0kt に見せない)。offset は軸時刻 = 絶対時刻 - offset。
-export function speedSeries(points, { range, bucketMs, offset = 0 }) {
+export function speedSeries(points, { range, bucketMs, offset = 0, source = 'record' }) {
   if (!Array.isArray(points) || !points.length || !(bucketMs > 0) || !(range.end > range.start)) return [];
-  const speeds = pointSpeedsMps(points);
+  const speeds = speedsBySource(points, source);
   const n = Math.ceil((range.end - range.start) / bucketMs);
   const sum = new Array(n).fill(0), cnt = new Array(n).fill(0);
   for (let i = 0; i < points.length; i++) {
@@ -66,22 +85,29 @@ export function speedSeries(points, { range, bucketMs, offset = 0 }) {
   return out;
 }
 
-// 可視トラックの Chart.js datasets。色はマップと同じトラック色。データの無い艇は除外。
-export function speedChartDatasets(tracks, { range, mode, bucketMs = bucketMsFor(range) }) {
+// 可視トラックの Chart.js datasets。色はマップと同じトラック色。データの無い艇・系列は除外。
+// source='both' は艇ごとに記録(実線)と座標±5秒(破線、ラベルに「(座標)」)の2本を出す。
+export function speedChartDatasets(tracks, { range, mode, bucketMs = bucketMsFor(range), source = 'record' }) {
   const out = [];
+  const lines = source === 'both'
+    ? [{ source: 'record', suffix: '', dash: [] }, { source: 'position', suffix: '(座標)', dash: [5, 4] }]
+    : [{ source, suffix: '', dash: [] }];
   for (const tr of tracks) {
     if (!tr.visible) continue;
     const offset = mode === 'elapsed' ? (tr.tRange?.start ?? 0) : 0;
-    const data = speedSeries(tr.points, { range, bucketMs, offset });
-    if (!data.some((p) => p.y != null)) continue;
-    out.push({
-      label: String(tr.name || tr.id || ''),
-      data,
-      borderColor: tr.color || '#888',
-      backgroundColor: tr.color || '#888',
-      fill: false,
-      spanGaps: false,
-    });
+    for (const line of lines) {
+      const data = speedSeries(tr.points, { range, bucketMs, offset, source: line.source });
+      if (!data.some((p) => p.y != null)) continue;
+      out.push({
+        label: String(tr.name || tr.id || '') + line.suffix,
+        data,
+        borderColor: tr.color || '#888',
+        backgroundColor: tr.color || '#888',
+        borderDash: line.dash,
+        fill: false,
+        spanGaps: false,
+      });
+    }
   }
   return out;
 }
