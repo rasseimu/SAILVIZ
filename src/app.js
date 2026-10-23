@@ -40,6 +40,8 @@ import { createDashboard } from './dashboard.js';
 import { createProgress } from './progress.js';
 import { createRoadmap } from './roadmap.js';
 import { summarizeNeonShare } from './vmg.js';
+import { renderChart } from './chartview.js';
+import { speedChartDatasets } from './speedchart.js';
 import {
   refreshDaySummary, daySummaryAfterGpsLoad, daySummaryAfterPracticeLoad, runDaySummaryAction,
 } from './daysummaryflow.js';
@@ -187,7 +189,10 @@ function renderVmgLegend() {
   const available = level !== 'unavailable';
   const label = a ? formatConfidenceLabel(a) : '比較不能：分析できませんでした';
 
-  let html = `<div class="vl-title">${icon('award')} VMGネオン</div>`
+  // 説明文はホームの使い方ガイドへ移した。見出しの title にだけ残す(推定値であることの注記を含む)。
+  const titleHelp = '30秒ごとに、同じ走種で比較できる艇のうち VMG（推定風軸方向の前進成分）が最も良い艇を発光。'
+    + '風軸は GPS からの推定値（または手動設定）で、実測値ではありません。';
+  let html = `<div class="vl-title" title="${escapeHtml(titleHelp)}">${icon('award')} VMGネオン</div>`
     + `<div class="vl-conf vl-conf-${escapeHtml(level)}">${escapeHtml(label)}</div>`;
   if (a) {
     // 合計は時刻の和集合。別の艇の組が同時刻に別の走種で比較されると、走種別の和は合計を上回る。
@@ -209,10 +214,8 @@ function renderVmgLegend() {
     }).join('');
     if (items) html += `<details class="vl-reasons vl-wind-reasons"><summary>各艇の風軸の判定理由</summary><ul>${items}</ul></details>`;
   }
-  html += available
-    ? '<div class="vl-desc">30秒ごとに、同じ走種で比較できる艇のうち VMG（推定風軸方向の前進成分）が最も良い艇を発光。'
-      + '表の割合は、各艇が比較に参加した時間のうち最良だった割合（参加時間中の勝率）。風軸は GPS からの推定値（または手動設定）で、実測値ではありません。</div>'
-    : '<div class="vl-desc">比較できる区間がないため、勝率とネオンは表示しません。風軸は GPS からの推定値（または手動設定）で、実測値ではありません。</div>';
+  html += '<div class="vl-speed"><div class="vl-speed-title">速度の推移（kt）</div>'
+    + '<div class="vl-speed-wrap"><canvas id="vl-speed-canvas"></canvas></div></div>';
 
   const share = available ? summarizeNeonShare(vmgWinners, visible, vmgParticipation || new Map()) : null;
   const rateCell = (rate, partMs) => (rate == null
@@ -245,8 +248,59 @@ function renderVmgLegend() {
   html += `<table class="vl-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
   if (share) html += '<div class="vl-note">勝率の下の時間は参加時間。— は比較に参加していない走種。</div>';
 
+  destroySpeedChart(); // innerHTML の差し替えで canvas が消えるため、作り直す
   el.className = '';
   el.innerHTML = html;
+  updateSpeedChart(playback.getNow());
+}
+
+// VMG 凡例内の速度推移グラフ(可視艇を1つのグラフに重ねる)。x はタイムライン軸(再生範囲=クロップ)、
+// 再生時刻の縦線を draw() のたびに描き直す。系列はクロップ・整列・可視艇が変わったときだけ作り直す。
+let speedChart = null;
+let speedChartKey = '';
+let speedChartNow = 0;
+function destroySpeedChart() {
+  speedChart?.destroy();
+  speedChart = null;
+  speedChartKey = '';
+}
+const speedCursorPlugin = {
+  id: 'speedCursor',
+  afterDatasetsDraw(chart) {
+    const { ctx, chartArea: a, scales: { x } } = chart;
+    if (!a || speedChartNow < x.min || speedChartNow > x.max) return;
+    const px = x.getPixelForValue(speedChartNow);
+    ctx.save();
+    ctx.strokeStyle = '#d93025';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(px, a.top); ctx.lineTo(px, a.bottom); ctx.stroke();
+    ctx.restore();
+  },
+};
+function formatSpeedTick(v) {
+  if (state.mode === 'elapsed') {
+    const m = Math.max(0, Math.floor(v / 60000));
+    return `+${m}分`;
+  }
+  return new Date(v).toLocaleTimeString('ja-JP', { hour12: false, hour: '2-digit', minute: '2-digit' });
+}
+function updateSpeedChart(now) {
+  speedChartNow = now;
+  const canvas = document.getElementById('vl-speed-canvas');
+  if (!vmgOn || !canvas) return;
+  const range = state.crop && state.crop.end > state.crop.start ? state.crop : globalRange(state.tracks, state.mode);
+  const visible = state.tracks.filter((t) => t.visible);
+  const key = [range.start, range.end, state.mode,
+    ...visible.map((t) => `${t.color}:${t.points.length}`)].join('|');
+  if (speedChart && key === speedChartKey) { speedChart.draw(); return; }
+  destroySpeedChart();
+  if (!(range.end > range.start)) return;
+  speedChart = renderChart(canvas, {
+    datasets: speedChartDatasets(visible, { range, mode: state.mode }),
+    from: range.start, to: range.end, mini: true, fmtX: formatSpeedTick, yBeginAtZero: true,
+    plugins: [speedCursorPlugin],
+  });
+  speedChartKey = key;
 }
 
 // elapsedモードでの軸オフセット(基準トラック開始)。軸時刻⇄絶対時刻の変換に使う。
@@ -413,6 +467,7 @@ function draw() {
       };
     });
   windstrip.render({ range, series: windSeries, now });
+  updateSpeedChart(now);
   $('clock').textContent = range.end > range.start ? formatClock(now, state.mode) : '--:--:--';
   $('drop-zone').classList.toggle('hidden', state.tracks.length > 0 || state.events.length > 0);
 }

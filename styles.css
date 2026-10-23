@@ -428,7 +428,9 @@ main { flex: 1; display: flex; min-height: 0; }
   font-size: 12px; color: var(--gd-text); }
 #vmg-legend.hidden { display: none; }
 #vmg-legend .vl-title { font-weight: 600; margin-bottom: 2px; }
-#vmg-legend .vl-desc { color: var(--gd-text2); font-size: 11px; line-height: 1.35; margin-bottom: 6px; }
+#vmg-legend .vl-speed { margin: 2px 0 6px; }
+#vmg-legend .vl-speed-title { color: var(--gd-text2); font-size: 11px; margin-bottom: 2px; }
+#vmg-legend .vl-speed-wrap { position: relative; height: 120px; width: 100%; min-width: 240px; }
 #vmg-legend .vl-table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 #vmg-legend .vl-table th, #vmg-legend .vl-table td { padding: 2px 6px; text-align: right; }
 #vmg-legend .vl-table th { color: var(--gd-text2); font-weight: 500; border-bottom: 1px solid var(--gd-border); }
