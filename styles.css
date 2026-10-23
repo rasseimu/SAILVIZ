@@ -417,7 +417,6 @@ main { flex: 1; display: flex; min-height: 0; }
 #speed-panel-bar { display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; cursor: move;
   user-select: none; touch-action: none; border-bottom: 1px solid var(--gd-border); }
 #speed-panel-bar .sp-title { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#speed-source { font: inherit; font-size: 11px; padding: 1px 2px; max-width: 150px; cursor: pointer; }
 #speed-panel-close { border: none; background: none; font-size: 16px; line-height: 1; padding: 2px 6px;
   cursor: pointer; color: var(--gd-text2); border-radius: 4px; }
 #speed-panel-close:hover { background: var(--gd-surface); color: var(--gd-text); }
@@ -464,6 +463,13 @@ main { flex: 1; display: flex; min-height: 0; }
 #vmg-legend .vl-sub { display: block; font-size: 10px; color: var(--gd-text2); }
 #vmg-legend .vl-table td.vl-na { color: var(--gd-text2); }
 #vmg-legend .vl-table td.vl-wind { font-size: 11px; white-space: nowrap; }
+#vmg-legend .vl-tacks { margin-top: 8px; }
+#vmg-legend .vl-tacks-title { font-weight: 600; margin-bottom: 2px; }
+#vmg-legend .vl-tacks .vl-sub { display: block; }
+#vmg-legend .vl-tack-row { cursor: pointer; }
+#vmg-legend .vl-tack-row:hover td { background: var(--gd-blue-soft); }
+#vmg-legend .vl-rank { display: inline-block; width: 16px; height: 16px; line-height: 16px; border-radius: 50%;
+  background: #f1c40f; color: #3d2e00; font-weight: 700; font-size: 10px; text-align: center; }
 #vmg-legend .vl-note { font-size: 10px; color: var(--gd-text2); margin-top: 4px; }
 #drop-zone { position: absolute; inset: 0; display: flex; align-items: center;
   justify-content: center; font-size: 20px; color: #4a6076; pointer-events: none; }
