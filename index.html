@@ -380,6 +380,9 @@
         <label id="vmg-label" title="30秒ごとに、同じ走種で比較できる艇のうちVMG（推定風軸方向の前進成分）が最良だった艇をネオンで強調">
           <input type="checkbox" id="vmg-minute-toggle" /> <svg class="ic" aria-hidden="true" focusable="false"><use href="/src/vendor/feather/sprite.svg#award"></use></svg> VMG
         </label>
+        <label id="speed-label" title="各艇の速度の推移グラフを表示（再生時刻に追従）">
+          <input type="checkbox" id="speed-panel-toggle" checked /> <svg class="ic" aria-hidden="true" focusable="false"><use href="/src/vendor/feather/sprite.svg#trending-up"></use></svg> 速度
+        </label>
         <span id="rotate-label">0°</span>
         <input type="range" id="rotate-slider" min="0" max="360" step="1" value="0" />
         <button id="rotate-reset" title="北上に戻す">⟲</button>
@@ -390,6 +393,13 @@
           <span class="vt-arrow" aria-hidden="true"><svg class="ic" aria-hidden="true" focusable="false"><use href="/src/vendor/feather/sprite.svg#chevron-right"></use></svg></span><span class="vt-label">VMG・勝率</span>
         </button>
         <div id="vmg-legend" class="hidden"></div>
+      </div>
+      <div id="speed-panel" class="hidden" role="region" aria-label="速度の推移">
+        <div id="speed-panel-bar" title="ドラッグで移動・右下の角で拡大縮小">
+          <span class="sp-title"><svg class="ic" aria-hidden="true" focusable="false"><use href="/src/vendor/feather/sprite.svg#trending-up"></use></svg> 速度の推移（kt）</span>
+          <button type="button" id="speed-panel-close" title="閉じる" aria-label="速度の推移を閉じる">×</button>
+        </div>
+        <div id="speed-panel-body"><canvas id="speed-canvas"></canvas></div>
       </div>
       <div id="mark-menu" class="hidden">
         <button data-shape="triangle" data-color="#e02020"><span style="color:#e02020">▲</span> 赤三角</button>

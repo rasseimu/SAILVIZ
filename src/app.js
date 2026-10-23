@@ -214,8 +214,6 @@ function renderVmgLegend() {
     }).join('');
     if (items) html += `<details class="vl-reasons vl-wind-reasons"><summary>各艇の風軸の判定理由</summary><ul>${items}</ul></details>`;
   }
-  html += '<div class="vl-speed"><div class="vl-speed-title">速度の推移（kt）</div>'
-    + '<div class="vl-speed-wrap"><canvas id="vl-speed-canvas"></canvas></div></div>';
 
   const share = available ? summarizeNeonShare(vmgWinners, visible, vmgParticipation || new Map()) : null;
   const rateCell = (rate, partMs) => (rate == null
@@ -248,14 +246,15 @@ function renderVmgLegend() {
   html += `<table class="vl-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
   if (share) html += '<div class="vl-note">勝率の下の時間は参加時間。— は比較に参加していない走種。</div>';
 
-  destroySpeedChart(); // innerHTML の差し替えで canvas が消えるため、作り直す
   el.className = '';
   el.innerHTML = html;
-  updateSpeedChart(playback.getNow());
+  placeSpeedPanelDefault(); // 凡例の高さが変わるので、未移動ならその上へ付け直す
 }
 
-// VMG 凡例内の速度推移グラフ(可視艇を1つのグラフに重ねる)。x はタイムライン軸(再生範囲=クロップ)、
-// 再生時刻の縦線を draw() のたびに描き直す。系列はクロップ・整列・可視艇が変わったときだけ作り直す。
+// 速度の推移パネル(#speed-panel)。可視艇の速度を1つのグラフに重ね、再生時刻の縦線を draw() のたびに描き直す。
+// x はタイムライン軸(再生範囲=クロップ)。系列はクロップ・整列・可視艇が変わったときだけ作り直す。
+// パネルは #stage 内でドラッグ移動・右下で拡大縮小でき、位置と大きさは localStorage に保持(この端末のブラウザ内のみ)。
+// 未移動のうちは VMG 凡例の上(凡例が無ければマップ右下)に置く。
 let speedChart = null;
 let speedChartKey = '';
 let speedChartNow = 0;
@@ -277,31 +276,126 @@ const speedCursorPlugin = {
     ctx.restore();
   },
 };
-function formatSpeedTick(v) {
-  if (state.mode === 'elapsed') {
-    const m = Math.max(0, Math.floor(v / 60000));
-    return `+${m}分`;
-  }
-  return new Date(v).toLocaleTimeString('ja-JP', { hour12: false, hour: '2-digit', minute: '2-digit' });
-}
 function updateSpeedChart(now) {
   speedChartNow = now;
-  const canvas = document.getElementById('vl-speed-canvas');
-  if (!vmgOn || !canvas) return;
+  const panel = $('speed-panel');
   const range = state.crop && state.crop.end > state.crop.start ? state.crop : globalRange(state.tracks, state.mode);
   const visible = state.tracks.filter((t) => t.visible);
+  const show = $('speed-panel-toggle').checked && visible.length > 0 && range.end > range.start;
+  if (panel.classList.contains('hidden') === show) {
+    panel.classList.toggle('hidden', !show);
+    if (show) placeSpeedPanel();
+  }
+  if (!show) { destroySpeedChart(); return; }
   const key = [range.start, range.end, state.mode,
-    ...visible.map((t) => `${t.color}:${t.points.length}`)].join('|');
+    ...visible.map((t) => `${t.color}:${t.name}:${t.points.length}`)].join('|');
   if (speedChart && key === speedChartKey) { speedChart.draw(); return; }
   destroySpeedChart();
-  if (!(range.end > range.start)) return;
-  speedChart = renderChart(canvas, {
+  speedChart = renderChart($('speed-canvas'), {
     datasets: speedChartDatasets(visible, { range, mode: state.mode }),
-    from: range.start, to: range.end, mini: true, fmtX: formatSpeedTick, yBeginAtZero: true,
+    from: range.start, to: range.end, fmtX: (v) => formatClock(v, state.mode), yBeginAtZero: true,
     plugins: [speedCursorPlugin],
   });
   speedChartKey = key;
 }
+
+const SPEED_PANEL_KEY = 'sailviz_speed_panel'; // {left, top, width, height}(#stage 内の px)。未移動なら無し
+const SPEED_PANEL_SHOW_KEY = 'sailviz_speed_panel_hidden';
+const SPEED_PANEL_TOP_MIN = 50; // 回転コントロールの下
+let speedPanelPlaced = null; // 利用者が動かした/大きさを変えた位置。null の間は既定位置に追従
+let speedResizing = null; // パネル本体(右下ハンドル)を押したときの大きさ。離したときに変わっていれば利用者の操作として保存する
+try {
+  const saved = JSON.parse(globalThis.localStorage?.getItem(SPEED_PANEL_KEY) || 'null');
+  if (saved && ['left', 'top', 'width', 'height'].every((k) => Number.isFinite(saved[k]))) speedPanelPlaced = saved;
+  if (globalThis.localStorage?.getItem(SPEED_PANEL_SHOW_KEY) === '1') $('speed-panel-toggle').checked = false;
+} catch { /* noop */ }
+
+// パネルを #stage 内に収める(はみ出す大きさは縮める)。#stage が非表示(大きさ0)の間は何もしない。
+function setSpeedPanelBox({ left, top, width, height }) {
+  const panel = $('speed-panel');
+  const sw = $('stage').clientWidth, sh = $('stage').clientHeight;
+  if (!sw || !sh) return;
+  const w = Math.min(width, sw), h = Math.min(height, sh);
+  panel.style.width = `${Math.round(w)}px`;
+  panel.style.height = `${Math.round(h)}px`;
+  panel.style.left = `${Math.round(Math.max(0, Math.min(left, sw - w)))}px`;
+  panel.style.top = `${Math.round(Math.max(0, Math.min(top, sh - h)))}px`;
+}
+function placeSpeedPanel() {
+  if (speedPanelPlaced) setSpeedPanelBox(speedPanelPlaced);
+  else placeSpeedPanelDefault();
+}
+function placeSpeedPanelDefault() {
+  const panel = $('speed-panel');
+  if (speedPanelPlaced || panel.classList.contains('hidden')) return;
+  const stage = $('stage').getBoundingClientRect();
+  if (!stage.width || !stage.height) return;
+  const width = 380, height = 220;
+  const legend = $('vmg-legend');
+  const legendShown = !$('vmg-dock').classList.contains('hidden') && !$('vmg-dock').classList.contains('collapsed')
+    && !legend.classList.contains('hidden');
+  if (legendShown) {
+    const r = legend.getBoundingClientRect();
+    setSpeedPanelBox({ left: r.right - stage.left - width, top: Math.max(SPEED_PANEL_TOP_MIN, r.top - stage.top - height - 8), width, height });
+  } else {
+    setSpeedPanelBox({ left: stage.width - width - 34, top: stage.height - height - 10, width, height });
+  }
+}
+function saveSpeedPanelBox() {
+  const p = $('speed-panel');
+  speedPanelPlaced = { left: p.offsetLeft, top: p.offsetTop, width: p.offsetWidth, height: p.offsetHeight };
+  try { globalThis.localStorage?.setItem(SPEED_PANEL_KEY, JSON.stringify(speedPanelPlaced)); } catch { /* noop */ }
+}
+
+// ドラッグ移動(見出しバーをつかむ)。
+let speedDrag = null;
+$('speed-panel-bar').addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || e.target.closest('button')) return;
+  const p = $('speed-panel');
+  speedDrag = { id: e.pointerId, x: e.clientX, y: e.clientY, left: p.offsetLeft, top: p.offsetTop };
+  e.currentTarget.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+$('speed-panel-bar').addEventListener('pointermove', (e) => {
+  if (!speedDrag || e.pointerId !== speedDrag.id) return;
+  const p = $('speed-panel');
+  setSpeedPanelBox({ left: speedDrag.left + e.clientX - speedDrag.x, top: speedDrag.top + e.clientY - speedDrag.y,
+    width: p.offsetWidth, height: p.offsetHeight });
+});
+const endSpeedDrag = (e) => {
+  if (!speedDrag || e.pointerId !== speedDrag.id) return;
+  speedDrag = null;
+  saveSpeedPanelBox();
+};
+$('speed-panel-bar').addEventListener('pointerup', endSpeedDrag);
+$('speed-panel-bar').addEventListener('pointercancel', endSpeedDrag);
+
+// 拡大縮小(CSS resize の右下ハンドル)。押している間の大きさの変化だけを保存する
+// (マップの大きさに合わせてこちらで縮めた分は保存しない)。
+$('speed-panel').addEventListener('pointerdown', (e) => {
+  const p = e.currentTarget;
+  if (!e.target.closest('#speed-panel-bar')) speedResizing = { w: p.offsetWidth, h: p.offsetHeight };
+});
+window.addEventListener('pointerup', () => {
+  if (!speedResizing) return;
+  const before = speedResizing;
+  speedResizing = null;
+  const p = $('speed-panel');
+  if (p.offsetWidth !== before.w || p.offsetHeight !== before.h) {
+    setSpeedPanelBox({ left: p.offsetLeft, top: p.offsetTop, width: p.offsetWidth, height: p.offsetHeight });
+    saveSpeedPanelBox();
+  }
+});
+// マップの大きさが変わったら(ウィンドウ・動画パネル開閉)収め直す。
+new ResizeObserver(() => { if (!$('speed-panel').classList.contains('hidden')) placeSpeedPanel(); }).observe($('stage'));
+
+function setSpeedPanelShown(on) {
+  $('speed-panel-toggle').checked = on;
+  try { globalThis.localStorage?.setItem(SPEED_PANEL_SHOW_KEY, on ? '0' : '1'); } catch { /* noop */ }
+  updateSpeedChart(playback.getNow());
+}
+$('speed-panel-toggle').addEventListener('change', (e) => setSpeedPanelShown(e.target.checked));
+$('speed-panel-close').addEventListener('click', () => setSpeedPanelShown(false));
 
 // elapsedモードでの軸オフセット(基準トラック開始)。軸時刻⇄絶対時刻の変換に使う。
 function currentBase() {
@@ -1265,6 +1359,7 @@ function setVmgLegendCollapsed(collapsed) {
   tab.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
   tab.title = collapsed ? 'VMGネオン・勝率を開く' : 'VMGネオン・勝率を閉じる';
   tab.querySelector('.vt-arrow').innerHTML = icon(collapsed ? 'chevron-left' : 'chevron-right');
+  placeSpeedPanelDefault();
 }
 try {
   setVmgLegendCollapsed(globalThis.localStorage?.getItem(VMG_LEGEND_KEY) === '1');
