@@ -1,23 +1,41 @@
 // src/speedchart.js
-// VMG 凡例内の「艇ごとの速度推移」グラフ用の純関数群。DOM / Chart.js 非依存(node:test で検証する)。
+// 速度の推移パネル(艇ごとの速度推移グラフ)用の純関数群。DOM / Chart.js 非依存(node:test で検証する)。
 // 時刻はタイムライン軸(absolute=絶対 epoch ms / elapsed=各トラック自身の開始を0)に合わせる。map・風軸ストリップと同じ規約。
 import { haversineMeters } from './gps.js';
 
 export const MPS_TO_KT = 1.943844;
 
-// 点ごとの速度(m/s)。記録済み speed が有効(有限・0以上)ならそれを使い、
-// 無効(null・負値など)なら直前の点からの haversine/dt で求める。求められなければ null。
-export function pointSpeedsMps(points) {
-  const out = new Array(points.length).fill(null);
-  for (let i = 0; i < points.length; i++) {
-    const p = points[i];
-    if (Number.isFinite(p.speed) && p.speed >= 0) { out[i] = p.speed; continue; }
-    const q = points[i - 1];
-    if (!q) continue;
-    const dtSec = (p.t - q.t) / 1000;
-    if (dtSec > 0) out[i] = haversineMeters(q, p) / dtSec;
+// 座標から求めた点ごとの速度(m/s)。前後 halfWindowMs の範囲の両端点を結ぶ直線距離 ÷ 時間。
+// 1点差分(隣接点の距離/dt)は位置誤差 数m がそのまま数 m/s の揺れになるため、窓で均す。
+// 経路長の合計ではなく両端の直線距離を使う(位置のジグザグ誤差で速度が過大にならない)。求められなければ null。
+// 窓の両端は points 自体の点(補間しない)。points は t 昇順。
+export function windowedSpeedsMps(points, { halfWindowMs = 5000 } = {}) {
+  const n = points.length;
+  const out = new Array(n).fill(null);
+  let lo = 0, hi = 0;
+  for (let i = 0; i < n; i++) {
+    const t = points[i].t;
+    while (points[lo].t < t - halfWindowMs) lo++;
+    if (hi < i) hi = i;
+    while (hi + 1 < n && points[hi + 1].t <= t + halfWindowMs) hi++;
+    // 記録間隔が窓より粗く窓内に自分しかいないときは、隣接点で求める
+    const a = lo === hi ? Math.max(0, i - 1) : lo;
+    const b = lo === hi ? Math.min(n - 1, i + 1) : hi;
+    const dtSec = (points[b].t - points[a].t) / 1000;
+    if (dtSec > 0) out[i] = haversineMeters(points[a], points[b]) / dtSec;
   }
   return out;
+}
+
+// 点ごとの速度(m/s)。記録済み speed が有効(有限・0以上)ならそれを使い、
+// 無効(null・負値など)なら windowedSpeedsMps の座標由来の値で補う。
+export function pointSpeedsMps(points, opts) {
+  let fromPos = null;
+  return points.map((p, i) => {
+    if (Number.isFinite(p.speed) && p.speed >= 0) return p.speed;
+    fromPos ??= windowedSpeedsMps(points, opts);
+    return fromPos[i];
+  });
 }
 
 // 軸範囲の長さから集計幅(ms)を決める。点数を maxPoints 以下に抑え、最小 minBucketMs。

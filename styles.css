@@ -408,6 +408,19 @@ main { flex: 1; display: flex; min-height: 0; }
 #rotate-control #rotate-reset { border: none; background: #24313d; color: #fff;
   width: 24px; height: 22px; border-radius: 4px; cursor: pointer; }
 #rotate-control #rotate-reset:hover { background: #33475a; }
+/* 速度の推移パネル(#stage 内を見出しバーでドラッグ移動・右下の角で拡大縮小)。位置と大きさは app.js が設定 */
+#speed-panel { position: absolute; z-index: 11; min-width: 220px; min-height: 120px; max-width: 100%; max-height: 100%;
+  display: flex; flex-direction: column; resize: both; overflow: hidden;
+  background: rgba(255,255,255,0.95); border: 1px solid var(--gd-border); border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(60,64,67,0.25); font-size: 12px; color: var(--gd-text); }
+#speed-panel.hidden { display: none; }
+#speed-panel-bar { display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; cursor: move;
+  user-select: none; touch-action: none; border-bottom: 1px solid var(--gd-border); }
+#speed-panel-bar .sp-title { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#speed-panel-close { border: none; background: none; font-size: 16px; line-height: 1; padding: 2px 6px;
+  cursor: pointer; color: var(--gd-text2); border-radius: 4px; }
+#speed-panel-close:hover { background: var(--gd-surface); color: var(--gd-text); }
+#speed-panel-body { position: relative; flex: 1; min-height: 0; padding: 4px 8px 8px; }
 /* VMGネオン凡例＋占有率表(#stage 右下オーバーレイ)。
    #vmg-dock は #stage の右端に貼り付き、動画を開いたときは動画の左端に来る。
    左側の縦タブ #vmg-tab で凡例を開閉する(閉じるとタブだけが右端に残る) */
@@ -428,9 +441,6 @@ main { flex: 1; display: flex; min-height: 0; }
   font-size: 12px; color: var(--gd-text); }
 #vmg-legend.hidden { display: none; }
 #vmg-legend .vl-title { font-weight: 600; margin-bottom: 2px; }
-#vmg-legend .vl-speed { margin: 2px 0 6px; }
-#vmg-legend .vl-speed-title { color: var(--gd-text2); font-size: 11px; margin-bottom: 2px; }
-#vmg-legend .vl-speed-wrap { position: relative; height: 120px; width: 100%; min-width: 240px; }
 #vmg-legend .vl-table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 #vmg-legend .vl-table th, #vmg-legend .vl-table td { padding: 2px 6px; text-align: right; }
 #vmg-legend .vl-table th { color: var(--gd-text2); font-weight: 500; border-bottom: 1px solid var(--gd-border); }

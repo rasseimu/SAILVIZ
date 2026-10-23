@@ -1,12 +1,12 @@
 // test/speedchart.test.js
-// VMG 凡例内の速度推移グラフ用の純関数(座標はダミー)。
+// 速度の推移パネル用の純関数(座標はダミー)。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MPS_TO_KT, pointSpeedsMps, bucketMsFor, speedSeries, speedChartDatasets } from '../src/speedchart.js';
+import { MPS_TO_KT, windowedSpeedsMps, pointSpeedsMps, bucketMsFor, speedSeries, speedChartDatasets } from '../src/speedchart.js';
 
 const pt = (t, speed, lat = 0, lon = 0) => ({ t, lat, lon, speed });
 
-test('pointSpeedsMps: 有効な記録 speed はそのまま、負値・null は直前点からの距離/時間', () => {
+test('pointSpeedsMps: 有効な記録 speed はそのまま、負値・null は座標から補う', () => {
   // 緯度 0.001° ≒ 111.2m を 10 秒 → 約 11.1 m/s
   const s = pointSpeedsMps([pt(0, 2), pt(10000, -1, 0.001), pt(20000, null, 0.002), pt(30000, 3, 0.003)]);
   assert.equal(s[0], 2);
@@ -15,9 +15,28 @@ test('pointSpeedsMps: 有効な記録 speed はそのまま、負値・null は�
   assert.equal(s[3], 3);
 });
 
-test('pointSpeedsMps: 先頭の無効 speed と dt<=0 は null', () => {
-  const s = pointSpeedsMps([pt(0, -1), pt(0, null, 0.001)]);
-  assert.deepEqual(s, [null, null]);
+test('pointSpeedsMps: 求められない点(1点だけ・同時刻)は null', () => {
+  assert.deepEqual(pointSpeedsMps([pt(0, -1)]), [null]);
+  assert.deepEqual(pointSpeedsMps([pt(0, -1), pt(0, null, 0.001)]), [null, null]);
+});
+
+test('windowedSpeedsMps: 位置の揺れ(±数m)を窓で均す。1点差分より真値に近い', () => {
+  // 真値 2 m/s で北へ 1Hz・60秒。各点に緯度方向 ±3m の交互誤差を足す
+  const deg = 1 / 111195;
+  const pts = Array.from({ length: 61 }, (_, i) => pt(i * 1000, null, (2 * i + (i % 2 ? 3 : -3)) * deg));
+  const w = windowedSpeedsMps(pts, { halfWindowMs: 5000 });
+  for (let i = 5; i <= 55; i++) assert.ok(Math.abs(w[i] - 2) < 0.7, `${i}: ${w[i]}`);
+  // 1点差分(直前の点との距離/dt)だと 2±6 m/s で揺れる
+  const one = (pts[10].lat - pts[9].lat) / deg;
+  assert.ok(Math.abs(one - 2) > 3, String(one));
+});
+
+test('windowedSpeedsMps: 端は片側だけの窓、窓内に他の点がなければ隣接点で求める', () => {
+  const deg = 1 / 111195;
+  const w = windowedSpeedsMps([pt(0, null, 0), pt(1000, null, 2 * deg), pt(60000, null, 61 * deg)]);
+  assert.ok(Math.abs(w[0] - 2) < 0.01);
+  assert.ok(Math.abs(w[1] - 2) < 0.01);
+  assert.ok(Math.abs(w[2] - 1) < 0.01, String(w[2])); // ±5秒に他の点がない → 直前の点から
 });
 
 test('bucketMsFor: 点数上限で幅を決め、最小幅を下回らない', () => {
