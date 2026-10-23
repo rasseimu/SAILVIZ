@@ -402,8 +402,21 @@ main { flex: 1; display: flex; min-height: 0; }
 #rotate-control #rotate-reset { border: none; background: #24313d; color: #fff;
   width: 24px; height: 22px; border-radius: 4px; cursor: pointer; }
 #rotate-control #rotate-reset:hover { background: #33475a; }
-/* VMGネオン凡例＋占有率表(#stage 右下オーバーレイ) */
-#vmg-legend { position: absolute; bottom: 10px; right: 10px; z-index: 10;
+/* VMGネオン凡例＋占有率表(#stage 右下オーバーレイ)。
+   #vmg-dock は #stage の右端に貼り付き、動画を開いたときは動画の左端に来る。
+   左側の縦タブ #vmg-tab で凡例を開閉する(閉じるとタブだけが右端に残る) */
+#vmg-dock { position: absolute; top: 50px; bottom: 10px; right: 0; z-index: 10;
+  display: flex; align-items: flex-end; pointer-events: none; }
+#vmg-dock > * { pointer-events: auto; }
+#vmg-dock.hidden { display: none; }
+#vmg-tab { display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 10px 4px; margin-right: -1px; cursor: pointer; font: inherit; font-size: 12px;
+  color: var(--gd-text); background: rgba(255,255,255,0.92); border: 1px solid var(--gd-border);
+  border-right: none; border-radius: 8px 0 0 8px; box-shadow: -1px 1px 3px rgba(60,64,67,0.2); }
+#vmg-tab:hover { background: var(--gd-surface); color: var(--gd-blue); }
+#vmg-tab .vt-label { writing-mode: vertical-rl; white-space: nowrap; letter-spacing: 1px; }
+#vmg-dock.collapsed #vmg-legend { display: none; }
+#vmg-legend { position: relative; margin-right: 10px; max-height: 100%;
   background: rgba(255,255,255,0.92); border: 1px solid var(--gd-border); border-radius: 8px;
   padding: 8px 10px; box-shadow: 0 1px 3px rgba(60,64,67,0.2); max-width: 260px;
   font-size: 12px; color: var(--gd-text); }
@@ -418,7 +431,7 @@ main { flex: 1; display: flex; min-height: 0; }
 #vmg-legend .vl-boat .legend-swatch { width: 14px; height: 6px; border-radius: 2px; flex: 0 0 auto; }
 #vmg-legend .vl-name { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 比較の信頼度バッジ・比較区間・理由一覧・各艇の風軸(Issue #30) */
-#vmg-legend { max-width: 300px; max-height: calc(100% - 60px); overflow: auto; }
+#vmg-legend { max-width: 300px; overflow: auto; }
 #vmg-legend .vl-conf { display: inline-block; margin: 2px 0 4px; padding: 2px 8px; border-radius: 10px;
   font-size: 11.5px; line-height: 1.4; border: 1px solid transparent; }
 #vmg-legend .vl-conf-high { background: #e6f4ea; color: var(--gd-ok); border-color: #a8dab5; }
@@ -584,6 +597,9 @@ main { flex: 1; display: flex; min-height: 0; }
   #rotate-control input[type=range] { width: auto; flex: 1 1 80px; min-width: 0; }
 
   /* VMG凡例は地図の下に通常の流れで配置。縦は main のスクロール、表が広いときは凡例内で横スクロール */
+  #vmg-dock { position: static; display: block; pointer-events: auto; }
+  #vmg-tab { display: none; }
+  #vmg-dock.collapsed #vmg-legend { display: block; }
   #vmg-legend { position: static; max-width: none; max-height: none;
     margin: 8px 10px 10px; overflow-x: auto; }
 

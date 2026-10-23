@@ -385,7 +385,12 @@
         <button id="rotate-reset" title="北上に戻す">⟲</button>
       </div>
       <div id="drop-zone">CSV / 動画をここにドラッグ&ドロップ</div>
-      <div id="vmg-legend" class="hidden"></div>
+      <div id="vmg-dock" class="hidden">
+        <button type="button" id="vmg-tab" aria-controls="vmg-legend" aria-expanded="true" title="VMGネオン・勝率を閉じる">
+          <span class="vt-arrow" aria-hidden="true">▶</span><span class="vt-label">🏆 VMG・勝率</span>
+        </button>
+        <div id="vmg-legend" class="hidden"></div>
+      </div>
       <div id="mark-menu" class="hidden">
         <button data-shape="triangle" data-color="#e02020"><span style="color:#e02020">▲</span> 赤三角</button>
         <button data-shape="triangle" data-color="#f1c40f"><span style="color:#f1c40f">▲</span> 黄三角</button>

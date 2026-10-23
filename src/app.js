@@ -178,6 +178,7 @@ const LEVEL_SHORT = { high: '高', medium: '中', low: '低', unavailable: '推�
 function renderVmgLegend() {
   const el = $('vmg-legend');
   if (!el) return;
+  $('vmg-dock')?.classList.toggle('hidden', !vmgOn);
   if (!vmgOn) { el.className = 'hidden'; el.innerHTML = ''; return; }
   const visible = state.tracks.filter((t) => t.visible);
   const a = vmgAssessment;
@@ -1194,6 +1195,25 @@ try {
 $('sb-collapse').addEventListener('click', () => {
   const collapsed = document.body.classList.toggle('sidebar-collapsed');
   try { globalThis.localStorage?.setItem(SIDEBAR_KEY, collapsed ? '1' : '0'); } catch { /* noop */ }
+});
+
+// VMGネオン・勝率の凡例の折りたたみ。マップ右端(動画を開いているときは動画の左端)の縦タブで開閉し、
+// 状態は localStorage に保持(この端末のブラウザ内のみ)。
+const VMG_LEGEND_KEY = 'sailviz_vmg_legend_collapsed';
+function setVmgLegendCollapsed(collapsed) {
+  $('vmg-dock').classList.toggle('collapsed', collapsed);
+  const tab = $('vmg-tab');
+  tab.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  tab.title = collapsed ? 'VMGネオン・勝率を開く' : 'VMGネオン・勝率を閉じる';
+  tab.querySelector('.vt-arrow').textContent = collapsed ? '◀' : '▶';
+}
+try {
+  setVmgLegendCollapsed(globalThis.localStorage?.getItem(VMG_LEGEND_KEY) === '1');
+} catch { /* noop */ }
+$('vmg-tab').addEventListener('click', () => {
+  const collapsed = !$('vmg-dock').classList.contains('collapsed');
+  setVmgLegendCollapsed(collapsed);
+  try { globalThis.localStorage?.setItem(VMG_LEGEND_KEY, collapsed ? '1' : '0'); } catch { /* noop */ }
 });
 
 // ===== アカウントメニュー(サイドバー下部) =====
