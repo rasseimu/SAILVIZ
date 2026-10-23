@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   relativeCourses, sideRuns, detectManeuversByWind, turnAcrossDeg, turnCenterMs, maneuverKind,
-  legacyManeuverEvents, detectManeuverEvents,
+  legacyManeuverEvents, detectManeuverEvents, excludeManeuvers, addManeuverExclusion, removeManeuverExclusions,
 } from '../src/maneuverdetect.js';
 
 const DEG = 1 / 111195; // 緯度 1m 相当
@@ -130,4 +130,31 @@ test('detectManeuverEvents: 風軸があれば舷の入れ替わりから、無�
   const legacy = detectManeuverEvents({ points: course([{ sec: 40, hdg: 315 }, { sec: 40, hdg: 45 }]).points }, []);
   assert.ok(legacy.every((e) => ['tack', 'gybe'].includes(e.kind) && Number.isFinite(e.tMs)));
   assert.deepEqual(detectManeuverEvents({ points: [] }, []), []);
+});
+
+// ===== 誤検出の除外 =====
+
+test('excludeManeuvers: 除外区間(両端を含む)に時刻があるマニューバを外す。区間なし・壊れた値は無視', () => {
+  const ev = [{ tMs: 100 }, { tMs: 200 }, { tMs: 300 }, { tMs: 400 }];
+  assert.deepEqual(excludeManeuvers(ev, [{ start: 200, end: 300 }]).map((e) => e.tMs), [100, 400]);
+  assert.deepEqual(excludeManeuvers(ev, [{ start: 50, end: 120 }, { start: 390, end: 999 }]).map((e) => e.tMs), [200, 300]);
+  assert.equal(excludeManeuvers(ev, []), ev);
+  assert.equal(excludeManeuvers(ev, undefined), ev); // 旧データ
+  assert.deepEqual(excludeManeuvers(ev, [{ start: 300, end: 200 }, null, { start: 'x', end: 1 }]).length, 4);
+});
+
+test('addManeuverExclusion: 足す・同じ区間は重ねない・不正な区間は無視。元の配列は変えない', () => {
+  const a = [{ start: 1, end: 2 }];
+  const b = addManeuverExclusion(a, { start: 5, end: 9 });
+  assert.deepEqual(b, [{ start: 1, end: 2 }, { start: 5, end: 9 }]);
+  assert.deepEqual(a, [{ start: 1, end: 2 }]);
+  assert.equal(addManeuverExclusion(b, { start: 5, end: 9 }).length, 2);
+  assert.equal(addManeuverExclusion(b, { start: 9, end: 5 }).length, 2);
+  assert.deepEqual(addManeuverExclusion(undefined, { start: 0, end: 1 }), [{ start: 0, end: 1 }]);
+});
+
+test('removeManeuverExclusions: 指定範囲と重なる区間だけを取り除く', () => {
+  const list = [{ start: 0, end: 10 }, { start: 20, end: 30 }, { start: 40, end: 50 }];
+  assert.deepEqual(removeManeuverExclusions(list, { start: 25, end: 45 }), [{ start: 0, end: 10 }]);
+  assert.deepEqual(removeManeuverExclusions(list, { start: 11, end: 19 }), list);
 });

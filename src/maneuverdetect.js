@@ -169,3 +169,33 @@ export function detectManeuverEvents(track, windSeries, { marks = [], ...opts } 
   if (windSeries && windSeries.length) return detectManeuversByWind(points, windSeries, opts);
   return legacyManeuverEvents(points, detectManeuvers(track, { marks }), windSeries, opts);
 }
+
+// ===== 誤検出の除外(下バー右クリック「タック/ジャイブを除外」) =====
+// 除外区間は艇ごとに track.maneuverExclusions = [{start, end}](絶対 epoch ms)として保存する。
+// 区間内に時刻があるマニューバは、地図のピン・top3・VMG 欄の回数から外す(今日の練習サマリの回数は
+// 風軸の手動上書きと同じく対象外)。
+
+// 有効な除外区間だけを返す(旧データ・壊れた値は無視)。
+function validRanges(list) {
+  return (Array.isArray(list) ? list : []).filter((r) => r && Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start);
+}
+
+// 除外区間に入っていないマニューバだけを返す(区間の両端を含む)。
+export function excludeManeuvers(events, exclusions) {
+  const ranges = validRanges(exclusions);
+  if (!ranges.length) return events || [];
+  return (events || []).filter((e) => !ranges.some((r) => e.tMs >= r.start && e.tMs <= r.end));
+}
+
+// 除外区間を足す。同じ区間が既にあれば足さない。元の配列は変えない。
+export function addManeuverExclusion(list, range) {
+  const ranges = validRanges(list);
+  if (!(Number.isFinite(range?.start) && Number.isFinite(range?.end) && range.end > range.start)) return ranges;
+  if (ranges.some((r) => r.start === range.start && r.end === range.end)) return ranges;
+  return [...ranges, { start: range.start, end: range.end }];
+}
+
+// range と重なる除外区間を取り除く(「除外を解除」)。元の配列は変えない。
+export function removeManeuverExclusions(list, range) {
+  return validRanges(list).filter((r) => r.end < range.start || r.start > range.end);
+}

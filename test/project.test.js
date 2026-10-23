@@ -224,3 +224,13 @@ test('保存JSONを読み直しても sourceKey は変わらない(開き直し�
   const reloaded = deserializeProject(JSON.parse(JSON.stringify(serializeProject(state))));
   assert.equal(daySummarySourceKey(reloaded.tracks), daySummarySourceKey(state.tracks));
 });
+
+test('serialize/deserialize: maneuverExclusions が保持され、旧データ(フィールド無し)は [] になる', () => {
+  const st = baseState();
+  st.tracks[0].maneuverExclusions = [{ start: 200, end: 400 }];
+  const obj = serializeProject(st);
+  assert.deepEqual(obj.tracks[0].maneuverExclusions, [{ start: 200, end: 400 }]);
+  assert.deepEqual(deserializeProject(JSON.parse(JSON.stringify(obj))).tracks[0].maneuverExclusions, [{ start: 200, end: 400 }]);
+  delete obj.tracks[0].maneuverExclusions;
+  assert.deepEqual(deserializeProject(obj).tracks[0].maneuverExclusions, []);
+});
