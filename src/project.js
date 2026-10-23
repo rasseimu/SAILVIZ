@@ -15,6 +15,8 @@ export function serializeProject(state, { savedAt } = {}) {
       id: t.id, name: t.name, color: t.color, visible: t.visible,
       points: t.points, bounds: t.bounds, tRange: t.tRange,
       windAxisOverrides: Array.isArray(t.windAxisOverrides) ? t.windAxisOverrides : [],
+      // タック/ジャイブの誤検出として除外した区間(下バー右クリック)。旧データには無い
+      maneuverExclusions: Array.isArray(t.maneuverExclusions) ? t.maneuverExclusions : [],
       // 読込時に点を除いた時間帯。項目のないトラック(旧データ)には書き出さない(分析側で旧データと区別するため)。
       ...(Array.isArray(t.excludedIntervals) ? { excludedIntervals: serializeExcludedIntervals(t.excludedIntervals) } : {}),
     })),
@@ -73,6 +75,7 @@ export function deserializeProject(obj) {
         ...t,
         tRange,
         windAxisOverrides: arr(t && t.windAxisOverrides),
+        maneuverExclusions: arr(t && t.maneuverExclusions),
       };
     }),
     events: arr(obj.events),

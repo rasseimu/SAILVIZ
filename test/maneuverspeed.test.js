@@ -2,7 +2,7 @@
 // タック/ジャイブ前後の減速(座標はダミー)。検出は test/maneuverdetect.test.js。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { speedAround, maneuverSpeedRows, topByKind } from '../src/maneuverspeed.js';
+import { speedAround, maneuverSpeedRows, topByKind, dropImplausibleManeuvers } from '../src/maneuverspeed.js';
 import { MPS_TO_KT } from '../src/speedchart.js';
 
 const DEG = 1 / 111195; // 緯度 1m 相当
@@ -62,4 +62,12 @@ test('maneuverSpeedRows / topByKind: 減速が小さい艇のタックが上', (
   const bad = trackWithDip('bad', 0.5);
   const rows = [...maneuverSpeedRows(bad, [tackAt20]), ...maneuverSpeedRows(good, [tackAt20])];
   assert.deepEqual(topByKind(rows, 'tack').map((x) => x.track.name), ['good', 'bad']);
+});
+
+test('dropImplausibleManeuvers: 減速が 0.1kt 未満のタックは誤検出として除く。ジャイブはそのまま', () => {
+  const r = (kind, dropKt) => ({ kind, dropKt });
+  const rows = [r('tack', 0), r('tack', 0.04), r('tack', 0.1), r('tack', 1.2), r('gybe', 0), r('gybe', 0.3)];
+  assert.deepEqual(dropImplausibleManeuvers(rows).map((x) => `${x.kind}:${x.dropKt}`), ['tack:0.1', 'tack:1.2', 'gybe:0', 'gybe:0.3']);
+  assert.equal(dropImplausibleManeuvers(rows, { minTackDropKt: 0 }).length, 6);
+  assert.deepEqual(dropImplausibleManeuvers(undefined), []);
 });

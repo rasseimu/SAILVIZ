@@ -42,8 +42,8 @@ import { createRoadmap } from './roadmap.js';
 import { summarizeNeonShare } from './vmg.js';
 import { renderChart } from './chartview.js';
 import { speedChartDatasets } from './speedchart.js';
-import { maneuverSpeedRows, topByKind } from './maneuverspeed.js';
-import { detectManeuverEvents } from './maneuverdetect.js';
+import { maneuverSpeedRows, topByKind, dropImplausibleManeuvers } from './maneuverspeed.js';
+import { detectManeuverEvents, excludeManeuvers, addManeuverExclusion, removeManeuverExclusions } from './maneuverdetect.js';
 import {
   refreshDaySummary, daySummaryAfterGpsLoad, daySummaryAfterPracticeLoad, runDaySummaryAction,
 } from './daysummaryflow.js';
@@ -155,8 +155,11 @@ function recomputeManeuvers(visible) {
   maneuverRows = [];
   for (const tr of visible) {
     try {
-      const events = detectManeuverEvents(tr, windSeriesByTrack.get(tr), { marks: state.marks });
-      maneuverRows.push(...maneuverSpeedRows(tr, events));
+      // 下バー右クリックで誤検出として除外した区間のマニューバは、ピン・top3・回数から外す
+      const events = excludeManeuvers(
+        detectManeuverEvents(tr, windSeriesByTrack.get(tr), { marks: state.marks }), tr.maneuverExclusions);
+      // 減速がほぼ 0 のタックは起こりえないので誤検出として外す(ピン・top3・回数とも)
+      maneuverRows.push(...dropImplausibleManeuvers(maneuverSpeedRows(tr, events)));
     } catch { /* 検出失敗の艇は落とさず、マニューバなしとして扱う */ }
   }
   maneuverTop = { tack: topByKind(maneuverRows, 'tack'), gybe: topByKind(maneuverRows, 'gybe') };
@@ -193,7 +196,8 @@ const MANEUVER_LABEL = { tack: 'タック', gybe: 'ジャイブ' };
 function maneuverTopHtml() {
   const count = (kind) => maneuverRows.filter((r) => r.kind === kind).length;
   const help = 'GPS 座標の移動距離(前後±2秒)から求めた速度で、艇首(タック)・艇尾(ジャイブ)が推定風軸を横切った時刻の'
-    + '前後3秒の「入りの速度 − 最低速度」が小さい順。風軸が180°ずれているとタックとジャイブが入れ替わるため、'
+    + '前後3秒の「入りの速度 − 最低速度」が小さい順。減速が 0.1kt 未満のタックは起こりえないので誤検出として除外。'
+    + '風軸が180°ずれているとタックとジャイブが入れ替わるため、'
     + 'その場合は風軸を手動設定してください';
   let html = `<div class="vl-tacks"><div class="vl-note" title="${escapeHtml(help)}">`
     + `検出 タック ${count('tack')}回／ジャイブ ${count('gybe')}回（地図のピン T/G）</div>`;
@@ -1732,16 +1736,27 @@ markMenu.querySelectorAll('button').forEach((b) =>
   }));
 window.addEventListener('pointerdown', (e) => { if (!markMenu.contains(e.target)) hideMenu(); });
 
-// タイムライン右クリック小メニュー: [風軸を再推定] / [ピンを刺す/消す]。
+// タイムライン右クリック小メニュー: [風軸を再推定] / [風軸を手動設定] / [タック/ジャイブを除外] / [除外を解除] / [ピンを刺す/消す]。
 const windaxisMenu = $('windaxis-menu');
 let tlMenu = null; // { t, pinIdx }（右クリック時の軸時刻とヒットしたピン番号）
 function hideTimelineMenu() { windaxisMenu.classList.add('hidden'); tlMenu = null; }
 function openTimelineMenu({ clientX, clientY, t, pinIdx }) {
   if (!state.tracks.length) { statusEl.textContent = '先にGPS軌跡を読み込んでください'; return; }
   tlMenu = { t, pinIdx };
-  windaxisMenu.style.left = `${clientX}px`;
-  windaxisMenu.style.top = `${clientY}px`;
   windaxisMenu.classList.remove('hidden');
+  placeMenuTowardCenter(windaxisMenu, clientX, clientY);
+}
+// ポップアップを画面の中心側へ開く: カーソルが画面の右半分なら左へ、下半分なら上へ広げる。画面外にははみ出さない。
+// el は position: fixed で表示済み(大きさを測るため)であること。
+function placeMenuTowardCenter(el, clientX, clientY) {
+  const w = el.offsetWidth, h = el.offsetHeight, margin = 4;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  let left = clientX > vw / 2 ? clientX - w : clientX;
+  let top = clientY > vh / 2 ? clientY - h : clientY;
+  left = Math.max(margin, Math.min(left, vw - w - margin));
+  top = Math.max(margin, Math.min(top, vh - h - margin));
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
 }
 // 現在の選択範囲(crop)を絶対epochへ変換して返す。未選択なら null(ステータス表示)。
 function cropAbsRange() {
@@ -1778,6 +1793,26 @@ function setManualWindAxisForCrop() {
   applyOverrideToVisible({ ...range, manualDeg: deg }, `選択区間の風軸を ${Math.round(((deg % 360) + 360) % 360)}° に設定しました`);
 }
 
+// 選択範囲(crop)のタック/ジャイブを、表示中の全艇で誤検出として除外する / 除外を取り消す。
+// 除外は track.maneuverExclusions に保存され、地図のピン・top3・VMG 欄の回数に効く。
+function setManeuverExclusionForCrop(exclude) {
+  const range = cropAbsRange();
+  if (!range) return;
+  const visible = state.tracks.filter((t) => t.visible);
+  if (visible.length === 0) { statusEl.textContent = '表示中の艇がありません'; return; }
+  const inRange = maneuverRows.filter((r) => visible.includes(r.track) && r.tMs >= range.start && r.tMs <= range.end).length;
+  for (const tr of visible) {
+    tr.maneuverExclusions = exclude
+      ? addManeuverExclusion(tr.maneuverExclusions, range)
+      : removeManeuverExclusions(tr.maneuverExclusions, range);
+  }
+  recomputeVmgWinners();
+  draw();
+  statusEl.textContent = exclude
+    ? `選択区間のタック/ジャイブを除外しました（${visible.length}艇${vmgOn ? `・${inRange}件` : ''}）`
+    : `選択区間のタック/ジャイブの除外を解除しました（${visible.length}艇）`;
+}
+
 windaxisMenu.querySelectorAll('button').forEach((b) =>
   b.addEventListener('click', () => {
     const act = b.dataset.act;
@@ -1785,6 +1820,10 @@ windaxisMenu.querySelectorAll('button').forEach((b) =>
       reestimateWindAxisForCrop();
     } else if (act === 'manual') {
       setManualWindAxisForCrop();
+    } else if (act === 'exclude-maneuver') {
+      setManeuverExclusionForCrop(true);
+    } else if (act === 'unexclude-maneuver') {
+      setManeuverExclusionForCrop(false);
     } else if (act === 'pin' && tlMenu) {
       if (tlMenu.pinIdx >= 0) state.pins.splice(tlMenu.pinIdx, 1);
       else state.pins.push(tlMenu.t + currentBase());

@@ -8,6 +8,7 @@ import { MPS_TO_KT, cachedWindowedSpeedsMps } from './speedchart.js';
 
 export const MANEUVER_HALF_WINDOW_MS = 3000; // マニューバ時刻の前後3秒を切り出す
 export const MANEUVER_SPEED_HALF_WINDOW_MS = 2000; // 切り出しに使う速度の窓(座標±2秒)
+export const MIN_TACK_DROP_KT = 0.1; // タックで減速がこれ未満(表示上ほぼ 0)は起こりえないので誤検出とみなす
 
 // 時刻 tMs の前後 halfMs を切り出した速度変化(m/s)。speeds は points と同じ並びの点ごとの速度。
 // entry = 窓の最初の点、exit = 窓の最後の点、min = 窓内の最低。drop = entry - min。
@@ -43,6 +44,12 @@ export function maneuverSpeedRows(track, events, opts = {}) {
     });
   }
   return rows;
+}
+
+// 誤検出とみなす行を除く。タックは風位を通るので必ず減速する。減速が MIN_TACK_DROP_KT 未満のタックは、
+// 直進中の見かけの検出か、時刻のずれで減速を切り出せていないもの。ジャイブは減速がほぼ無いこともあるので対象外。
+export function dropImplausibleManeuvers(rows, { minTackDropKt = MIN_TACK_DROP_KT } = {}) {
+  return (rows || []).filter((r) => r.kind !== 'tack' || r.dropKt >= minTackDropKt);
 }
 
 // 減速が最も小さいマニューバ上位 n 件(kind = 'tack' | 'gybe'、全艇まとめて)。同じ減速なら入りの速度が速い方を上に。
