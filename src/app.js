@@ -31,6 +31,7 @@ import { serializeProject, deserializeProject } from './project.js';
 import { uniqueProjectName } from './projectfs.js';
 import { store } from './store.js';
 import { resolveActiveOrg, getActiveOrgId } from './activeorg.js';
+import { orgAvatar } from './orgavatar.js';
 import { lockActiveOrg } from './api.js';
 import { earliestContentMs } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
@@ -1145,7 +1146,7 @@ function enterApp() { showTop(); }
   // 未ログイン(401)・共有ログイン・ファイル版(503)は何もしない=ヘッダー無しのまま。
   try {
     const me = await store.me();
-    if (me) resolveActiveOrg(me.orgs);
+    if (me) renderAccountOrg((me.orgs || []).find((o) => o?.id === resolveActiveOrg(me.orgs)));
   } catch { /* 取れなくても今のまま動く */ }
   // このページの組織をここで固定する(以後の読み書きはすべてこの組織。別タブ等で変わったら読み込み直す)。
   // me が取れなかったときも覚えている組織で固定する(ヘッダー無しで送って所属の先頭へ書かない)。
@@ -1154,6 +1155,16 @@ function enterApp() { showTop(); }
 })();
 
 // ===== サイドバー(ログイン後の共通ナビ) =====
+// アカウント欄を表示中の組織の名前・アバターにする。組織が無い(共有ログイン・ファイル版)ときは index.html の既定表示のまま。
+function renderAccountOrg(org) {
+  if (!org) return;
+  const { initial, background } = orgAvatar(org);
+  const avatar = document.querySelector('#sb-account .account-avatar');
+  avatar.textContent = initial;
+  avatar.style.background = background;
+  document.querySelector('#sb-account .sb-account-name').textContent = org.name;
+  $('sb-account').title = org.name;
+}
 async function doLogout() {
   try { await store.logout(); } catch { /* 失敗しても画面は戻す */ }
   showLanding();
