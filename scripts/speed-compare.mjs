@@ -17,8 +17,8 @@
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { parseCsv } from '../src/csv.js';
-import { prepareTrackPoints, haversineMeters } from '../src/gps.js';
-import { MPS_TO_KT, windowedSpeedsMps } from '../src/speedchart.js';
+import { prepareTrackPoints } from '../src/gps.js';
+import { MPS_TO_KT, windowedSpeedsMps, diffSpeedsMps } from '../src/speedchart.js';
 
 const args = process.argv.slice(2);
 const accuracyFilter = !args.includes('--no-accuracy');
@@ -29,14 +29,6 @@ if (!files.length) {
 }
 
 const validSpeed = (v) => Number.isFinite(v) && v >= 0;
-
-function diff1(points) {
-  return points.map((p, i) => {
-    const q = points[i - 1];
-    const dt = q ? (p.t - q.t) / 1000 : 0;
-    return dt > 0 ? haversineMeters(q, p) / dt : null;
-  });
-}
 
 function median(xs) {
   if (!xs.length) return null;
@@ -81,7 +73,7 @@ for (const file of files) {
     + `  有効な CSV speed ${valid}点(${f((valid / points.length) * 100, 0)}%)  精度フィルタ ${accuracyFilter ? 'ON' : 'OFF'}`);
   const sources = [
     ['csv', csv.map((v) => (validSpeed(v) ? v : null))],
-    ['diff1', diff1(points)],
+    ['diff1', diffSpeedsMps(points)],
     ['win±3s', windowedSpeedsMps(points, { halfWindowMs: 3000 })],
     ['win±5s', windowedSpeedsMps(points, { halfWindowMs: 5000 })],
     ['win±10s', windowedSpeedsMps(points, { halfWindowMs: 10000 })],

@@ -41,7 +41,7 @@ import { createProgress } from './progress.js';
 import { createRoadmap } from './roadmap.js';
 import { summarizeNeonShare } from './vmg.js';
 import { renderChart } from './chartview.js';
-import { speedChartDatasets } from './speedchart.js';
+import { speedChartDatasets, SPEED_SOURCES } from './speedchart.js';
 import {
   refreshDaySummary, daySummaryAfterGpsLoad, daySummaryAfterPracticeLoad, runDaySummaryAction,
 } from './daysummaryflow.js';
@@ -287,12 +287,13 @@ function updateSpeedChart(now) {
     if (show) placeSpeedPanel();
   }
   if (!show) { destroySpeedChart(); return; }
-  const key = [range.start, range.end, state.mode,
+  const source = $('speed-source').value;
+  const key = [range.start, range.end, state.mode, source,
     ...visible.map((t) => `${t.color}:${t.name}:${t.points.length}`)].join('|');
   if (speedChart && key === speedChartKey) { speedChart.draw(); return; }
   destroySpeedChart();
   speedChart = renderChart($('speed-canvas'), {
-    datasets: speedChartDatasets(visible, { range, mode: state.mode }),
+    datasets: speedChartDatasets(visible, { range, mode: state.mode, source }),
     from: range.start, to: range.end, fmtX: (v) => formatClock(v, state.mode), yBeginAtZero: true,
     plugins: [speedCursorPlugin],
   });
@@ -301,6 +302,7 @@ function updateSpeedChart(now) {
 
 const SPEED_PANEL_KEY = 'sailviz_speed_panel'; // {left, top, width, height}(#stage 内の px)。未移動なら無し
 const SPEED_PANEL_SHOW_KEY = 'sailviz_speed_panel_hidden';
+const SPEED_SOURCE_KEY = 'sailviz_speed_source'; // 速度の出どころ(speedchart.js の SPEED_SOURCES)
 const SPEED_PANEL_TOP_MIN = 50; // 回転コントロールの下
 let speedPanelPlaced = null; // 利用者が動かした/大きさを変えた位置。null の間は既定位置に追従
 let speedResizing = null; // パネル本体(右下ハンドル)を押したときの大きさ。離したときに変わっていれば利用者の操作として保存する
@@ -308,6 +310,8 @@ try {
   const saved = JSON.parse(globalThis.localStorage?.getItem(SPEED_PANEL_KEY) || 'null');
   if (saved && ['left', 'top', 'width', 'height'].every((k) => Number.isFinite(saved[k]))) speedPanelPlaced = saved;
   if (globalThis.localStorage?.getItem(SPEED_PANEL_SHOW_KEY) === '1') $('speed-panel-toggle').checked = false;
+  const src = globalThis.localStorage?.getItem(SPEED_SOURCE_KEY);
+  if (SPEED_SOURCES.includes(src)) $('speed-source').value = src;
 } catch { /* noop */ }
 
 // パネルを #stage 内に収める(はみ出す大きさは縮める)。#stage が非表示(大きさ0)の間は何もしない。
@@ -350,7 +354,7 @@ function saveSpeedPanelBox() {
 // ドラッグ移動(見出しバーをつかむ)。
 let speedDrag = null;
 $('speed-panel-bar').addEventListener('pointerdown', (e) => {
-  if (e.button !== 0 || e.target.closest('button')) return;
+  if (e.button !== 0 || e.target.closest('button, select')) return;
   const p = $('speed-panel');
   speedDrag = { id: e.pointerId, x: e.clientX, y: e.clientY, left: p.offsetLeft, top: p.offsetTop };
   e.currentTarget.setPointerCapture(e.pointerId);
@@ -396,6 +400,10 @@ function setSpeedPanelShown(on) {
 }
 $('speed-panel-toggle').addEventListener('change', (e) => setSpeedPanelShown(e.target.checked));
 $('speed-panel-close').addEventListener('click', () => setSpeedPanelShown(false));
+$('speed-source').addEventListener('change', (e) => {
+  try { globalThis.localStorage?.setItem(SPEED_SOURCE_KEY, e.target.value); } catch { /* noop */ }
+  updateSpeedChart(playback.getNow());
+});
 
 // elapsedモードでの軸オフセット(基準トラック開始)。軸時刻⇄絶対時刻の変換に使う。
 function currentBase() {

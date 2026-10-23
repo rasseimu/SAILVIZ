@@ -2,7 +2,7 @@
 // 速度の推移パネル用の純関数(座標はダミー)。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MPS_TO_KT, windowedSpeedsMps, pointSpeedsMps, bucketMsFor, speedSeries, speedChartDatasets } from '../src/speedchart.js';
+import { MPS_TO_KT, windowedSpeedsMps, diffSpeedsMps, speedsBySource, pointSpeedsMps, bucketMsFor, speedSeries, speedChartDatasets } from '../src/speedchart.js';
 
 const pt = (t, speed, lat = 0, lon = 0) => ({ t, lat, lon, speed });
 
@@ -81,4 +81,35 @@ test('speedChartDatasets: 可視・データありの艇だけ、トラック色
   // absolute では C の点は範囲外になり除外される
   const abs = speedChartDatasets([a, c], { range: { start: 100000, end: 104000 }, mode: 'absolute', bucketMs: 2000 });
   assert.deepEqual(abs.map((d) => d.label), ['A']);
+});
+
+test('diffSpeedsMps: 直前の点との距離/時間。先頭と dt<=0 は null', () => {
+  const deg = 1 / 111195;
+  const s = diffSpeedsMps([pt(0, 9, 0), pt(1000, 9, 2 * deg), pt(1000, 9, 3 * deg), pt(3000, 9, 7 * deg)]);
+  assert.equal(s[0], null);
+  assert.ok(Math.abs(s[1] - 2) < 0.01);
+  assert.equal(s[2], null);
+  assert.ok(Math.abs(s[3] - 2) < 0.01);
+});
+
+test('speedsBySource: record は記録 speed、position / diff は座標から(記録 speed を無視)', () => {
+  const deg = 1 / 111195;
+  const pts = [pt(0, 9, 0), pt(1000, 9, 2 * deg), pt(2000, 9, 4 * deg)];
+  assert.deepEqual(speedsBySource(pts, 'record'), [9, 9, 9]);
+  assert.ok(speedsBySource(pts, 'position').every((v) => Math.abs(v - 2) < 0.01));
+  const d = speedsBySource(pts, 'diff');
+  assert.equal(d[0], null);
+  assert.ok(Math.abs(d[2] - 2) < 0.01);
+});
+
+test('speedChartDatasets: both は艇ごとに記録(実線)と座標(破線)の2本', () => {
+  const deg = 1 / 111195;
+  const a = { name: 'A', color: '#ff0000', visible: true, tRange: { start: 0 },
+    points: [pt(0, 5, 0), pt(1000, 5, 2 * deg), pt(2000, 5, 4 * deg)] };
+  const ds = speedChartDatasets([a], { range: { start: 0, end: 2000 }, mode: 'absolute', bucketMs: 2000, source: 'both' });
+  assert.deepEqual(ds.map((d) => d.label), ['A', 'A(座標)']);
+  assert.deepEqual(ds[0].borderDash, []);
+  assert.deepEqual(ds[1].borderDash, [5, 4]);
+  assert.ok(Math.abs(ds[0].data[0].y - 5 * MPS_TO_KT) < 1e-9);
+  assert.ok(Math.abs(ds[1].data[0].y - 2 * MPS_TO_KT) < 0.02);
 });

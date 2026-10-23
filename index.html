@@ -397,6 +397,12 @@
       <div id="speed-panel" class="hidden" role="region" aria-label="速度の推移">
         <div id="speed-panel-bar" title="ドラッグで移動・右下の角で拡大縮小">
           <span class="sp-title"><svg class="ic" aria-hidden="true" focusable="false"><use href="/src/vendor/feather/sprite.svg#trending-up"></use></svg> 速度の推移（kt）</span>
+          <select id="speed-source" title="速度の出どころ" aria-label="速度の出どころ">
+            <option value="record" title="CSV の speed 列。無効値の点だけ GPS 座標(前後±5秒)で補う">記録 speed</option>
+            <option value="position" title="GPS 座標の移動距離から。前後±5秒の両端点の直線距離 / 時間">GPS座標(±5秒)</option>
+            <option value="diff" title="GPS 座標の移動距離から。直前の点との距離 / 時間(位置誤差の影響を大きく受ける)">GPS座標(1点差分)</option>
+            <option value="both" title="記録 speed(実線)と GPS座標±5秒(破線)を重ねて比較">記録+GPS座標を比較</option>
+          </select>
           <button type="button" id="speed-panel-close" title="閉じる" aria-label="速度の推移を閉じる">×</button>
         </div>
         <div id="speed-panel-body"><canvas id="speed-canvas"></canvas></div>
