@@ -48,7 +48,8 @@ test('commit: 新規プロジェクトを作成して反省を保存', async () 
   assert.equal(j.created, true);
   assert.equal(j.added, 1);
   assert.match(j.name, /^sailviz-20260909-0000\.sailviz\.json$/);
-  const proj = await (await fetch(`${base}/api/projects/${j.name}`)).json();
+  assert.equal(j.id, j.name, 'ファイル版の id はファイル名');
+  const proj = await (await fetch(`${base}/api/projects/${j.id}`)).json();
   assert.equal(proj.reflections.length, 1);
   assert.deepEqual(proj.reflections[0].people, ['本間 由真']);
   assert.equal(proj.reflections[0].notes.goal, 'g');
@@ -57,9 +58,9 @@ test('commit: 新規プロジェクトを作成して反省を保存', async () 
 
 test('commit: 既存(practiceDate 一致)へ append し同一部員はマージ', async () => {
   const name = 'sailviz-20260910-0000.sailviz.json';
-  await fetch(`${base}/api/projects/${name}`, {
-    method: 'PUT', headers: bearer,
-    body: JSON.stringify({ version: 1, practiceDate: PD_APPEND, reflections: [] }),
+  await fetch(`${base}/api/projects`, {
+    method: 'POST', headers: bearer,
+    body: JSON.stringify({ name, project: { version: 1, practiceDate: PD_APPEND, reflections: [] } }),
   });
   const r = await commit({
     practiceDate: PD_APPEND,
@@ -72,6 +73,7 @@ test('commit: 既存(practiceDate 一致)へ append し同一部員はマージ'
   const j = await r.json();
   assert.equal(j.created, false);
   assert.equal(j.name, name);
+  assert.equal(j.id, name);
   assert.equal(j.added, 1); // 同一部員2行 → 1反省
   const proj = await (await fetch(`${base}/api/projects/${name}`)).json();
   assert.equal(proj.reflections.length, 1);
@@ -87,9 +89,9 @@ test('commit: デスクトップ作成の時刻付き practiceDate プロジェ�
   const PD_NONMID = 1_789_101_000_000; // JST 2026-09-11 13:30
   const PD_11_MIDNIGHT = 1_789_052_400_000; // JST 2026-09-11 00:00
   const existingName = 'sailviz-20260911-1330.sailviz.json';
-  await fetch(`${base}/api/projects/${existingName}`, {
-    method: 'PUT', headers: bearer,
-    body: JSON.stringify({ version: 1, practiceDate: PD_NONMID, reflections: [] }),
+  await fetch(`${base}/api/projects`, {
+    method: 'POST', headers: bearer,
+    body: JSON.stringify({ name: existingName, project: { version: 1, practiceDate: PD_NONMID, reflections: [] } }),
   });
 
   // モバイルは JST midnight で commit → 同じ JST 日を指す

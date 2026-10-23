@@ -11,6 +11,12 @@ export function isValidProjectName(name) {
   return typeof name === 'string' && !name.includes('..') && PROJECT_RE.test(name);
 }
 
+// 旧 API の練習 ID。ファイル版はファイル名、DB 版は practice_days.id(pd_ + 16 進 10 桁)。
+const PRACTICE_DAY_ID_RE = /^pd_[0-9a-f]{10}$/;
+export function isValidProjectId(id) {
+  return isValidProjectName(id) || (typeof id === 'string' && PRACTICE_DAY_ID_RE.test(id));
+}
+
 function projectsDir(dataDir) { return join(dataDir, 'projects'); }
 
 async function ensureDir(dir) { await mkdir(dir, { recursive: true }); }

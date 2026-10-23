@@ -1,5 +1,5 @@
 // scripts/perf-compare-projects.mjs
-// 移行計画 §6「性能」: GET /api/projects/:name の応答時間を STORAGE=file と STORAGE=db で比べる。
+// 移行計画 §6「性能」: GET /api/projects/:id の応答時間を STORAGE=file と STORAGE=db で比べる。
 // Node 24(node:sqlite)で実行する。
 //
 // 使い方: node scripts/perf-compare-projects.mjs [--file <project.json>] [--runs 30] [--warmup 3]
@@ -107,7 +107,10 @@ async function measure(storage, dataDir, name, orgId = null) {
   const exited = new Promise((r) => { child.once('exit', r); child.once('error', r); });
   try {
     await waitUp(port, exited);
-    const url = `http://127.0.0.1:${port}/api/projects/${encodeURIComponent(name)}`;
+    // 1 件の取得は練習 ID で引く(DB 版は pd_…、ファイル版はファイル名)。一覧から名前で ID を探す。
+    const list = await (await fetch(`http://127.0.0.1:${port}/api/projects`)).json();
+    const id = (Array.isArray(list) ? list.find((p) => p.name === name)?.id : null) ?? name;
+    const url = `http://127.0.0.1:${port}/api/projects/${encodeURIComponent(id)}`;
     const times = []; let body = null; let status = 0;
     for (let i = 0; i < WARMUP + RUNS; i++) {
       const t0 = performance.now();
