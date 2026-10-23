@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 // scripts/tack-speed-measure.mjs
-// タック前後3秒の減速(src/maneuverspeed.js)の物差し(測定ハーネス)。合成データのみで、実データは使わない。
-// 減速の深さが既知のタックを並べた合成トラックに位置誤差を足し、速度の窓幅ごとに
-// 「測った減速」と「真の減速」の相関と、減速が小さい上位3本が真の上位5本に入った数を出す。
+// タック検出(src/maneuverdetect.js)と前後3秒の減速(src/maneuverspeed.js)の物差し(測定ハーネス)。
+// 合成データのみで、実データは使わない。
+// 1) 検出: 旋回の速さ・レグの長さ・位置誤差を変えた合成トラックで、風軸からの検出(新)と
+//    detectManeuvers 経由(旧・風軸が無い艇の代わりの経路)の検出数・誤検出数を比べる。
+// 2) 減速: 減速の深さが既知のタックを並べた合成トラックに位置誤差を足し、速度の窓幅ごとに
+//    「測った減速」と「真の減速」の相関と、減速が小さい上位3本が真の上位5本に入った数を出す。
 //
 // 使い方:
 //   node scripts/tack-speed-measure.mjs
@@ -11,8 +14,9 @@
 // その後10秒で回復する。深さは 15〜65% の一様乱数(固定シード)。位置誤差は各点独立の一様乱数。
 // 実際の GPS の誤差は時間的に相関するため、ここでの誤差は悲観的な見積もり。
 
-import { detectManeuvers } from '../src/windaxis.js';
 import { maneuverSpeedRows } from '../src/maneuverspeed.js';
+import { detectManeuversByWind, legacyManeuverEvents } from '../src/maneuverdetect.js';
+import { detectManeuvers } from '../src/windaxis.js';
 
 const DEG_PER_M = 1 / 111200;
 const COS_LAT = Math.cos((10 * Math.PI) / 180);
@@ -53,13 +57,70 @@ function correlation(pairs) {
 }
 
 const wind = [{ tMs: 0, windFromDeg: 0 }];
+
+// ===== 1) 検出 =====
+// n 本のレグ(各 legSec 秒・3 m/s)を交互に hdgA/hdgB で走り、間で turnSec 秒かけて旋回(旋回中は半分の速度)
+function zigzag({ n = 20, legSec = 60, turnSec = 6, hdgA = 315, hdgB = 45, noiseM = 0, seed = 1 }) {
+  let s = seed;
+  const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  const points = [], truth = [];
+  let lat = 10, lon = 10, t = 0;
+  const step = (hdg, v) => {
+    const r = (hdg * Math.PI) / 180;
+    lat += v * Math.cos(r) * DEG_PER_M; lon += (v * Math.sin(r) * DEG_PER_M) / COS_LAT;
+    points.push({
+      t: t * 1000, speed: null,
+      lat: lat + (rnd() - 0.5) * 2 * noiseM * DEG_PER_M,
+      lon: lon + ((rnd() - 0.5) * 2 * noiseM * DEG_PER_M) / COS_LAT,
+    });
+    t++;
+  };
+  for (let k = 0; k < n; k++) {
+    const to = k % 2 ? hdgB : hdgA;
+    if (k > 0) {
+      const from = k % 2 ? hdgA : hdgB, d = ((to - from + 540) % 360) - 180;
+      truth.push((t + turnSec / 2) * 1000);
+      for (let j = 0; j < turnSec; j++) step(from + d * ((j + 1) / turnSec), 1.5);
+    }
+    for (let j = 0; j < legSec; j++) step(to, 3);
+  }
+  return { points, truth };
+}
+function detectionScore(found, truth) {
+  const used = new Set();
+  let hit = 0;
+  for (const t of truth) {
+    const i = found.findIndex((f, j) => !used.has(j) && Math.abs(f.tMs - t) <= 6000);
+    if (i >= 0) { hit++; used.add(i); }
+  }
+  return `${hit}/${truth.length} 誤${found.length - hit}`;
+}
+const scenarios = [
+  ['通常のタック(60秒レグ・6秒旋回)', {}],
+  ['ゆっくりのタック(12秒旋回)', { turnSec: 12 }],
+  ['短いレグ(15秒)', { n: 30, legSec: 15 }],
+  ['ジャイブ(60秒レグ)', { hdgA: 135, hdgB: 225 }],
+];
+console.log('1) 検出(風軸は真値) — 検出数/真の数 誤検出数');
+console.log('シナリオ                          位置誤差  旧(detectManeuvers)  新(風軸から)');
+for (const [name, opt] of scenarios) {
+  for (const noiseM of [0, 1.5, 3]) {
+    const { points, truth } = zigzag({ ...opt, noiseM });
+    const legacy = legacyManeuverEvents(points, detectManeuvers({ points }, {}), wind);
+    const byWind = detectManeuversByWind(points, wind);
+    console.log(`${name.padEnd(24)}  ±${String(noiseM).padEnd(5)}m  ${detectionScore(legacy, truth).padEnd(19)}  ${detectionScore(byWind, truth)}`);
+  }
+}
+
+// ===== 2) 減速 =====
+console.log('\n2) 減速(風軸からの検出)');
 console.log('位置誤差  速度の窓  検出/真のタック  相関  top3が真の上位5に入った数');
 for (const noiseM of [0, 1, 1.5, 3]) {
   const { points, truth } = makeTrack(noiseM);
   const track = { points };
-  const maneuvers = detectManeuvers(track, {});
+  const events = detectManeuversByWind(points, wind);
   for (const speedHalfWindowMs of [1000, 2000, 3000, 5000]) {
-    const rows = maneuverSpeedRows(track, maneuvers, wind, { speedHalfWindowMs }).filter((r) => r.kind === 'tack');
+    const rows = maneuverSpeedRows(track, events, { speedHalfWindowMs }).filter((r) => r.kind === 'tack');
     const label = `±${noiseM}m`.padEnd(8) + `±${speedHalfWindowMs / 1000}秒`.padEnd(8);
     if (rows.length < 3) { console.log(`${label}  ${String(rows.length).padStart(3)}/${truth.length}  (検出不足)`); continue; }
     const pairs = rows.map((r) => {

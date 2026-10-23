@@ -1,29 +1,11 @@
 // test/maneuverspeed.test.js
-// タック/ジャイブ前後の減速(座標はダミー)。
+// タック/ジャイブ前後の減速(座標はダミー)。検出は test/maneuverdetect.test.js。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { maneuverKind, speedAround, turnAcrossDeg, turnCenterMs, maneuverSpeedRows, topTacks } from '../src/maneuverspeed.js';
+import { speedAround, maneuverSpeedRows, topByKind } from '../src/maneuverspeed.js';
 import { MPS_TO_KT } from '../src/speedchart.js';
 
 const DEG = 1 / 111195; // 緯度 1m 相当
-
-test('maneuverKind: 前後とも風上ならタック、前後とも風下ならジャイブ(減速率の判別に依らない)', () => {
-  // 北風(0°)。315°→45° は両方クローズ → タック。135°→225° は両方ランニング → ジャイブ
-  assert.equal(maneuverKind({ headingBefore: 315, headingAfter: 45, type: 'gybe' }, 0), 'tack');
-  assert.equal(maneuverKind({ headingBefore: 135, headingAfter: 225, type: 'tack' }, 0), 'gybe');
-});
-
-test('maneuverKind: マーク回航(クローズ→ランニング)やリーチを含む旋回はどちらでもない', () => {
-  assert.equal(maneuverKind({ headingBefore: 315, headingAfter: 225, type: 'tack' }, 5), null); // ベアウェイ
-  assert.equal(maneuverKind({ headingBefore: 135, headingAfter: 45, type: 'gybe' }, 0), null); // ラフアップ
-  assert.equal(maneuverKind({ headingBefore: 90, headingAfter: 270, type: 'tack' }, 0), null); // リーチ
-});
-
-test('maneuverKind: 風軸が無ければ既存の判別、判別不能は null', () => {
-  assert.equal(maneuverKind({ headingBefore: 315, headingAfter: 45, type: 'gybe' }, null), 'gybe');
-  assert.equal(maneuverKind({ type: 'tack' }, 0), 'tack');
-  assert.equal(maneuverKind({}, null), null);
-});
 
 test('speedAround: 前後3秒の入り・最低・出と減速', () => {
   const points = Array.from({ length: 11 }, (_, i) => ({ t: i * 1000 }));
@@ -41,63 +23,43 @@ test('speedAround: 片側に点が無い・点不足・速度 null は除外し�
 });
 
 // 1Hz・41秒。20秒で進路を before → after に変え、その前後2秒は dipMps に減速(速度は座標から求まる)
-function trackWithDip(name, dipMps, { before = 315, after = 45, turn = true } = {}) {
+function trackWithDip(name, dipMps, { before = 315, after = 45 } = {}) {
   const points = [];
   let lat = 0, lon = 0;
   for (let i = 0; i <= 40; i++) {
     const v = Math.abs(i - 20) <= 2 ? dipMps : 3;
-    const h = (!turn || i <= 20 ? before : after) * Math.PI / 180;
+    const h = (i <= 20 ? before : after) * Math.PI / 180;
     lat += v * Math.cos(h) * DEG; lon += v * Math.sin(h) * DEG;
     points.push({ t: i * 1000, lat, lon, speed: 99 });
   }
   return { name, points };
 }
 
-test('turnAcrossDeg: 窓の外側の前後で進路がどれだけ変わったか', () => {
-  assert.ok(Math.abs(turnAcrossDeg(trackWithDip('t', 3).points, 20000) - 90) < 1);
-  assert.ok(turnAcrossDeg(trackWithDip('s', 3, { turn: false }).points, 20000) < 1);
-  assert.equal(turnAcrossDeg(trackWithDip('t', 3).points, 2000), null); // 前の区間が記録の外
+test('maneuverSpeedRows: マニューバの時刻で前後3秒を切り出し、種別・位置はそのまま。切り出せないものは除外', () => {
+  const tr = trackWithDip('t', 1);
+  const rows = maneuverSpeedRows(tr, [
+    { tMs: 20000, lat: 1, lon: 2, kind: 'tack' },
+    { tMs: 39000, lat: 0, lon: 0, kind: 'tack' }, // 後ろ3秒が記録の外 → 窓の端に点がある限りは切り出す
+    { tMs: 90000, lat: 0, lon: 0, kind: 'gybe' }, // 記録の外
+  ]);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].track, tr);
+  assert.deepEqual([rows[0].tMs, rows[0].lat, rows[0].lon, rows[0].kind], [20000, 1, 2, 'tack']);
+  assert.ok(rows[0].dropKt > 2, String(rows[0].dropKt)); // 3 → 1 m/s の減速(±2秒で均しても残る)
+  assert.ok(rows[0].entryKt < 99 * MPS_TO_KT); // 記録 speed(99)は使わない
 });
 
-test('turnCenterMs: 検出時刻が数秒ずれていても、実際に向きを変えた時刻へ寄せる', () => {
-  const pts = trackWithDip('t', 3).points; // 20秒で旋回
-  assert.ok(Math.abs(turnCenterMs(pts, 14000) - 20000) <= 1000, String(turnCenterMs(pts, 14000)));
-  assert.ok(Math.abs(turnCenterMs(pts, 25000) - 20000) <= 1000);
-  assert.equal(turnCenterMs([], 0), null);
+test('topByKind: 種別ごとに減速の小さい順、件数で切り、同じ減速なら入りの速い方が上', () => {
+  const r = (kind, dropKt, entryKt) => ({ kind, dropKt, entryKt });
+  const rows = [r('tack', 1, 5), r('tack', 0.5, 4), r('gybe', 0.1, 6), r('tack', 0.5, 6), r('tack', 2, 6), r('gybe', 0.3, 6)];
+  assert.deepEqual(topByKind(rows, 'tack', 3).map((x) => [x.dropKt, x.entryKt]), [[0.5, 6], [0.5, 4], [1, 5]]);
+  assert.deepEqual(topByKind(rows, 'gybe', 3).map((x) => x.dropKt), [0.1, 0.3]);
 });
 
-test('maneuverSpeedRows: 検出時刻がずれていても旋回の中心で前後3秒を切り出す', () => {
-  const wind = [{ tMs: 0, windFromDeg: 0 }];
-  const [row] = maneuverSpeedRows(trackWithDip('t', 1), [{ tMs: 14000, headingBefore: 315, headingAfter: 45 }], wind);
-  assert.ok(Math.abs(row.tMs - 20000) <= 1000, String(row.tMs));
-  assert.ok(row.dropKt > 1, String(row.dropKt));
-});
-
-test('maneuverSpeedRows / topTacks: 減速の小さいタック順に上位を返し、ジャイブは含めない', () => {
-  const tackAt20 = { tMs: 20000, lat: 0, lon: 0, headingBefore: 315, headingAfter: 45 };
-  const gybeAt20 = { tMs: 20000, lat: 0, lon: 0, headingBefore: 135, headingAfter: 225 };
-  const wind = [{ tMs: 0, windFromDeg: 0 }];
+test('maneuverSpeedRows / topByKind: 減速が小さい艇のタックが上', () => {
+  const tackAt20 = { tMs: 20000, lat: 0, lon: 0, kind: 'tack' };
   const good = trackWithDip('good', 2.5);
   const bad = trackWithDip('bad', 0.5);
-  const gybe = trackWithDip('gybe', 3, { before: 135, after: 225 });
-  const straight = trackWithDip('straight', 3, { turn: false });
-  const rows = [
-    ...maneuverSpeedRows(bad, [tackAt20], wind),
-    ...maneuverSpeedRows(good, [tackAt20], wind),
-    ...maneuverSpeedRows(gybe, [gybeAt20], wind),
-    ...maneuverSpeedRows(straight, [tackAt20], wind), // 向きが変わっていない見かけのタックは除外
-  ];
-  assert.deepEqual(rows.map((r) => r.kind), ['tack', 'tack', 'gybe']);
-  const top = topTacks(rows, 3);
-  assert.deepEqual(top.map((r) => r.track.name), ['good', 'bad']);
-  assert.ok(top[0].dropKt < top[1].dropKt);
-  assert.ok(top[0].entryKt > 0 && top[0].entryKt < 99 * MPS_TO_KT); // 記録 speed(99)は使わない
-  // 減速が大きいほど drop も大きく出る(±5秒で均すと平らになって 0 に潰れる)
-  assert.ok(top[1].dropKt > 2, String(top[1].dropKt));
-});
-
-test('topTacks: 件数で切り、同じ減速なら入りの速い方が上', () => {
-  const r = (dropKt, entryKt) => ({ kind: 'tack', dropKt, entryKt });
-  const top = topTacks([r(1, 5), r(0.5, 4), r(0.5, 6), r(2, 6)], 3);
-  assert.deepEqual(top.map((x) => [x.dropKt, x.entryKt]), [[0.5, 6], [0.5, 4], [1, 5]]);
+  const rows = [...maneuverSpeedRows(bad, [tackAt20]), ...maneuverSpeedRows(good, [tackAt20])];
+  assert.deepEqual(topByKind(rows, 'tack').map((x) => x.track.name), ['good', 'bad']);
 });

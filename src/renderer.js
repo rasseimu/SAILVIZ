@@ -154,9 +154,12 @@ function drawVmgNeon(ctx, tr, T, lo, hi) {
   ctx.lineCap = 'butt';
 }
 
-// タック(T)/ジャイブ(G)のピン。針の先が地点。減速の小さいタック上位(rank 1〜3)は金色で順位を表示。
+// タック(T)/ジャイブ(G)のピン。針の先が地点。減速の小さい上位(rank 1〜3)は順位を表示
+// (タックは金色、ジャイブは水色。VMG 欄の表の順位バッジと同じ色)。
+const TOP_PIN = { tack: { fill: '#f1c40f', text: '#3d2e00' }, gybe: { fill: '#5dade2', text: '#0b3550' } };
 function drawManeuverPin(ctx, s, p, color) {
   const top = p.rank != null;
+  const tc = TOP_PIN[p.kind] || TOP_PIN.tack;
   const r = top ? 8 : 6;
   const cy = s.py - r - 6;
   ctx.beginPath();
@@ -164,7 +167,7 @@ function drawManeuverPin(ctx, s, p, color) {
   ctx.lineTo(s.px - r * 0.6, cy + r * 0.5);
   ctx.lineTo(s.px + r * 0.6, cy + r * 0.5);
   ctx.closePath();
-  ctx.fillStyle = top ? '#f1c40f' : color;
+  ctx.fillStyle = top ? tc.fill : color;
   ctx.fill();
   ctx.beginPath();
   ctx.arc(s.px, cy, r, 0, Math.PI * 2);
@@ -172,7 +175,7 @@ function drawManeuverPin(ctx, s, p, color) {
   ctx.lineWidth = 1.5;
   ctx.strokeStyle = top ? color : '#fff';
   ctx.stroke();
-  ctx.fillStyle = top ? '#3d2e00' : '#fff';
+  ctx.fillStyle = top ? tc.text : '#fff';
   ctx.font = `bold ${top ? 10 : 8}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';

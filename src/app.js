@@ -13,7 +13,7 @@ import { planBasemap, stitchBasemap } from './basemap.js';
 import { createPlayback } from './playback.js';
 import { createTimeline } from './timeline.js';
 import { createWindStrip } from './windstripview.js';
-import { windDirAt, circMedianDeg, detectManeuvers } from './windaxis.js';
+import { windDirAt, circMedianDeg } from './windaxis.js';
 import { applyWindAxisOverrides, pushOverride } from './windaxisoverride.js';
 import { minuteWinnersDetailed } from './vmgminute.js';
 import { assessComparison, formatConfidenceLabel, windAxisReasonRows } from './analysisconfidence.js';
@@ -42,7 +42,8 @@ import { createRoadmap } from './roadmap.js';
 import { summarizeNeonShare } from './vmg.js';
 import { renderChart } from './chartview.js';
 import { speedChartDatasets } from './speedchart.js';
-import { maneuverSpeedRows, topTacks } from './maneuverspeed.js';
+import { maneuverSpeedRows, topByKind } from './maneuverspeed.js';
+import { detectManeuverEvents } from './maneuverdetect.js';
 import {
   refreshDaySummary, daySummaryAfterGpsLoad, daySummaryAfterPracticeLoad, runDaySummaryAction,
 } from './daysummaryflow.js';
@@ -145,27 +146,29 @@ let vmgOn = false; // VMG勝者ネオン表示。表示のみ・保存しない(
 let vmgWinners = []; // [{boatId,color,lo,hi,pointOfSail,vmg}]（絶対epoch ms）
 let vmgAssessment = null; // assessComparison の結果(信頼度・理由・比較区間)。計算失敗時 null
 let vmgParticipation = null; // Map<track, {upwind, downwind}>(勝者が決まった断片への参加時間 ms)
-// タック/ジャイブ前後3秒の減速(maneuverspeed.js の行)と、減速の小さいタック上位3本。vmgOn時のみ算出。
+// タック/ジャイブ前後3秒の減速(maneuverspeed.js の行)と、減速の小さいタック・ジャイブ各上位3本。vmgOn時のみ算出。
+// 検出は maneuverdetect.js(風軸があれば舷の入れ替わりから。今日の練習サマリの回数と同じ)。
 let maneuverRows = [];
-let tackTop = [];
-let maneuverPins = []; // 地図のピン: maneuverRows に上位3本の順位(rank)を付けたもの
+let maneuverTop = { tack: [], gybe: [] };
+let maneuverPins = []; // 地図のピン: maneuverRows に各上位3本の順位(rank)を付けたもの
 function recomputeManeuvers(visible) {
   maneuverRows = [];
   for (const tr of visible) {
     try {
-      maneuverRows.push(...maneuverSpeedRows(tr, detectManeuvers(tr, { marks: state.marks }), windSeriesByTrack.get(tr)));
+      const events = detectManeuverEvents(tr, windSeriesByTrack.get(tr), { marks: state.marks });
+      maneuverRows.push(...maneuverSpeedRows(tr, events));
     } catch { /* 検出失敗の艇は落とさず、マニューバなしとして扱う */ }
   }
-  tackTop = topTacks(maneuverRows, 3);
+  maneuverTop = { tack: topByKind(maneuverRows, 'tack'), gybe: topByKind(maneuverRows, 'gybe') };
   maneuverPins = maneuverRows.map((r) => {
-    const i = tackTop.indexOf(r);
+    const i = maneuverTop[r.kind].indexOf(r);
     return i >= 0 ? { ...r, rank: i + 1 } : r;
   });
 }
 function recomputeVmgWinners() {
   if (!vmgOn) {
     vmgWinners = []; vmgAssessment = null; vmgParticipation = null;
-    maneuverRows = []; tackTop = []; maneuverPins = [];
+    maneuverRows = []; maneuverTop = { tack: [], gybe: [] }; maneuverPins = [];
     renderVmgLegend();
     return;
   }
@@ -185,29 +188,35 @@ function recomputeVmgWinners() {
   renderVmgLegend();
 }
 
-// 減速の小さいタック上位3本(VMG 凡例の下段)。行を押すとそのタックの3秒前へシーク(data-seek は絶対 epoch ms)。
-function tackTopHtml() {
-  const tacks = maneuverRows.filter((r) => r.kind === 'tack').length;
-  const gybes = maneuverRows.length - tacks;
-  let html = '<div class="vl-tacks"><div class="vl-tacks-title" title="GPS 座標の移動距離(前後±2秒)から求めた速度で、'
-    + 'タック時刻の前後3秒の「入りの速度 − 最低速度」が小さい順。タック/ジャイブの判別は推定風軸による'
-    + '(風軸が180°ずれているとタックとジャイブが入れ替わるため、その場合は風軸を手動設定してください)">'
-    + `${icon('award')} タック top3（前後3秒の減速が小さい順）</div>`
-    + `<div class="vl-note">検出 タック ${tacks}回／ジャイブ ${gybes}回（地図のピン T/G）</div>`;
-  if (!tackTop.length) return `${html}<div class="vl-note">前後3秒を切り出せるタックがありません。</div></div>`;
-  const body = tackTop.map((r, i) => {
-    const t = r.track;
-    const sw = `<span class="legend-swatch" style="background:${escapeHtml(t.color || '#888')}"></span>`;
-    const at = state.mode === 'elapsed' ? r.tMs - (t.tRange?.start ?? 0) : r.tMs;
-    return `<tr class="vl-tack-row" data-seek="${r.tMs}" data-track="${state.tracks.indexOf(t)}" title="押すとこのタックの3秒前へ移動">`
-      + `<td><span class="vl-rank">${i + 1}</span></td>`
-      + `<td class="vl-boat">${sw}<span class="vl-name">${escapeHtml(t.name || t.id || '')}</span></td>`
-      + `<td>${escapeHtml(formatClock(at, state.mode))}</td>`
-      + `<td>${r.entryKt.toFixed(1)}→${r.minKt.toFixed(1)}<span class="vl-sub">出 ${r.exitKt.toFixed(1)}</span></td>`
-      + `<td>−${r.dropKt.toFixed(1)}</td></tr>`;
-  }).join('');
-  return `${html}<table class="vl-table"><thead><tr><th></th><th>艇</th><th>時刻</th><th>入り→最低<br>[kt]</th><th>減速<br>[kt]</th></tr></thead>`
-    + `<tbody>${body}</tbody></table></div>`;
+// 減速の小さいタック・ジャイブ各上位3本(VMG 凡例の下段)。行を押すとその3秒前へシーク(data-seek は絶対 epoch ms)。
+const MANEUVER_LABEL = { tack: 'タック', gybe: 'ジャイブ' };
+function maneuverTopHtml() {
+  const count = (kind) => maneuverRows.filter((r) => r.kind === kind).length;
+  const help = 'GPS 座標の移動距離(前後±2秒)から求めた速度で、艇首(タック)・艇尾(ジャイブ)が推定風軸を横切った時刻の'
+    + '前後3秒の「入りの速度 − 最低速度」が小さい順。風軸が180°ずれているとタックとジャイブが入れ替わるため、'
+    + 'その場合は風軸を手動設定してください';
+  let html = `<div class="vl-tacks"><div class="vl-note" title="${escapeHtml(help)}">`
+    + `検出 タック ${count('tack')}回／ジャイブ ${count('gybe')}回（地図のピン T/G）</div>`;
+  for (const kind of ['tack', 'gybe']) {
+    const label = MANEUVER_LABEL[kind];
+    html += `<div class="vl-tacks-title" title="${escapeHtml(help)}">${icon('award')} ${label} top3（前後3秒の減速が小さい順）</div>`;
+    const top = maneuverTop[kind];
+    if (!top.length) { html += `<div class="vl-note">前後3秒を切り出せる${label}がありません。</div>`; continue; }
+    const body = top.map((r, i) => {
+      const t = r.track;
+      const sw = `<span class="legend-swatch" style="background:${escapeHtml(t.color || '#888')}"></span>`;
+      const at = state.mode === 'elapsed' ? r.tMs - (t.tRange?.start ?? 0) : r.tMs;
+      return `<tr class="vl-tack-row" data-seek="${r.tMs}" data-track="${state.tracks.indexOf(t)}" title="押すとこの${label}の3秒前へ移動">`
+        + `<td><span class="vl-rank vl-rank-${kind}">${i + 1}</span></td>`
+        + `<td class="vl-boat">${sw}<span class="vl-name">${escapeHtml(t.name || t.id || '')}</span></td>`
+        + `<td>${escapeHtml(formatClock(at, state.mode))}</td>`
+        + `<td>${r.entryKt.toFixed(1)}→${r.minKt.toFixed(1)}<span class="vl-sub">出 ${r.exitKt.toFixed(1)}</span></td>`
+        + `<td>−${r.dropKt.toFixed(1)}</td></tr>`;
+    }).join('');
+    html += '<table class="vl-table"><thead><tr><th></th><th>艇</th><th>時刻</th><th>入り→最低<br>[kt]</th><th>減速<br>[kt]</th></tr></thead>'
+      + `<tbody>${body}</tbody></table>`;
+  }
+  return `${html}</div>`;
 }
 
 // 時間[ms]を「4分30秒」「45秒」の形で表す(比較区間の長さの表示用)。
@@ -290,7 +299,7 @@ function renderVmgLegend() {
     : '<tr><th>艇</th><th>風軸</th></tr>';
   html += `<table class="vl-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
   if (share) html += '<div class="vl-note">勝率の下の時間は参加時間。— は比較に参加していない走種。</div>';
-  html += tackTopHtml();
+  html += maneuverTopHtml();
 
   el.className = '';
   el.innerHTML = html;
