@@ -1,12 +1,13 @@
 // server/routes/orgs.js
 // 組織の名簿・メンバー API(設計書 v2 §10.3): /api/orgs/:orgId/roster(GET/PUT)・/api/orgs/:orgId/members(GET)。
+// members は [{ userId, name, legacyName, isAdmin }](legacyName は反省・議事録のメンバー候補で既存の記録を引き継ぐキー)。
 // 組織の作成(POST /api/orgs)は routes/auth.js。処理したら true、対象外なら false。
 // GET の応答は設計書 §10.3 どおり素の配列。PUT の本文は { roster:[...] }、応答は { linked, unlinked }。
 import { send } from './http.js';
 import { resolveIdentity } from '../accountAuth.js';
 import { validateRosterRows } from '../domain/rosterInput.js';
 import { applyRoster } from '../rosterLink.js';
-import { displayNameFor } from '../domain/displayName.js';
+import { orgMemberEntries } from '../orgMembers.js';
 import { inviteStatus, validateInviteInput, expiresAtFromDays } from '../domain/invites.js';
 
 const MAX_BODY = 512 * 1024; // 1000 行の名簿が収まる大きさ
@@ -68,11 +69,8 @@ export function createOrgsRoute({
     'GET members': async (req, res, orgId) => {
       if (!gate(req, res, orgId, 'member')) return;
       const admins = new Set(accounts.listOrgAdmins(orgId));
-      send(res, 200, accounts.listMembers(orgId).map((m) => ({
-        userId: m.user_id,
-        name: displayNameFor(accounts.getUser(m.user_id) ?? { id: m.user_id }),
-        isAdmin: admins.has(m.user_id),
-      })));
+      // legacyName: 名簿の「旧名簿の氏名」(既存の記録を引き継ぐキー。無ければ null)
+      send(res, 200, orgMemberEntries(accounts, orgId).map((m) => ({ ...m, isAdmin: admins.has(m.userId) })));
     },
   };
 

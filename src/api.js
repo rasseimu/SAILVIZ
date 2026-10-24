@@ -99,6 +99,9 @@ export async function apiUnlock(password) {
 export async function apiLock() { await send('/api/lock', 'POST'); }
 
 // アカウントのログイン(所属組織の一覧)。未ログイン(401)・ファイル版(503)は null。
+// 組織のメンバー [{ userId, name, legacyName, isAdmin }](組織メンバーのみ)。
+export async function apiOrgMembers(orgId) { return getJson(`/api/orgs/${encodeURIComponent(orgId)}/members`); }
+
 export async function apiMe() {
   const res = await request('/api/me');
   if (!res.ok) return null;

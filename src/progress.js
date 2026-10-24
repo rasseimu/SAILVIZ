@@ -1,7 +1,7 @@
 // src/progress.js
 // #progress-screen に「横タブ(全て＋名簿) × 目標変化/課題進捗(3段階)/風速別発見/解決量推移グラフ」を描画。
 // 反省(真実源)は全練習ファイルから集め、進捗段階は sailviz.progress オーバーレイで持つ。
-import { memberList } from './members.js';
+import { memberList, memberLabel } from './members.js';
 import {
   loadProgress, saveProgress, setIssueStage, setGoalDone, setTextOverride,
   addComment, removeComment, hasAiComment, summarize, setCardDeleted,
@@ -91,7 +91,7 @@ export function createProgress({
 
   function renderNav() {
     const nav = $('progress-nav');
-    const items = [{ key: 'all', label: '全て' }, ...memberList().map((m) => ({ key: m.fullName, label: m.fullName }))];
+    const items = [{ key: 'all', label: '全て' }, ...memberList().map((m) => ({ key: m.fullName, label: m.displayName ?? m.fullName }))];
     nav.innerHTML = items.map((it) =>
       `<button type="button" class="dashboard-nav-item${it.key === selected ? ' active' : ''}" data-key="${esc(it.key)}">${esc(it.label)}</button>`
     ).join('');
@@ -128,7 +128,7 @@ export function createProgress({
       const ms = e.milestones || [];
       const goal = e.goal ? `<span class="pq-rm-goal">${icon('target')} ${esc(e.goal)}</span>` : '';
       const head = withName
-        ? `<div class="pq-rm-name">${esc(name)}${goal}</div>`
+        ? `<div class="pq-rm-name">${esc(memberLabel(name))}${goal}</div>`
         : (goal ? `<div class="pq-rm-name">${goal}</div>` : '');
       // 単一部員表示のみ小目標の内訳を出す(全員表示は俯瞰のステッパーのみ)。
       const breakdown = withName ? '' : childBreakdownHtml(ms);
@@ -143,7 +143,7 @@ export function createProgress({
 
   // 名前接頭辞＋編集可能テキスト(表示 or 入力)を返す。field ∈ {goal,issue,discovery}。
   function editable(field, reflId, name, text) {
-    const prefix = selected === 'all' ? `<span class="et-name">${esc(name)}：</span>` : '';
+    const prefix = selected === 'all' ? `<span class="et-name">${esc(memberLabel(name))}：</span>` : '';
     if (editing === `${reflId}:${field}`) {
       return `${prefix}<textarea class="edit-input" rows="1" data-refl="${esc(reflId)}" data-field="${field}">${esc(text)}</textarea>`
         + `<button class="edit-save writes-json" data-refl="${esc(reflId)}" data-field="${field}">保存</button>`
@@ -261,7 +261,7 @@ export function createProgress({
     const rows = items.map((t) =>
       `<li class="trash-row"><span class="trash-kind">${FIELD_LABEL[t.field] || ''}</span>`
       + `<span class="trash-when">${fmtDate(t.dateMs)}</span>`
-      + (selected === 'all' ? `<span class="et-name">${esc(t.name)}：</span>` : '')
+      + (selected === 'all' ? `<span class="et-name">${esc(memberLabel(t.name))}：</span>` : '')
       + `<span class="trash-text">${esc(t.text)}</span>`
       + `<button class="card-restore" data-restore-field="${t.field}" data-restore-refl="${esc(t.reflId)}">復元</button></li>`).join('');
     el.innerHTML = `<div class="pq-trash"><h3>${icon('trash-2')} ゴミ箱 (${items.length})</h3><ul class="trash-list">${rows}</ul></div>`;

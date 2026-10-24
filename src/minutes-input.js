@@ -5,10 +5,13 @@ import { geminiGenerate } from './gemini.js';
 import { buildMinutesSystemPrompt, parseAiMinutes, parseMinutes, parseMinutesDate } from './minutes.js';
 import { aiToRows, blocksToRows, toCommitRows } from './minutes-rows.js';
 import { memberList } from './members.js';
+import { loadActiveOrgMemberRoster } from './memberroster.js';
 import { jstWallToMs, msToJstWall } from './time.js';
 
 const $ = (id) => document.getElementById(id);
-const roster = memberList();
+// メンバー候補。個人アカウントなら表示中の組織に所属するアカウント(起動時に読み込む)、それ以外は従来の名簿
+let roster = memberList();
+loadActiveOrgMemberRoster().then((ok) => { if (ok) roster = memberList(); });
 let rows = []; // Row[]（minutes-rows の形状）
 
 function setStatus(msg) { $('mn-status').textContent = msg || ''; }

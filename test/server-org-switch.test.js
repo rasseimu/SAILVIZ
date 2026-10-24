@@ -194,7 +194,10 @@ test('進捗 PUT は表示中の組織の反省だけを変える', { skip }, as
 test('取込み: 応答に id が入り、ユーザーの取込みは表示中の組織の器を使う', { skip }, async () => {
   const { memberList } = await import('../src/members.js');
   const day = Date.UTC(2026, 4, 31, 15, 0, 0); // JST 2026-06-01 0 時(センサー取込みの practiceDate と完全一致する)
-  const body = { practiceDate: day, rows: [{ fullName: memberList()[0].fullName, goal: '議事録' }] }; // 名簿は同梱のもの
+  // ユーザーの取込みの名簿は表示中の組織のメンバー(x は A・B の両方に所属)。従来の名簿の名前は組織に居なければ通らない
+  const body = { practiceDate: day, rows: [{ fullName: 'テスト', goal: '議事録' }] }; // x のアカウント名(mk の name)
+  const outside = await call('POST', '/api/minutes-imports/commit', { auth: xTok, org: B, body: { practiceDate: day, rows: [{ fullName: memberList()[0].fullName, goal: 'x' }] } });
+  assert.equal(outside.status, 400, '組織に居ない名前は名簿外');
   const r = await call('POST', '/api/minutes-imports/commit', { auth: xTok, org: B, body });
   assert.equal(r.status, 200, JSON.stringify(r.json));
   assert.equal(r.json.created, true);
@@ -205,7 +208,7 @@ test('取込み: 応答に id が入り、ユーザーの取込みは表示中�
   const r3 = await call('POST', '/api/minutes-imports/commit', { auth: xTok, org: B, body });
   assert.deepEqual([r3.json.id, r3.json.created], [r.json.id, false]);
   // センサー取込み: matched に id。commit は { id, boatNumber }
-  const person = memberList()[0].fullName;
+  const person = 'テスト'; // 上の取込みで反省を書いた人
   const csv = ['time,latitude,longitude,speed,bearing,horizontalAccuracy', ...Array.from({ length: 5 }, (_, i) => `${(Date.UTC(2026, 5, 1, 3, 0, i)) * 1e6},10.0,100.0,2,90,4`)].join('\n') + '\n';
   const pdDay = rows("SELECT json_extract(web_state, '$.practiceDate') AS d FROM practice_days WHERE id = ?", r.json.id)[0].d;
   assert.equal(Number(pdDay), day);

@@ -92,7 +92,7 @@ export function memberGoalsHtml(roadmap, members) {
     if (!e || typeof e.goal !== 'string' || !e.goal.trim()) continue;
     const { done, total } = roadmapProgress(Array.isArray(e.milestones) ? e.milestones : []);
     rows.push('<li class="hs-member-goal">'
-      + `<span class="hs-member-name">${escapeHtml(m.fullName)}</span>`
+      + `<span class="hs-member-name">${escapeHtml(m.displayName ?? m.fullName)}</span>`
       + `<span class="hs-member-text">${escapeHtml(e.goal)}</span>`
       + (total ? `<span class="hs-member-prog">${done}/${total} 段階</span>` : '')
       + '</li>');

@@ -74,7 +74,7 @@ export function createRoadmap({
     const nav = $('roadmap-nav');
     if (!nav) return;
     nav.innerHTML = memberList().map((m) =>
-      `<button type="button" class="dashboard-nav-item${m.fullName === selected ? ' active' : ''}" data-key="${esc(m.fullName)}">${esc(m.fullName)}</button>`
+      `<button type="button" class="dashboard-nav-item${m.fullName === selected ? ' active' : ''}" data-key="${esc(m.fullName)}">${esc(m.displayName ?? m.fullName)}</button>`
     ).join('');
     nav.querySelectorAll('.dashboard-nav-item').forEach((btn) =>
       btn.addEventListener('click', () => {

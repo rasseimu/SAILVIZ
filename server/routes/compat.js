@@ -18,12 +18,13 @@ import {
   buildReflectionIndex, filterProgressRead, mergeProgressWrite, filterRoadmapRead, mergeRoadmapWrite,
 } from '../domain/compatAccess.js';
 import { activeOrgOf } from '../domain/policy.js';
+import { rosterForSubject } from '../orgMembers.js';
 import { randomBytes } from 'node:crypto';
 
 export async function compatRoute(req, res, ctx) {
   const {
     store, token, viewEnabled, viewSecret, viewUser, viewPassword,
-    secureCookie, path, method, requireViewer, requireWrite,
+    secureCookie, path, method, requireViewer, requireWrite, accounts,
   } = ctx;
 
   // ---- 認可 ----
@@ -153,7 +154,9 @@ export async function compatRoute(req, res, ctx) {
     const body = await readBody(req) || {};
     const practiceDate = Number(body.practiceDate);
     const rows = Array.isArray(body.rows) ? body.rows : [];
-    const bad = validateCommitRows(rows, practiceDate);
+    // 名簿: 個人アカウントなら表示中の組織のメンバー、共有ログイン・ファイル版は従来の名簿
+    const roster = rosterForSubject(accounts, writer === true ? null : writer, writer === true ? null : activeOrgOf(writer));
+    const bad = validateCommitRows(rows, practiceDate, roster);
     if (bad) { send(res, 400, { error: bad }); return true; }
 
     const reflections = reflectionsFromRows({ rows: mergeRowsByMember(rows), now: Date.now() });
