@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {
   MPS_TO_KT, windowedSpeedsMps, diffSpeedsMps, cachedWindowedSpeedsMps, windowedSpeedAt,
   bucketMsFor, speedSeries, speedChartDatasets,
+  SPEED_WINDOW_DEFAULT_MS, zoomWindowMs, followWindow, dataRangeFor, bucketMsForWindow, speedYMaxKt,
 } from '../src/speedchart.js';
 
 const DEG = 1 / 111195; // 緯度 1m 相当
@@ -63,14 +64,13 @@ test('bucketMsFor: 点数上限で幅を決め、最小幅を下回らない', (
 });
 
 test('speedSeries: 座標±5秒の区間平均を kt で返し、点の無い区間は null', () => {
-  // 0〜4秒に 2 m/s で5点、間を空けて 20 秒以降に 4 m/s で5点
-  const pts = [...run(2, 5), ...run(4, 5, 20000).map((p) => ({ ...p, lat: p.lat + 1000 * DEG }))];
-  const out = speedSeries(pts, { range: { start: 0, end: 26000 }, bucketMs: 2000 });
+  // 0〜9秒に 2 m/s で10点。範囲は 0〜26秒(10秒以降は点が無い)
+  const out = speedSeries(run(2, 10), { range: { start: 0, end: 26000 }, bucketMs: 2000 });
   assert.equal(out.length, 13);
   assert.equal(out[0].x, 1000);
   assert.ok(Math.abs(out[0].y - 2 * MPS_TO_KT) < 0.01, String(out[0].y)); // 記録 speed(99)は使わない
   assert.equal(out[5].y, null);
-  assert.ok(Math.abs(out[11].y - 4 * MPS_TO_KT) < 0.01, String(out[11].y));
+  assert.equal(out[11].y, null);
 });
 
 test('speedSeries: offset で軸時刻へずらし、範囲外の点は数えない', () => {
@@ -99,4 +99,46 @@ test('speedChartDatasets: 可視・データありの艇だけ、トラック色
   // absolute では C の点は範囲外になり除外される
   const abs = speedChartDatasets([a, c], { range: { start: 100000, end: 104000 }, mode: 'absolute', bucketMs: 2000 });
   assert.deepEqual(abs.map((d) => d.label), ['A']);
+});
+
+// ===== 再生に追従する表示窓 =====
+
+test('zoomWindowMs: ズームインで狭く・アウトで広く。最小 5 秒と最大(軸範囲)に収める', () => {
+  assert.equal(SPEED_WINDOW_DEFAULT_MS, 20000);
+  assert.equal(zoomWindowMs(20000, 1), 16000);
+  assert.equal(zoomWindowMs(20000, -1), 25000);
+  assert.equal(zoomWindowMs(5500, 1), 5000);
+  assert.equal(zoomWindowMs(50000, -1, { maxMs: 60000 }), 60000);
+  assert.equal(zoomWindowMs(20000, 0), 20000);
+});
+
+test('followWindow / dataRangeFor: 再生時刻を中央に。系列は前後に余裕を持たせ軸範囲に収める', () => {
+  assert.deepEqual(followWindow(100000, 20000), { min: 90000, max: 110000 });
+  assert.deepEqual(dataRangeFor(100000, 20000, { start: 0, end: 1e6 }), { start: 70000, end: 130000 });
+  assert.deepEqual(dataRangeFor(5000, 20000, { start: 0, end: 20000 }), { start: 0, end: 20000 });
+});
+
+test('bucketMsForWindow: 20秒なら1秒刻み、長い窓ほど粗く', () => {
+  assert.equal(bucketMsForWindow(20000), 1000);
+  assert.equal(bucketMsForWindow(600000), 4000);
+});
+
+test('speedYMaxKt: 範囲内の最大速度 + 2kt を切り上げ。データなしは null', () => {
+  const a = { visible: true, tRange: { start: 0 }, points: run(3, 30) };
+  assert.equal(speedYMaxKt([a], { range: { start: 0, end: 30000 }, mode: 'absolute' }), Math.ceil(3 * MPS_TO_KT + 2)); // 5.83kt → 8
+  assert.equal(speedYMaxKt([{ ...a, visible: false }], { range: { start: 0, end: 30000 }, mode: 'absolute' }), null);
+});
+
+test('cachedWindowedSpeedsMps: 練習の最初と最後(止まっている間)は速度を null にする(windowedSpeedsMps はそのまま)', () => {
+  // 0〜299秒は止まっている(測位直後に 1 点だけ大きく飛ぶ)、300〜1499秒は 3 m/s、1500〜1799秒は止まっている
+  const still = (n, t0, lat) => Array.from({ length: n }, (_, i) => ({ t: t0 + i * 1000, lat, lon: 0, speed: 99, accuracy: 5 }));
+  const moving = run(3, 1200, 300000);
+  const pts = [...still(300, 0, 0), ...moving, ...still(300, 1500000, moving.at(-1).lat)];
+  pts[1] = { ...pts[1], lat: 0.001, accuracy: 40 }; // 測位直後の飛び
+  const v = cachedWindowedSpeedsMps(pts);
+  assert.equal(v[1], null);
+  assert.equal(v[200], null);
+  assert.ok(Math.abs(v[900] - 3) < 0.01);
+  assert.equal(v[1700], null);
+  assert.equal(typeof windowedSpeedsMps(pts)[200], 'number'); // マスク前は止まっている間も速度(≒0)がある
 });

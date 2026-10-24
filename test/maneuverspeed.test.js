@@ -2,7 +2,7 @@
 // タック/ジャイブ前後の減速(座標はダミー)。検出は test/maneuverdetect.test.js。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { speedAround, maneuverSpeedRows, topByKind, dropImplausibleManeuvers } from '../src/maneuverspeed.js';
+import { speedAround, maneuverSpeedRows, topByKind, dropImplausibleManeuvers, maneuverAxisMarks } from '../src/maneuverspeed.js';
 import { MPS_TO_KT } from '../src/speedchart.js';
 
 const DEG = 1 / 111195; // 緯度 1m 相当
@@ -70,4 +70,20 @@ test('dropImplausibleManeuvers: 減速が 0.1kt 未満のタックは誤検出�
   assert.deepEqual(dropImplausibleManeuvers(rows).map((x) => `${x.kind}:${x.dropKt}`), ['tack:0.1', 'tack:1.2', 'gybe:0', 'gybe:0.3']);
   assert.equal(dropImplausibleManeuvers(rows, { minTackDropKt: 0 }).length, 6);
   assert.deepEqual(dropImplausibleManeuvers(undefined), []);
+});
+
+test('maneuverAxisMarks: 表示中の艇の印を軸時刻で返す。範囲外・非表示の艇は除き、艇ごとに段を分ける', () => {
+  const a = { color: '#f00', tRange: { start: 1000 } }, b = { color: '#00f', tRange: { start: 5000 } }, hidden = { tRange: { start: 0 } };
+  const rows = [
+    { track: a, tMs: 3000, kind: 'tack', rank: 1 },
+    { track: b, tMs: 9000, kind: 'gybe' },
+    { track: b, tMs: 99000, kind: 'tack' }, // 範囲外
+    { track: hidden, tMs: 3000, kind: 'tack' },
+  ];
+  assert.deepEqual(maneuverAxisMarks(rows, [a, b], { mode: 'absolute', min: 0, max: 10000 }), [
+    { x: 3000, kind: 'tack', rank: 1, color: '#f00', lane: 0 },
+    { x: 9000, kind: 'gybe', rank: null, color: '#00f', lane: 1 },
+  ]);
+  // elapsed は各艇自身の開始を0に
+  assert.deepEqual(maneuverAxisMarks(rows, [a, b], { mode: 'elapsed', min: 0, max: 5000 }).map((m) => m.x), [2000, 4000]);
 });

@@ -9,6 +9,8 @@ import { circDiffDeg, bearingDeg, windDirAt, detectManeuvers } from './windaxis.
 import { classifyPointOfSail } from './vmg.js';
 import { haversineMeters } from './gps.js';
 import { positionAt } from './interpolate.js';
+import { outsideSpan } from './sailingspan.js';
+import { sailingSpanOf } from './speedchart.js';
 
 export const DETECT_DEFAULTS = Object.freeze({
   courseHalfMs: 3000, // 進路は前後3秒の両端点を結ぶ方位(位置誤差を均す)
@@ -19,9 +21,12 @@ export const DETECT_DEFAULTS = Object.freeze({
 
 // 各点の、風に対する進路の角度(-180〜180°)。正 = 進路が風位より右(風を左舷から受ける = ポート)、
 // 負 = 左(右舷から受ける = スターボード)。0 付近が風位、±180 付近が真追っ手。進路が求まらない点は null。
+// 練習の最初と最後(出艇前・着艇後。sailingspan.js)の点も null(舷を判定しない)。
 export function relativeCourses(points, windSeries, opts = {}) {
   const o = { ...DETECT_DEFAULTS, ...opts };
+  const span = sailingSpanOf(points);
   return points.map((p) => {
+    if (outsideSpan(p.t, span)) return null;
     const a = positionAt(points, p.t - o.courseHalfMs);
     const b = positionAt(points, p.t + o.courseHalfMs);
     if (!a || !b || haversineMeters(a, b) < o.minChordM) return null;
@@ -164,10 +169,14 @@ export function legacyManeuverEvents(points, maneuvers, windSeries, opts = {}) {
 
 // 艇のタック/ジャイブ(地図のピン・top3・今日の練習サマリの回数で共通)。風軸があれば舷の入れ替わりから、
 // 無ければ detectManeuvers から。marks は detectManeuvers のマーク近傍除外に渡す。
+// 練習の最初と最後(出艇前・着艇後。sailingspan.js)のマニューバは除く(風軸が無い艇の経路も含めて)。
 export function detectManeuverEvents(track, windSeries, { marks = [], ...opts } = {}) {
   const points = Array.isArray(track?.points) ? track.points : [];
-  if (windSeries && windSeries.length) return detectManeuversByWind(points, windSeries, opts);
-  return legacyManeuverEvents(points, detectManeuvers(track, { marks }), windSeries, opts);
+  const events = windSeries && windSeries.length
+    ? detectManeuversByWind(points, windSeries, opts)
+    : legacyManeuverEvents(points, detectManeuvers(track, { marks }), windSeries, opts);
+  const span = sailingSpanOf(points);
+  return span ? events.filter((e) => !outsideSpan(e.tMs, span)) : events;
 }
 
 // ===== 誤検出の除外(下バー右クリック「タック/ジャイブを除外」) =====

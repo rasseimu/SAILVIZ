@@ -59,3 +59,18 @@ export function topByKind(rows, kind, n = 3) {
     .sort((a, b) => a.dropKt - b.dropKt || b.entryKt - a.entryKt)
     .slice(0, n);
 }
+
+// 速度の推移グラフの横軸に打つタック/ジャイブの印。rows は maneuverSpeedRows の行(top3 は rank 付き)。
+// 表示中の艇の行だけを軸時刻 x(elapsed は各艇自身の開始を0)にし、表示範囲 [min, max] のものを返す。
+// lane は表示中の艇の並び順(艇ごとに段を分けて重ならないようにする)。
+export function maneuverAxisMarks(rows, visibleTracks, { mode, min, max }) {
+  const out = [];
+  for (const r of rows || []) {
+    const lane = visibleTracks.indexOf(r.track);
+    if (lane < 0) continue;
+    const x = mode === 'elapsed' ? r.tMs - (r.track.tRange?.start ?? 0) : r.tMs;
+    if (x < min || x > max) continue;
+    out.push({ x, kind: r.kind, rank: r.rank ?? null, color: r.track.color || '#888', lane });
+  }
+  return out;
+}

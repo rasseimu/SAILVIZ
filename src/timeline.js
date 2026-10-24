@@ -52,6 +52,11 @@ export function createTimeline(canvas, { onCropChange, onScrub, onVideoClick, on
     state = next;
     const w = canvas.width, h = canvas.height;
     ctx.clearRect(0, 0, w, h);
+    // クローズ(薄い灰色)/ランニング(濃い灰色)の推定走種の背景(速度の推移グラフと同じ色)
+    for (const b of state.bands || []) {
+      ctx.fillStyle = b.kind === 'downwind' ? 'rgba(60,64,67,0.22)' : 'rgba(60,64,67,0.08)';
+      ctx.fillRect(tToX(b.start), 0, tToX(b.end) - tToX(b.start), h);
+    }
     // ベースライン
     ctx.fillStyle = '#c7d3dd';
     ctx.fillRect(0, h / 2 - 2, w, 4);

@@ -41,8 +41,12 @@ import { createProgress } from './progress.js';
 import { createRoadmap } from './roadmap.js';
 import { summarizeNeonShare } from './vmg.js';
 import { renderChart } from './chartview.js';
-import { speedChartDatasets } from './speedchart.js';
-import { maneuverSpeedRows, topByKind, dropImplausibleManeuvers } from './maneuverspeed.js';
+import {
+  speedChartDatasets, SPEED_WINDOW_DEFAULT_MS, SPEED_WINDOW_MIN_MS, zoomWindowMs, followWindow, dataRangeFor,
+  bucketMsForWindow, speedYMaxKt,
+} from './speedchart.js';
+import { pointOfSailBands } from './sailbands.js';
+import { maneuverSpeedRows, topByKind, dropImplausibleManeuvers, maneuverAxisMarks } from './maneuverspeed.js';
 import { detectManeuverEvents, excludeManeuvers, addManeuverExclusion, removeManeuverExclusions } from './maneuverdetect.js';
 import {
   refreshDaySummary, daySummaryAfterGpsLoad, daySummaryAfterPracticeLoad, runDaySummaryAction,
@@ -136,7 +140,18 @@ function recomputeWindAxis() {
       windSeriesByTrack.set(tr, []); // 推定失敗は空系列として扱い、落とさない
     }
   }
+  recomputeSailBands();
   recomputeVmgWinners();
+}
+
+// クローズ/ランニングの推定の帯(軸時刻)。速度の推移グラフと下バーの背景に使う。風軸を求め直したときに作り直す。
+let sailBands = [];
+function recomputeSailBands() {
+  try {
+    sailBands = pointOfSailBands(state.tracks, windSeriesByTrack, { range: globalRange(state.tracks, state.mode), mode: state.mode });
+  } catch {
+    sailBands = [];
+  }
 }
 
 // 30秒ごとVMG勝者(ネオンハイライト用)。vmgOn時のみ算出。風軸再計算後に呼ぶ。
@@ -146,7 +161,7 @@ let vmgOn = false; // VMG勝者ネオン表示。表示のみ・保存しない(
 let vmgWinners = []; // [{boatId,color,lo,hi,pointOfSail,vmg}]（絶対epoch ms）
 let vmgAssessment = null; // assessComparison の結果(信頼度・理由・比較区間)。計算失敗時 null
 let vmgParticipation = null; // Map<track, {upwind, downwind}>(勝者が決まった断片への参加時間 ms)
-// タック/ジャイブ前後3秒の減速(maneuverspeed.js の行)と、減速の小さいタック・ジャイブ各上位3本。vmgOn時のみ算出。
+// タック/ジャイブ前後3秒の減速(maneuverspeed.js の行)と、減速の小さいタック・ジャイブ各上位3本。風軸を求め直すたびに算出。
 // 検出は maneuverdetect.js(風軸があれば舷の入れ替わりから。今日の練習サマリの回数と同じ)。
 let maneuverRows = [];
 let maneuverTop = { tack: [], gybe: [] };
@@ -169,14 +184,14 @@ function recomputeManeuvers(visible) {
   });
 }
 function recomputeVmgWinners() {
+  const visible = state.tracks.filter((t) => t.visible);
+  // マニューバは速度の推移グラフの横軸にも出すので VMG の ON/OFF に関わらず求める(地図のピンは VMG ON のときだけ)
+  recomputeManeuvers(visible);
   if (!vmgOn) {
     vmgWinners = []; vmgAssessment = null; vmgParticipation = null;
-    maneuverRows = []; maneuverTop = { tack: [], gybe: [] }; maneuverPins = [];
     renderVmgLegend();
     return;
   }
-  const visible = state.tracks.filter((t) => t.visible);
-  recomputeManeuvers(visible);
   try {
     vmgAssessment = assessComparison(visible, windSeriesByTrack, {});
     const d = minuteWinnersDetailed(visible, windSeriesByTrack, {
@@ -310,17 +325,27 @@ function renderVmgLegend() {
   placeSpeedPanelDefault(); // 凡例の高さが変わるので、未移動ならその上へ付け直す
 }
 
-// 速度の推移パネル(#speed-panel)。可視艇の速度を1つのグラフに重ね、再生時刻の縦線を draw() のたびに描き直す。
-// x はタイムライン軸(再生範囲=クロップ)。系列はクロップ・整列・可視艇が変わったときだけ作り直す。
+// 速度の推移パネル(#speed-panel)。可視艇の速度を1つのグラフに重ねる。再生時刻を中央に置いた幅 speedWindowMs の窓を
+// 表示し、再生につれて右から左へ流れる(赤い縦線 = 再生時刻は常に中央)。ホイール / −+ で横軸(時間の幅)だけを変え、
+// 縦軸は練習全体の最大速度で固定する。背景はクローズ(薄い灰色)/ランニング(濃い灰色)の推定走種。
+// 系列は表示範囲の前後に余裕を持たせて作り、窓がその外に出たとき・窓幅が変わったときだけ作り直す。
 // パネルは #stage 内でドラッグ移動・右下で拡大縮小でき、位置と大きさは localStorage に保持(この端末のブラウザ内のみ)。
 // 未移動のうちは VMG 凡例の上(凡例が無ければマップ右下)に置く。
 let speedChart = null;
-let speedChartKey = '';
+let speedChartKey = ''; // 作り直しが必要な条件(範囲・整列・可視艇)。変われば Chart を作り直す
+let speedDataRange = null; // 今の系列を作った範囲と集計幅
 let speedChartNow = 0;
+const SPEED_WINDOW_KEY = 'sailviz_speed_window_ms';
+let speedWindowMs = SPEED_WINDOW_DEFAULT_MS;
+try {
+  const w = Number(globalThis.localStorage?.getItem(SPEED_WINDOW_KEY));
+  if (Number.isFinite(w) && w >= SPEED_WINDOW_MIN_MS) speedWindowMs = w;
+} catch { /* noop */ }
 function destroySpeedChart() {
   speedChart?.destroy();
   speedChart = null;
   speedChartKey = '';
+  speedDataRange = null;
 }
 const speedCursorPlugin = {
   id: 'speedCursor',
@@ -335,10 +360,58 @@ const speedCursorPlugin = {
     ctx.restore();
   },
 };
+// クローズ/ランニングの背景(下バーと同じ色)。帯は軸時刻。
+const SAIL_BAND_FILL = { upwind: 'rgba(60,64,67,0.08)', downwind: 'rgba(60,64,67,0.22)' };
+const speedBandPlugin = {
+  id: 'speedBands',
+  beforeDatasetsDraw(chart) {
+    const { ctx, chartArea: a, scales: { x } } = chart;
+    if (!a) return;
+    ctx.save();
+    for (const b of sailBands) {
+      if (b.end < x.min || b.start > x.max) continue;
+      const x0 = Math.max(a.left, x.getPixelForValue(b.start)), x1 = Math.min(a.right, x.getPixelForValue(b.end));
+      ctx.fillStyle = SAIL_BAND_FILL[b.kind];
+      ctx.fillRect(x0, a.top, x1 - x0, a.bottom - a.top);
+    }
+    ctx.restore();
+  },
+};
+// タック/ジャイブの時刻を横軸のすぐ上に小さく T/G で打つ(艇の色。top3 は地図のピンと同じ金色/水色に順位)。艇ごとに段を分ける。
+const speedManeuverPlugin = {
+  id: 'speedManeuvers',
+  afterDatasetsDraw(chart) {
+    const { ctx, chartArea: a, scales: { x } } = chart;
+    if (!a) return;
+    const visible = state.tracks.filter((t) => t.visible);
+    const marks = maneuverAxisMarks(maneuverPins, visible, { mode: state.mode, min: x.min, max: x.max });
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const m of marks) {
+      const px = x.getPixelForValue(m.x), cy = a.bottom - 4.5 - m.lane * 9, r = 4;
+      const top = m.rank != null ? (m.kind === 'tack' ? { fill: '#f1c40f', text: '#3d2e00' } : { fill: '#5dade2', text: '#0b3550' }) : null;
+      ctx.beginPath();
+      ctx.arc(px, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = top ? top.fill : m.color;
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = top ? m.color : '#fff';
+      ctx.stroke();
+      ctx.fillStyle = top ? top.text : '#fff';
+      ctx.font = 'bold 6px sans-serif';
+      ctx.fillText(top ? String(m.rank) : (m.kind === 'tack' ? 'T' : 'G'), px, cy + 0.5);
+    }
+    ctx.restore();
+  },
+};
+function speedAxisRange() {
+  return state.crop && state.crop.end > state.crop.start ? state.crop : globalRange(state.tracks, state.mode);
+}
 function updateSpeedChart(now) {
   speedChartNow = now;
   const panel = $('speed-panel');
-  const range = state.crop && state.crop.end > state.crop.start ? state.crop : globalRange(state.tracks, state.mode);
+  const range = speedAxisRange();
   const visible = state.tracks.filter((t) => t.visible);
   const show = $('speed-panel-toggle').checked && visible.length > 0 && range.end > range.start;
   if (panel.classList.contains('hidden') === show) {
@@ -348,15 +421,44 @@ function updateSpeedChart(now) {
   if (!show) { destroySpeedChart(); return; }
   const key = [range.start, range.end, state.mode,
     ...visible.map((t) => `${t.color}:${t.name}:${t.points.length}`)].join('|');
-  if (speedChart && key === speedChartKey) { speedChart.draw(); return; }
-  destroySpeedChart();
-  speedChart = renderChart($('speed-canvas'), {
-    datasets: speedChartDatasets(visible, { range, mode: state.mode }),
-    from: range.start, to: range.end, fmtX: (v) => formatClock(v, state.mode), yBeginAtZero: true,
-    plugins: [speedCursorPlugin],
-  });
-  speedChartKey = key;
+  if (!speedChart || key !== speedChartKey) {
+    destroySpeedChart();
+    speedChart = renderChart($('speed-canvas'), {
+      datasets: [], from: range.start, to: range.end, fmtX: (v) => formatClock(v, state.mode), yBeginAtZero: true,
+      plugins: [speedBandPlugin, speedManeuverPlugin, speedCursorPlugin],
+    });
+    speedChart.options.scales.y.max = speedYMaxKt(visible, { range, mode: state.mode }) ?? undefined;
+    speedChartKey = key;
+  }
+  const view = followWindow(now, speedWindowMs);
+  const bucketMs = bucketMsForWindow(speedWindowMs);
+  // 表示範囲が系列の外に出た(範囲の端は除く)・集計幅が変わったときだけ系列を作り直す
+  const d = speedDataRange;
+  const outside = !d || d.bucketMs !== bucketMs
+    || (view.min < d.start && d.start > range.start) || (view.max > d.end && d.end < range.end);
+  if (outside) {
+    const dr = dataRangeFor(now, speedWindowMs, range);
+    speedChart.data.datasets = dr.end > dr.start
+      ? speedChartDatasets(visible, { range: dr, mode: state.mode, bucketMs }) : [];
+    speedDataRange = { ...dr, bucketMs };
+  }
+  speedChart.options.scales.x.min = view.min;
+  speedChart.options.scales.x.max = view.max;
+  $('speed-window-label').textContent = `${Math.round(speedWindowMs / 1000)}秒`;
+  speedChart.update('none');
 }
+function zoomSpeedChart(dir) {
+  const range = speedAxisRange();
+  speedWindowMs = zoomWindowMs(speedWindowMs, dir, { maxMs: range.end - range.start });
+  try { globalThis.localStorage?.setItem(SPEED_WINDOW_KEY, String(speedWindowMs)); } catch { /* noop */ }
+  updateSpeedChart(playback.getNow());
+}
+$('speed-panel-body').addEventListener('wheel', (e) => {
+  e.preventDefault();
+  zoomSpeedChart(e.deltaY < 0 ? 1 : -1);
+}, { passive: false });
+$('speed-zoom-in').addEventListener('click', () => zoomSpeedChart(1));
+$('speed-zoom-out').addEventListener('click', () => zoomSpeedChart(-1));
 
 const SPEED_PANEL_KEY = 'sailviz_speed_panel'; // {left, top, width, height}(#stage 内の px)。未移動なら無し
 const SPEED_PANEL_SHOW_KEY = 'sailviz_speed_panel_hidden';
@@ -605,9 +707,9 @@ function draw() {
     transform: state.transform, tracks: state.tracks, events: state.events,
     marks: state.marks, videos: state.videos, activeVideoId: currentVideo?.id,
     now, mode: state.mode, crop: state.crop, referenceTrack: refTrack,
-    vmgWinners, maneuverPins, basemap: state.basemap,
+    vmgWinners, maneuverPins: vmgOn ? maneuverPins : [], basemap: state.basemap,
   });
-  timeline.render({ range, crop: state.crop, now, events: axisEvents, pending: pendingStart, videos: axisVideos, pins: axisPins });
+  timeline.render({ range, crop: state.crop, now, events: axisEvents, pending: pendingStart, videos: axisVideos, pins: axisPins, bands: sailBands });
   // 風軸ストリップ: 可視トラックの推定風向を軸時刻へ変換して重ね描き(色はマップと同じ)。
   // elapsed では各トラックを自身の開始で0起点にする(start-together規約。map描画と同じ)。
   const windSeries = state.tracks

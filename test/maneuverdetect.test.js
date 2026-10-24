@@ -158,3 +158,16 @@ test('removeManeuverExclusions: 指定範囲と重なる区間だけを取り除
   assert.deepEqual(removeManeuverExclusions(list, { start: 25, end: 45 }), [{ start: 0, end: 10 }]);
   assert.deepEqual(removeManeuverExclusions(list, { start: 11, end: 19 }), list);
 });
+
+test('detectManeuverEvents / relativeCourses: 練習の最初と最後(出艇前・着艇後)のマニューバは数えない', () => {
+  // 出艇前: 0.5 m/s(1kt)でふらふら向きを変える → 帆走前なので数えない。その後 3 m/s でタック1回
+  const slow = course([{ sec: 60, hdg: 315 }, { sec: 60, hdg: 45 }, { sec: 60, hdg: 315 }], { slowMps: 0.5 });
+  const slowPts = slow.points.map((p, i) => ({ ...p, lat: p.lat / 6, lon: p.lon / 6, t: i * 1000 })); // 速度を 1/6 に
+  const fast = course([{ sec: 120, hdg: 45 }, { sec: 120, hdg: 315 }]).points
+    .map((p) => ({ ...p, t: p.t + slowPts.length * 1000, lat: p.lat + slowPts.at(-1).lat, lon: p.lon + slowPts.at(-1).lon }));
+  const points = [...slowPts, ...fast];
+  const ev = detectManeuverEvents({ points }, NORTH);
+  assert.equal(ev.length, 1);
+  assert.ok(ev[0].tMs > slowPts.length * 1000);
+  assert.equal(relativeCourses(points, NORTH)[60], null);
+});
