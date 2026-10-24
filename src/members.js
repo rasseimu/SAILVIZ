@@ -70,9 +70,10 @@ export function orgRoster(members) {
 }
 
 // 今の名簿。setMemberRoster で組織の名簿にするまでは従来の名簿。
+// 空の配列は「名簿が空」(組織に所属していないアカウント)として扱い、従来の名簿へ戻さない。null で従来の名簿へ戻す。
 let currentRoster = null;
 export function setMemberRoster(list) {
-  currentRoster = Array.isArray(list) && list.length ? list : null;
+  currentRoster = Array.isArray(list) ? list : null;
 }
 export function memberList() {
   return currentRoster ? currentRoster.map((m) => ({ ...m })) : legacyMemberList();

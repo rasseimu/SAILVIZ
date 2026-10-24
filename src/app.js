@@ -1050,14 +1050,19 @@ async function showDashboard() {
   setActiveNav('dashboard');
   await dashboard.render();
 }
+// 組織に所属していない個人アカウント(/api/session の noOrg)。進捗管理・ロードマップは読み込まずに案内だけを出す。
+let noOrgAccount = false;
 async function showProgress() {
   clearViews();
   document.body.classList.add('view-progress');
   setActiveNav('progress');
+  document.body.classList.toggle('no-org', noOrgAccount);
+  if (noOrgAccount) return;
   await progress.render();
 }
 // member を渡すと、その部員を選択して編集画面を開く(進捗画面の導線用)。
 async function showRoadmap(member) {
+  if (noOrgAccount) return showProgress();
   // ロードマップは自己完結データ(目標/段階)。永続化は API(store)。
   clearViews();
   document.body.classList.add('view-roadmap');
@@ -1458,6 +1463,7 @@ function enterApp() { showTop(); }
   } catch { /* 復元失敗は無視 */ }
   let sess = { loggedIn: false };
   try { sess = await store.session(); } catch { /* 未ログイン扱い */ }
+  noOrgAccount = sess.noOrg === true;
   // アカウントでログインしていれば、表示中の組織を所属から決める(覚えている ID が外れていれば先頭)。
   // 未ログイン(401)・共有ログイン・ファイル版(503)は何もしない=ヘッダー無しのまま。
   try {
@@ -1467,6 +1473,7 @@ function enterApp() { showTop(); }
   // このページの組織をここで固定する(以後の読み書きはすべてこの組織。別タブ等で変わったら読み込み直す)。
   // me が取れなかったときも覚えている組織で固定する(ヘッダー無しで送って所属の先頭へ書かない)。
   lockActiveOrg(getActiveOrgId());
+  if (noOrgAccount) renderNoOrgAccount();
   // 反省・議事録・進捗のメンバー候補(サーバーが読み書きの主体と同じ判定で決める。取れなければ従来の名簿のまま)
   if (sess.loggedIn) await loadMemberRoster();
   if (sess.loggedIn) enterApp(); else showLanding();
@@ -1482,6 +1489,27 @@ function renderAccountOrg(org) {
   avatar.style.background = background;
   document.querySelector('#sb-account .sb-account-name').textContent = org.name;
   $('sb-account').title = org.name;
+}
+// 組織に所属していない個人アカウント: 既定表示(共有ログインの組織名)を出さず「組織未所属」にする。
+const SB_ACCOUNT_DEFAULT = (() => {
+  const b = document.getElementById('sb-account');
+  const a = b.querySelector('.account-avatar');
+  return { initial: a.textContent, background: a.style.background, name: b.querySelector('.sb-account-name').textContent, title: b.title };
+})();
+function renderNoOrgAccount() {
+  const avatar = document.querySelector('#sb-account .account-avatar');
+  avatar.textContent = '?';
+  avatar.style.background = '#9aa0a6';
+  document.querySelector('#sb-account .sb-account-name').textContent = '組織未所属';
+  $('sb-account').title = '組織未所属';
+}
+// 既定表示(index.html のまま)へ戻す。
+function resetAccountOrg() {
+  const avatar = document.querySelector('#sb-account .account-avatar');
+  avatar.textContent = SB_ACCOUNT_DEFAULT.initial;
+  avatar.style.background = SB_ACCOUNT_DEFAULT.background;
+  document.querySelector('#sb-account .sb-account-name').textContent = SB_ACCOUNT_DEFAULT.name;
+  $('sb-account').title = SB_ACCOUNT_DEFAULT.title;
 }
 async function doLogout() {
   try { await store.logout(); } catch { /* 失敗しても画面は戻す */ }
@@ -1599,7 +1627,7 @@ viewLoginForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   viewLoginError.hidden = true;
   const r = await store.login(viewLoginUser.value.trim(), viewLoginPassword.value);
-  if (r.ok) { viewLoginDialog.close(); enterApp(); }
+  if (r.ok) { if (noOrgAccount) resetAccountOrg(); noOrgAccount = false; viewLoginDialog.close(); enterApp(); } // 共有ログインは組織(芝浦)のメンバー
   else { viewLoginError.textContent = r.error || 'ログインに失敗しました'; viewLoginError.hidden = false; }
 });
 $('viewLoginCancel').addEventListener('click', () => viewLoginDialog.close());

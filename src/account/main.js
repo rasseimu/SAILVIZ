@@ -178,7 +178,9 @@ function renderOrgLoggedOut() {
 // ログイン・登録のあとの動作。既定は /account へ。参加ページ(/join/:code)では URL を変えずに描き直して戻る。
 const toAccount = async () => { history.replaceState(null, '', '/account'); await render(); };
 
-function loginForm(after = toAccount) {
+// inviteCode: 参加ページ(/join/:code)から使うとき。サーバがログイン・登録と同時にその組織へ参加させる。
+// after(応答の JSON) はログイン・登録できたあとの動作。
+function loginForm(after = toAccount, inviteCode) {
   const email = h('input', { id: 'ac-login-email', type: 'email', autocomplete: 'username', required: true });
   const pw = h('input', { id: 'ac-login-password', type: 'password', autocomplete: 'current-password', required: true });
   const btn = h('button', { id: 'ac-login-submit', class: 'ac-btn', type: 'submit' }, 'ログイン');
@@ -187,15 +189,15 @@ function loginForm(after = toAccount) {
     e.preventDefault();
     submitting(btn, async () => {
       if (!email.value.trim() || !pw.value) return setMsg('メールアドレスとパスワードを入力してください', 'error');
-      const r = await api('POST', '/api/auth/login', { email: email.value, password: pw.value });
+      const r = await api('POST', '/api/auth/login', { email: email.value, password: pw.value, ...(inviteCode ? { inviteCode } : {}) });
       if (r.status !== 200) return setMsg(apiErrorMessage(r.status, r.json), 'error');
-      await after();
+      await after(r.json);
     });
   });
   return form;
 }
 
-function registerForm(after = toAccount) {
+function registerForm(after = toAccount, inviteCode) {
   const email = h('input', { id: 'ac-reg-email', type: 'email', autocomplete: 'email', required: true });
   const pw = h('input', { id: 'ac-reg-password', type: 'password', autocomplete: 'new-password', required: true, minlength: '8' });
   const name = h('input', { id: 'ac-reg-name', type: 'text', autocomplete: 'name', required: true });
@@ -217,9 +219,10 @@ function registerForm(after = toAccount) {
       // サーバ時刻に揃えるなら API 契約(設計書 v2 §10)の変更になるため、人の判断待ち(S2.7-P2 P3-3)。
       const r = await api('POST', '/api/auth/register', {
         email: f.email, password: f.password, name: f.name, affiliationText: f.affiliationText, agreedAt: Date.now(),
+        ...(inviteCode ? { inviteCode } : {}),
       });
       if (r.status !== 200) return setMsg(apiErrorMessage(r.status, r.json), 'error');
-      await after();
+      await after(r.json);
       setMsg('登録しました。確認メールのリンクを開いてください。', 'ok');
     });
   });
@@ -274,7 +277,7 @@ function profileCard() {
     actions.unshift(resend);
   }
   return h('section', { class: 'ac-card' }, h('h1', {}, 'アカウント'), h('dl', { class: 'ac-dl' }, ...rows),
-    !verified && h('p', { class: 'ac-note' }, EXTRAS ? 'メールの確認が済むと、組織の作成や名簿との自動紐付けができます。' : 'メールの確認が済むと、組織の作成や招待リンクでの参加ができます。'),
+    !verified && h('p', { class: 'ac-note' }, EXTRAS ? 'メールの確認が済むと、組織の作成や名簿との自動紐付けができます。' : 'メールの確認が済むと、組織の作成ができます。'),
     h('div', { class: 'ac-row' }, ...actions));
 }
 
@@ -654,13 +657,31 @@ function dropToJoinLogin() {
   setMsg(SESSION_EXPIRED_MESSAGE, 'error');
 }
 
+// 参加ページでログイン・登録したあと: サーバが同時に参加させた結果(応答の invite)を出す。
+// 招待が無効だったとき(invite が参加以外)は、参加ページを描き直して理由を出す。
+async function afterJoinAuth(json) {
+  const inv = json && json.invite;
+  if (inv && (inv.status === 'joined' || inv.status === 'already')) {
+    await loadMe(); renderNav();
+    mount(joinedCard(inv.orgName));
+    return;
+  }
+  await render();
+}
+
+function joinedCard(orgName) {
+  return joinCard(h('p', { id: 'ac-join-result', 'data-state': 'ok' }, `${orgName} に参加しました。すでに参加済みだった場合も、この表示になります。`),
+    h('div', { class: 'ac-row' }, h('a', { class: 'ac-btn', href: '/' }, 'SailViz へ'), h('a', { class: 'ac-btn ac-btn-ghost', href: '/account' }, 'アカウントのページへ')));
+}
+
 function renderJoinLoggedOut(tab) {
+  const code = inviteCodeFromPath(location.pathname);
   const tabs = h('div', { class: 'ac-tabs', role: 'tablist' },
     ...[['login', 'ログイン'], ['register', '新規登録']].map(([id, label]) =>
       h('button', { id: `ac-tab-${id}`, class: 'ac-tab', type: 'button', role: 'tab', 'aria-selected': String(id === tab), onclick: () => renderJoinLoggedOut(id) }, label)));
   mount(joinCard(
-    h('p', { id: 'ac-join-login-note' }, '組織への招待リンクです。参加するには、ログインまたは新規登録をしてください(メールアドレスの確認も必要です)。'),
-    tabs, tab === 'register' ? registerForm(render) : loginForm(render)));
+    h('p', { id: 'ac-join-login-note' }, '組織への招待リンクです。ログインまたは新規登録をすると、この組織に参加します。'),
+    tabs, tab === 'register' ? registerForm(afterJoinAuth, code) : loginForm(afterJoinAuth, code)));
 }
 
 async function renderJoin() {
@@ -707,8 +728,8 @@ async function renderJoin() {
   btn.addEventListener('click', () => submitting(btn, async () => {
     const a = await api('POST', `/api/invites/${encodeURIComponent(code)}/accept`, {});
     if (a.status === 200) {
-      mount(joinCard(h('p', { id: 'ac-join-result', 'data-state': 'ok' }, `${orgName} に参加しました。すでに参加済みだった場合も、この表示になります。`),
-        h('a', { class: 'ac-btn', href: '/account' }, 'アカウントのページへ')));
+      await loadMe(); renderNav();
+      mount(joinedCard(orgName));
       return;
     }
     const v = joinFailureView(a.status, a.json);

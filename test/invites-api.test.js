@@ -191,13 +191,13 @@ test('revoke: 管理者は失効でき {ok:true}。他組織の管理者は 403 
 });
 
 // ---------- API: プレビュー・参加 ----------
-test('GET /api/invites/:code: 401・未確認 403・未知 404、有効なら秘密なしで返す', { skip }, async () => {
+test('GET /api/invites/:code: 401・未知 404、有効なら秘密なしで返す(メール未確認でも見られる)', { skip }, async () => {
   const { admin, org } = mkOrg();
   const inv = await mkInvite(org, admin);
   assert.equal((await call('GET', `/api/invites/${inv.code}`, null)).status, 401);
   const un = await call('GET', `/api/invites/${inv.code}`, mkUser(false).tok);
-  assert.equal(un.status, 403);
-  assert.equal((await un.json()).error.code, 'email_not_verified');
+  assert.equal(un.status, 200);
+  assert.equal((await un.json()).valid, true);
   const u = mkUser();
   assert.equal((await call('GET', '/api/invites/nope', u.tok)).status, 404);
   const r = await call('GET', `/api/invites/${inv.code}`, u.tok);
@@ -223,16 +223,16 @@ test('GET /api/invites/:code: 失効/期限切れ/上限超過は valid:false �
   } finally { clock -= 2 * DAY; }
 });
 
-test('accept: 401・未確認 403(参加しない)・未知 404', { skip }, async () => {
+test('accept: 401・未知 404、メール未確認でも参加できる', { skip }, async () => {
   const { admin, org } = mkOrg();
   const inv = await mkInvite(org, admin);
   assert.equal((await call('POST', `/api/invites/${inv.code}/accept`, null)).status, 401);
+  assert.equal(accounts.getInvite(inv.id).use_count, 0);
   const un = mkUser(false);
   const r = await call('POST', `/api/invites/${inv.code}/accept`, un.tok);
-  assert.equal(r.status, 403);
-  assert.equal((await r.json()).error.code, 'email_not_verified');
-  assert.equal(accounts.isMember(org.id, un.user.id), false);
-  assert.equal(accounts.getInvite(inv.id).use_count, 0);
+  assert.equal(r.status, 200);
+  assert.equal(accounts.isMember(org.id, un.user.id), true);
+  assert.equal(accounts.getInvite(inv.id).use_count, 1);
   assert.equal((await call('POST', '/api/invites/nope/accept', mkUser().tok)).status, 404);
 });
 
@@ -333,4 +333,61 @@ test('accept: 同時に上限を超えて参加できない', { skip }, async ()
   const codes = rs.map((r) => r.status).sort();
   assert.deepEqual(codes, [200, 200, 410, 410, 410, 410]);
   assert.equal(accounts.getInvite(inv.id).use_count, 2);
+});
+
+// ---------- 招待リンクからの登録・ログイン(本文の inviteCode で同時に参加)----------
+const PW = 'password-123';
+const register = (email, extra = {}) => call('POST', '/api/auth/register', null, {
+  email, password: PW, name: '招待 太郎', affiliationText: 'テスト部', agreedAt: clock, ...extra,
+});
+
+test('register: inviteCode があれば登録と同時に参加(メール未確認でも)。応答に invite', { skip }, async () => {
+  const { admin, org } = mkOrg();
+  const inv = await mkInvite(org, admin);
+  const r = await register(`reg-join${++seq}@example.test`, { inviteCode: inv.code });
+  assert.equal(r.status, 200);
+  const j = await r.json();
+  assert.deepEqual(j.invite, { status: 'joined', orgId: org.id, orgName: 'テスト組織' });
+  assert.equal(j.user.emailVerified, false);
+  assert.equal(accounts.isMember(org.id, j.user.id), true);
+  assert.equal(accounts.getInvite(inv.id).use_count, 1);
+  const me = await (await call('GET', '/api/me', j.token)).json();
+  assert.deepEqual(me.orgs.map((o) => o.id), [org.id]);
+});
+
+test('register: inviteCode が無ければ invite を載せず参加もしない。無効な招待でも登録は成功', { skip }, async () => {
+  const { admin, org } = mkOrg();
+  const plain = await (await register(`reg-plain${++seq}@example.test`)).json();
+  assert.equal('invite' in plain, false);
+  assert.equal(accounts.listMembershipsOfUser(plain.user.id).length, 0);
+  const unknown = await register(`reg-unk${++seq}@example.test`, { inviteCode: 'nope' });
+  assert.equal(unknown.status, 200);
+  assert.deepEqual((await unknown.json()).invite, { status: 'not_found' });
+  const rev = await mkInvite(org, admin);
+  await call('POST', `/api/orgs/${org.id}/invites/${rev.id}/revoke`, admin.tok);
+  const revoked = await (await register(`reg-rev${++seq}@example.test`, { inviteCode: rev.code })).json();
+  assert.deepEqual(revoked.invite, { status: 'revoked' });
+  assert.equal(accounts.isMember(org.id, revoked.user.id), false);
+  const bad = await register(`reg-bad${++seq}@example.test`, { inviteCode: 123 });
+  assert.equal(bad.status, 200);
+  assert.deepEqual((await bad.json()).invite, { status: 'not_found' });
+});
+
+test('login: inviteCode があればログインと同時に参加。既参加は already で加算しない。パスワード違いは参加しない', { skip }, async () => {
+  const { admin, org } = mkOrg();
+  const inv = await mkInvite(org, admin);
+  const email = `login-join${++seq}@example.test`;
+  const reg = await (await register(email)).json();
+  const wrong = await call('POST', '/api/auth/login', null, { email, password: 'wrong-pass', inviteCode: inv.code });
+  assert.equal(wrong.status, 401);
+  assert.equal(accounts.isMember(org.id, reg.user.id), false);
+  const r = await call('POST', '/api/auth/login', null, { email, password: PW, inviteCode: inv.code });
+  assert.equal(r.status, 200);
+  assert.deepEqual((await r.json()).invite, { status: 'joined', orgId: org.id, orgName: 'テスト組織' });
+  assert.equal(accounts.isMember(org.id, reg.user.id), true);
+  const again = await call('POST', '/api/auth/login', null, { email, password: PW, inviteCode: inv.code });
+  assert.equal((await again.json()).invite.status, 'already');
+  assert.equal(accounts.getInvite(inv.id).use_count, 1);
+  const plain = await (await call('POST', '/api/auth/login', null, { email, password: PW })).json();
+  assert.equal('invite' in plain, false);
 });

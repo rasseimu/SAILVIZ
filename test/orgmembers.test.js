@@ -39,12 +39,12 @@ test('orgMemberEntries: 名簿行に結び付いた人はその旧名簿の氏�
   assert.equal(e[3].name.startsWith('ユーザー'), true); // 名前が無い人は表示名の既定
 });
 
-test('rosterForSubject: アカウントの主体で表示中の組織があればそのメンバー、それ以外は従来の名簿', () => {
+test('rosterForSubject: アカウントの主体で表示中の組織があればそのメンバー、組織なしのアカウントは空、それ以外は従来の名簿', () => {
   const legacy = legacyMemberList().map((m) => m.fullName);
   const accounts = stubAccounts({ members: [{ user_id: 'u1', roster_id: null }], users: [{ id: 'u1', name: '山田 太郎' }] });
   const user = { kind: 'user', userId: 'u1', orgIds: ['o1'] };
   assert.deepEqual(rosterForSubject(accounts, user, 'o1').map((m) => m.fullName), ['山田 太郎']);
-  assert.deepEqual(rosterForSubject(accounts, user, null).map((m) => m.fullName), legacy); // 表示中の組織なし
+  assert.deepEqual(rosterForSubject(accounts, user, null), []); // 表示中の組織なし: 従来の名簿(実在の部員名)を見せない
   assert.deepEqual(rosterForSubject(accounts, { kind: 'legacy', shared: true }, 'o1').map((m) => m.fullName), legacy);
   assert.deepEqual(rosterForSubject(null, user, 'o1').map((m) => m.fullName), legacy); // アカウント機能なし
   assert.deepEqual(rosterForSubject(null, null, null).map((m) => m.fullName), legacy);

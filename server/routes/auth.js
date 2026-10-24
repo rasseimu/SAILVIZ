@@ -97,6 +97,19 @@ export function createAuthRoute({
     return null;
   };
 
+  // 招待リンク(/join/:code)から登録・ログインしたときは、その組織へ参加させる(招待リンク自体が参加の許可)。
+  // 本文に inviteCode が無ければ null(応答に invite を載せない)。招待が無効でも登録・ログイン自体は成功させる。
+  const joinByInvite = (userId, code) => {
+    if (code === undefined || code === null) return null;
+    const inv = typeof code === 'string' && code ? accounts.getInviteByCode(code) : null;
+    const org = inv && accounts.getOrg(inv.org_id);
+    if (!org) return { status: 'not_found' };
+    const r = accounts.acceptInvite({ code, userId, now: now() });
+    if (r.status === 'joined' || r.status === 'already') return { status: r.status, orgId: org.id, orgName: org.name };
+    return { status: r.status };
+  };
+  const withInvite = (payload, invite) => (invite ? { ...payload, invite } : payload);
+
   const issueVerify = (user) => (user.email_verified_at == null
     // 発行時のアドレスを保存し、確認時に「今のアドレスと同じ」を必須にする(変更前アドレス宛てのリンクで新アドレスを確認済みにさせない)
     ? issueEmailToken(accounts, { userId: user.id, purpose: 'verify', newEmail: user.email, now: now() }) : null);
@@ -122,8 +135,9 @@ export function createAuthRoute({
       }
       const verify = issueVerify(user);
       await sendMail(user.email, 'verify', verify.token); // 失敗しても登録は成功(再送できる)
+      const invite = joinByInvite(user.id, body.inviteCode);
       const t = issueAuthToken(accounts, user.id, now());
-      send(res, 200, { token: t.token, user: publicUser(user) }, cookieHeader(t.token));
+      send(res, 200, withInvite({ token: t.token, user: publicUser(user) }, invite), cookieHeader(t.token));
     },
 
     // ---- POST /api/auth/verify-email ----(Web のページ /verify-email?token=… が呼ぶ)
@@ -176,8 +190,9 @@ export function createAuthRoute({
       if (needsRehash(user.password_hash, hashParams)) {
         accounts.updateUser(user.id, { passwordHash: await hashPassword(body.password, hashParams) });
       }
+      const invite = joinByInvite(user.id, body.inviteCode);
       const t = issueAuthToken(accounts, user.id, now());
-      send(res, 200, { token: t.token, user: publicUser(accounts.getUser(user.id)) }, cookieHeader(t.token));
+      send(res, 200, withInvite({ token: t.token, user: publicUser(accounts.getUser(user.id)) }, invite), cookieHeader(t.token));
     },
 
     // ---- POST /api/auth/logout ----

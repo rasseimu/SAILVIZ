@@ -82,13 +82,11 @@ export function createOrgsRoute({
   const REASON_MESSAGE = {
     revoked: '招待は失効しています', expired: '招待の有効期限が切れています', exhausted: '招待の利用上限に達しています',
   };
-  // 要ログイン+メール確認済み。失敗したら応答を送って null。
-  const verifiedUser = (req, res) => {
+  // 要ログイン。失敗したら応答を送って null。
+  // メール確認は求めない(招待リンクからの登録で確認前に参加するのと同じ扱い。招待リンク自体が参加の許可)。
+  const loggedInUser = (req, res) => {
     const id = resolveIdentity(req, { writeToken, repo: accounts, now: now() });
     if (id?.kind !== 'user') { err(res, 401, 'unauthorized', 'ログインが必要です'); return null; }
-    if (id.user.email_verified_at == null) {
-      err(res, 403, 'email_not_verified', 'メールアドレスを確認してから招待を使ってください'); return null;
-    }
     return id;
   };
 
@@ -125,7 +123,7 @@ export function createOrgsRoute({
   }
 
   async function handleInvitePreview(req, res, code) {
-    if (!verifiedUser(req, res)) return;
+    if (!loggedInUser(req, res)) return;
     const inv = accounts.getInviteByCode(code);
     const org = inv && accounts.getOrg(inv.org_id);
     if (!inv || !org) return err(res, 404, 'not_found', '招待が見つかりません');
@@ -136,7 +134,7 @@ export function createOrgsRoute({
   }
 
   async function handleInviteAccept(req, res, code) {
-    const id = verifiedUser(req, res); if (!id) return;
+    const id = loggedInUser(req, res); if (!id) return;
     const inv = accounts.getInviteByCode(code);
     if (!inv || !accounts.getOrg(inv.org_id)) return err(res, 404, 'not_found', '招待が見つかりません');
     const r = accounts.acceptInvite({ code, userId: id.user.id, now: now() });

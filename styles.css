@@ -801,6 +801,10 @@ body.view-roadmap #transport { display: none; }
 .rm-cadd-input { flex: 1; padding: 4px 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; }
 .rm-cadd-btn { border: 1px solid #ddd; background: #fafafa; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px; }
 
+/* 組織に所属していない個人アカウント(body.no-org)には進捗管理の中身を出さず、案内だけを出す */
+#progress-no-org { display: none; margin: 24px 16px; color: #555; }
+body.no-org #progress-no-org { display: block; }
+body.no-org #progress-bar, body.no-org #progress-nav, body.no-org #progress-content, body.no-org #progress-trash { display: none; }
 #progress-nav { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; border-bottom: 1px solid #eee; overflow-x: auto; }
 /* 十字4分割: 左上=目標 右上=課題 左下=発見 右下=推移。各象限は独立スクロール。 */
 #progress-content { flex: 1; overflow: hidden; padding: 16px; display: grid; position: relative;

@@ -95,8 +95,11 @@ export async function compatRoute(req, res, ctx) {
   // 所属外の X-Sailviz-Org でも 403 にせずログイン済みを返す(ホームに入れる)。
   if (path === '/api/session' && method === 'GET') {
     // users はログイン画面の候補表示用(ユーザー名のみ・パスワードは返さない)。
+    // noOrg: 個人アカウントで、どの組織にも所属していない(進捗管理などの組織の画面を出さない目印)。
+    const subject = ctx.getSubject();
     send(res, 200, {
-      loggedIn: isViewer(req, viewSecret, token) || ctx.getSubject()?.kind === 'user',
+      loggedIn: isViewer(req, viewSecret, token) || subject?.kind === 'user',
+      noOrg: subject?.kind === 'user' && !(subject.orgIds || []).length,
       gate: viewEnabled,
       users: viewEnabled ? [viewUser] : [],
     });

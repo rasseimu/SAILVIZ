@@ -23,7 +23,9 @@ export function orgMemberEntries(accounts, orgId) {
 // 主体(compatPrincipal.js の resolveSubject。読み書きされるデータの組織を決めるのと同じ判定)の名簿(src/members.js の形)。
 // 個人アカウントの主体で表示中の組織があればその組織のメンバー、それ以外(共有ログイン・閲覧ゲートの Cookie がある Web・
 // ファイル版)は従来の名簿。画面の候補と取込の検証をこの1つの判定にそろえる。
+// 個人アカウントで組織に所属していない(表示中の組織が無い)主体は空(従来の名簿=実在の部員名を見せない)。
 export function rosterForSubject(accounts, subject, activeOrgId) {
-  if (!accounts || subject?.kind !== 'user' || !activeOrgId) return legacyMemberList();
+  if (!accounts || subject?.kind !== 'user') return legacyMemberList();
+  if (!activeOrgId) return [];
   return orgRoster(orgMemberEntries(accounts, activeOrgId));
 }
