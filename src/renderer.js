@@ -1,7 +1,7 @@
 import { worldToScreen } from './viewport.js';
 import { project } from './projection.js';
 import { positionAt, positionOnTracksAt } from './interpolate.js';
-import { windowedSpeedAt } from './speedchart.js';
+import { windowedSpeedAt, MPS_TO_KT } from './speedchart.js';
 import { trackLookupTime } from './timeaxis.js';
 
 function toScreen(lat, lon, T) {
@@ -256,9 +256,9 @@ export function drawScene(ctx, state) {
     ctx.lineWidth = 2;
     ctx.strokeStyle = '#000';
     ctx.stroke();
-    // 現在の移動速度(m/s)をマーカー右上に表示。GPS(playhead)に同期。速度は GPS 座標±5秒(速度グラフと同じ)。
+    // 現在の移動速度(kt)をマーカー右上に表示。GPS(playhead)に同期。速度は GPS 座標±5秒(速度グラフと同じ)。
     const speed = windowedSpeedAt(tr.points, lookup);
-    if (speed != null) drawSpeedLabel(ctx, s, `${speed.toFixed(1)} m/s`, tr.color);
+    if (speed != null) drawSpeedLabel(ctx, s, `${(speed * MPS_TO_KT).toFixed(1)} kt`, tr.color);
   }
 
   // タグピン。lat/lon があればその座標に、無ければ基準トラックの絶対時刻位置を補間して配置。
