@@ -442,3 +442,67 @@ test('S2.5-P4: sensor-imports の matched は PUT できる器を選ぶ (他組�
   const c = await call(baseA, 'POST', `/api/sensor-imports/${encodeURIComponent(up.json.importId)}/commit`, { ck: cookie, body: { id: up.json.matched.id, boatNumber: '1234' } });
   assert.equal(c.status, 200, JSON.stringify(c.json));
 });
+
+// ---- GET /api/session: アカウントのセッションだけでもログイン済み(ホームに入れる)----
+const sessionOf = async (base, opts) => {
+  const r = await call(base, 'GET', '/api/session', opts);
+  assert.equal(r.status, 200);
+  return r.json.loggedIn;
+};
+// このテスト用のアカウント(合成メール)。トークンは呼ぶたびに新しく発行する。
+let sessSeq = 0;
+const mkSessionUser = (orgs = [ORG]) => {
+  const u = accounts.createUser({ email: `session${++sessSeq}@example.com`, name: 'テスト', affiliationText: 'テスト部', passwordHash: 'x', agreedAt: 1 });
+  for (const o of orgs) accounts.linkMember({ orgId: o, userId: u.id });
+  return u.id;
+};
+
+test('S1: /api/session はアカウントの Cookie(sailviz_session)・Bearer で loggedIn true、未ログインは false', { skip }, async () => {
+  for (const base of [baseA, baseB]) {
+    assert.equal(await sessionOf(base, { ck: `sailviz_session=${memberTok}` }), true, `${base} Cookie`);
+    assert.equal(await sessionOf(base, { auth: memberTok }), true, `${base} Bearer`);
+    assert.equal(await sessionOf(base, {}), false, `${base} 未ログイン`);
+  }
+});
+
+test('S2: 期限切れのアカウントトークンでは /api/session は loggedIn false', { skip }, async () => {
+  const { AUTH_TOKEN_TTL_MS } = await import('../server/domain/tokens.js');
+  const uid = mkSessionUser();
+  const expired = issueAuthToken(accounts, uid, Date.now() - AUTH_TOKEN_TTL_MS - 1000).token;
+  assert.equal(await sessionOf(baseA, { ck: `sailviz_session=${expired}` }), false);
+  assert.equal(await sessionOf(baseA, { auth: expired }), false);
+});
+
+test('S3: POST /api/auth/logout の後は同じ Cookie の /api/session が loggedIn false', { skip }, async () => {
+  const uid = mkSessionUser();
+  const ck = `sailviz_session=${issueAuthToken(accounts, uid).token}`;
+  assert.equal(await sessionOf(baseA, { ck }), true);
+  assert.equal((await call(baseA, 'POST', '/api/auth/logout', { ck })).status, 200);
+  assert.equal(await sessionOf(baseA, { ck }), false);
+});
+
+test('S4: 所属外の X-Sailviz-Org でも /api/session は 200・loggedIn true(旧 API の読みは 403 org_forbidden)', { skip }, async () => {
+  const headers = { cookie: `sailviz_session=${memberTok}`, 'x-sailviz-org': OTHER };
+  const s = await fetch(`${baseA}/api/session`, { headers });
+  assert.equal(s.status, 200);
+  assert.equal((await s.json()).loggedIn, true);
+  const p = await fetch(`${baseA}/api/projects`, { headers });
+  assert.equal(p.status, 403);
+  assert.equal((await p.json()).error, 'org_forbidden');
+});
+
+test('S5: 共有ログインの Cookie は MIGRATION_ORG_ID の有無によらず loggedIn true、誤った Bearer は false', { skip }, async () => {
+  assert.equal(await sessionOf(baseA, { ck: cookie }), true);
+  assert.equal(await sessionOf(baseB, { ck: await loginCookie(baseB) }), true);
+  assert.equal(await sessionOf(baseA, { auth: 'wrong' }), false);
+  assert.equal(await sessionOf(baseB, { auth: 'wrong' }), false);
+});
+
+test('S6: 削除済みユーザーのトークンでは /api/session は loggedIn false', { skip }, async () => {
+  const uid = mkSessionUser();
+  const tok = issueAuthToken(accounts, uid).token;
+  assert.equal(await sessionOf(baseA, { auth: tok }), true);
+  accounts.markUserDeleted(uid);
+  assert.equal(await sessionOf(baseA, { ck: `sailviz_session=${tok}` }), false);
+  assert.equal(await sessionOf(baseA, { auth: tok }), false);
+});

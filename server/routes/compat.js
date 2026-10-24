@@ -87,10 +87,12 @@ export async function compatRoute(req, res, ctx) {
   if (path === '/api/auth') { send(res, 200, { unlocked: isAuthorized(req, token) }); return true; }
 
   // 閲覧セッションの状態。ゲート無効時は常にログイン済み扱い。
+  // 閲覧ゲート Cookie・書込トークン・アカウントのセッション(Cookie sailviz_session / Bearer)を見る。
+  // 所属外の X-Sailviz-Org でも 403 にせずログイン済みを返す(ホームに入れる)。
   if (path === '/api/session' && method === 'GET') {
     // users はログイン画面の候補表示用(ユーザー名のみ・パスワードは返さない)。
     send(res, 200, {
-      loggedIn: isViewer(req, viewSecret, token),
+      loggedIn: isViewer(req, viewSecret, token) || ctx.getSubject()?.kind === 'user',
       gate: viewEnabled,
       users: viewEnabled ? [viewUser] : [],
     });
