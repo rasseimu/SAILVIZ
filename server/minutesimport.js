@@ -1,10 +1,11 @@
 // スマホ議事録 commit の純ロジック(HTTP 非依存)。node --test 可能。
-import { memberList } from '../src/members.js';
+import { legacyMemberList } from '../src/members.js';
 import { createReflection } from '../src/reflections.js';
 import { PROJECT_VERSION } from '../src/project.js';
 
 // commit 行のバリデーション。問題があれば理由文字列、無ければ null。
-export function validateCommitRows(rows, practiceDate, roster = memberList()) {
+// roster は取込先の名簿(orgMembers.js の rosterForSubject)。省略時は従来の名簿。
+export function validateCommitRows(rows, practiceDate, roster = legacyMemberList()) {
   if (!Number.isFinite(practiceDate)) return 'practiceDate が数値でない';
   if (!Array.isArray(rows) || rows.length === 0) return 'rows が空';
   const names = new Set(roster.map((m) => m.fullName));

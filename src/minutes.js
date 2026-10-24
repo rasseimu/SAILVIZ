@@ -67,23 +67,34 @@ export function parseMinutes(text) {
   return blocks;
 }
 
-// 見出し名/フルネームヒントを名簿へ照合。優先: fullname → family → kana → given。
+// 見出し名/フルネームヒントを名簿へ照合。優先: fullname(表示名を含む) → family → kana → given。
+// 組織の名簿では姓・読みが空('')の人がいるので、空の項目では一致させない。
 export function matchMember(headerName, fullNameHint, roster = memberList()) {
   const norm = (s) => String(s || '').replace(/\s+/g, '');
   const hint = norm(fullNameHint);
   const head = String(headerName || '').trim();
+  const fullOf = (m, x) => norm(m.fullName) === x || (!!m.displayName && norm(m.displayName) === x);
+  // 表示名(アカウント名)の姓・名。旧名簿の氏名で結び付いた人は family/given が旧名簿のものなので、アカウント名でも照合する
+  const dn = (m) => {
+    const p = String(m.displayName || '').trim().split(/\s+/).filter(Boolean);
+    return p.length > 1 ? { family: p[0], given: p.slice(1).join(' ') } : { family: '', given: p[0] || '' };
+  };
+  const famOf = (m) => [m.family, dn(m).family].filter(Boolean);
+  const givenOf = (m) => [m.given, dn(m).given].filter(Boolean);
   if (hint) {
-    const byFull = roster.find((m) => norm(m.fullName) === hint);
+    const byFull = roster.find((m) => fullOf(m, hint));
     if (byFull) return { member: byFull, how: 'fullname' };
-    const byFamHint = roster.find((m) => hint.startsWith(m.family) || m.family === hint);
+    const byFamHint = roster.find((m) => famOf(m).some((f) => hint.startsWith(f)));
     if (byFamHint) return { member: byFamHint, how: 'family' };
   }
-  const byFam = roster.find((m) => head === m.family || head.startsWith(m.family));
+  const byHeadFull = head ? roster.find((m) => fullOf(m, norm(head))) : null;
+  if (byHeadFull) return { member: byHeadFull, how: 'fullname' };
+  const byFam = roster.find((m) => famOf(m).some((f) => head.startsWith(f)));
   if (byFam) return { member: byFam, how: 'family' };
   const kana = toHiragana(head);
-  const byKana = roster.find((m) => m.kana === kana);
+  const byKana = kana ? roster.find((m) => m.kana && m.kana === kana) : null;
   if (byKana) return { member: byKana, how: 'kana' };
-  const byGiven = roster.find((m) => m.given === head);
+  const byGiven = head ? roster.find((m) => givenOf(m).includes(head)) : null;
   if (byGiven) return { member: byGiven, how: 'given' };
   return { member: null, how: 'none' };
 }
