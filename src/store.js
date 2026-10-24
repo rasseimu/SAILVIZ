@@ -21,7 +21,12 @@ export function createStore(api) {
     async lock() { await api.apiLock(); unlocked = false; },
     session: () => api.apiSession(),
     login: (user, pw) => api.apiLogin(user, pw),
-    logout: () => api.apiLogout(),
+    // 共有ログインとアカウントのセッションの両方を失効させる。片方が失敗しても他方は呼ぶ。
+    // 共有ログアウトの失敗は従来どおり呼び出し側へ投げる。
+    async logout() {
+      const [shared] = await Promise.allSettled([api.apiLogout(), api.apiAccountLogout()]);
+      if (shared.status === 'rejected') throw shared.reason;
+    },
     me: () => api.apiMe(),
   };
 }

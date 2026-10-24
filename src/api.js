@@ -30,9 +30,10 @@ export function lockActiveOrg(id) {
 
 // すべての fetch はここを通す。所属していない組織を指していた(403 org_forbidden)ら、
 // 表示中の組織を消してから投げ、以後この画面からは送らない(次の起動で /api/me の先頭に戻る)。
-async function request(path, init = {}) {
-  if (blocked) throw new Error(RELOAD_MESSAGE);
-  const orgId = locked ? lockedOrgId : getActiveOrgId();
+// noOrg: 組織のデータに触れない要求(ログアウト)。blocked でも送り、X-Sailviz-Org を付けない。
+async function request(path, init = {}, { noOrg = false } = {}) {
+  if (blocked && !noOrg) throw new Error(RELOAD_MESSAGE);
+  const orgId = noOrg ? null : (locked ? lockedOrgId : getActiveOrgId());
   const headers = orgId ? { ...init.headers, 'X-Sailviz-Org': orgId } : init.headers;
   const res = await fetch(path, { ...OPTS, ...init, ...(headers ? { headers } : {}) });
   if (res.status === 403) {
@@ -53,12 +54,12 @@ async function getJson(path) {
   return res.json();
 }
 
-async function send(path, method, obj) {
+async function send(path, method, obj, opts) {
   return request(path, {
     method,
     headers: { 'content-type': 'application/json' },
     body: obj === undefined ? undefined : JSON.stringify(obj),
-  });
+  }, opts);
 }
 
 // 練習は ID で引く(DB 版は pd_…、ファイル版はファイル名)。表示は一覧の name・label を使う。
@@ -123,7 +124,11 @@ export async function apiLogin(user, password) {
   if (!res.ok) return { ok: false, error: `ログインに失敗 (${res.status})` };
   return { ok: true };
 }
-export async function apiLogout() { await send('/api/logout', 'POST'); }
+export async function apiLogout() { await send('/api/logout', 'POST', undefined, { noOrg: true }); }
+// アカウントのセッションも失効させる。未ログイン(401)・ファイル版(503)・通信失敗は無視する。
+export async function apiAccountLogout() {
+  try { await send('/api/auth/logout', 'POST', undefined, { noOrg: true }); } catch { /* 無視 */ }
+}
 
 export async function apiCommitMinutes({ practiceDate, rows }) {
   const res = await send('/api/minutes-imports/commit', 'POST', { practiceDate, rows });

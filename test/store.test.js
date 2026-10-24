@@ -51,3 +51,34 @@ test('progress overlay round-trip', async () => {
   await store.writeProgress({ r1: { issueStage: 1 } });
   assert.deepEqual(await store.readProgress(), { r1: { issueStage: 1 } });
 });
+
+test('logout calls both shared logout and account logout', async () => {
+  const calls = [];
+  const store = createStore({
+    ...fakeApi(),
+    apiLogout: async () => { calls.push('shared'); },
+    apiAccountLogout: async () => { calls.push('account'); },
+  });
+  await store.logout();
+  assert.deepEqual(calls.sort(), ['account', 'shared']);
+});
+
+test('logout still calls the other when one rejects (shared failure is propagated as before)', async () => {
+  let accountCalled = false;
+  const s1 = createStore({
+    ...fakeApi(),
+    apiLogout: async () => { throw new Error('shared down'); },
+    apiAccountLogout: async () => { accountCalled = true; },
+  });
+  await assert.rejects(s1.logout(), /shared down/);
+  assert.equal(accountCalled, true);
+
+  let sharedCalled = false;
+  const s2 = createStore({
+    ...fakeApi(),
+    apiLogout: async () => { sharedCalled = true; },
+    apiAccountLogout: async () => { throw new Error('account down'); },
+  });
+  await s2.logout();
+  assert.equal(sharedCalled, true);
+});

@@ -157,6 +157,23 @@ test('api: org_forbidden のあとは、このページから要求を送らな�
   assert.equal(calls.length, 0);
 });
 
+test('api: org_forbidden のあとでもログアウト(共有・アカウント)は送る。組織ヘッダーは付けない', async () => {
+  const api = await freshApi();
+  setActiveOrgId('org_gone');
+  api.lockActiveOrg('org_gone');
+  recordFetch(() => ({ ok: false, status: 403, json: async () => ({ error: 'org_forbidden' }) }));
+  await assert.rejects(() => api.apiListProjects());
+  const calls = recordFetch(() => okJson({ ok: true }));
+  await api.apiLogout();
+  await api.apiAccountLogout();
+  assert.deepEqual(calls.map((c) => [c.url, c.init.method]), [['/api/logout', 'POST'], ['/api/auth/logout', 'POST']]);
+  assert.equal(orgHeader(calls[0].init), undefined);
+  assert.equal(orgHeader(calls[1].init), undefined);
+  // 他の要求は引き続き送らない
+  await assert.rejects(() => api.apiListProjects(), /読み込み直して/);
+  assert.equal(calls.length, 2);
+});
+
 test('api: 組織が無いページ(ファイル版・アカウント無し)はヘッダー無しで普通に動く', async () => {
   const api = await freshApi();
   api.lockActiveOrg(null);

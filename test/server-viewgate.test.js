@@ -42,6 +42,12 @@ test('session exposes configured usernames (no password)', async () => {
   assert.equal('password' in s, false);
 });
 
+// ファイル版にはアカウントが無いので、sailviz_session Cookie だけではログイン済みにならない。
+test('session stays logged out with only a sailviz_session cookie (file store)', async () => {
+  const s = await (await fetch(`${base}/api/session`, { headers: { cookie: 'sailviz_session=dummy-session-token' } })).json();
+  assert.equal(s.loggedIn, false);
+});
+
 test('GET data is blocked without login', async () => {
   assert.equal((await fetch(`${base}/api/projects`)).status, 401);
   assert.equal((await fetch(`${base}/api/summaries`)).status, 401);
