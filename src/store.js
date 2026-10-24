@@ -21,6 +21,15 @@ export function createStore(api) {
     async lock() { await api.apiLock(); unlocked = false; },
     session: () => api.apiSession(),
     login: (user, pw) => api.apiLogin(user, pw),
+    // ランディングのログイン: 部内共有のログインを先に試し、だめでメールアドレスの形ならアカウントで試す。
+    // 戻り値 { ok, kind: 'shared' | 'account', error }。共有ログインが無効なサーバーは共有ログインを 401 で断る。
+    async loginAny(id, pw) {
+      const shared = await api.apiLogin(id, pw);
+      if (shared.ok) return { ok: true, kind: 'shared' };
+      if (!String(id).includes('@')) return { ok: false, error: shared.error };
+      const account = await api.apiAccountLogin(id, pw);
+      return account.ok ? { ok: true, kind: 'account' } : { ok: false, error: account.error };
+    },
     // 共有ログインとアカウントのセッションの両方を失効させる。片方が失敗しても他方は呼ぶ。
     // 共有ログアウトの失敗は従来どおり呼び出し側へ投げる。
     async logout() {

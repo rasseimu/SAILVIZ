@@ -1626,7 +1626,9 @@ function openContact() { contactDialog.showModal(); }
 viewLoginForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   viewLoginError.hidden = true;
-  const r = await store.login(viewLoginUser.value.trim(), viewLoginPassword.value);
+  const r = await store.loginAny(viewLoginUser.value.trim(), viewLoginPassword.value);
+  // アカウントでログインしたら読み込み直す(所属組織・名簿・組織未所属の判定を起動時の手順で決め直す)。
+  if (r.ok && r.kind === 'account') { location.reload(); return; }
   if (r.ok) { if (noOrgAccount) resetAccountOrg(); noOrgAccount = false; viewLoginDialog.close(); enterApp(); } // 共有ログインは組織(芝浦)のメンバー
   else { viewLoginError.textContent = r.error || 'ログインに失敗しました'; viewLoginError.hidden = false; }
 });

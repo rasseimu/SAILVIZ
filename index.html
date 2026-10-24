@@ -57,7 +57,7 @@
         <span class="lt-brand"><img src="src/logo.png" alt="" /> SailViz</span>
         <span class="lt-actions">
           <a id="landing-account" class="lp-btn lp-btn-ghost" href="/account" title="個人のアカウント(メールアドレスで登録・ログイン)">アカウント</a>
-          <button type="button" id="landing-login" class="lp-btn lp-btn-ghost" title="部の共有パスワードでログイン">ログイン</button>
+          <button type="button" id="landing-login" class="lp-btn lp-btn-ghost" title="メールアドレス(または部内共有アカウント)でログイン">ログイン</button>
           <button type="button" id="landing-register" class="lp-btn lp-btn-primary">登録</button>
         </span>
       </nav>
@@ -72,7 +72,7 @@
           <button type="button" class="lp-btn lp-btn-primary lp-btn-lg" data-lp-login>ログインして練習データを見る</button>
           <button type="button" class="lp-btn lp-btn-ghost lp-btn-lg" data-lp-register>導入について問い合わせる</button>
         </div>
-        <p class="lh-note">既存データは部内共有アカウントでログインしてご覧いただけます。</p>
+        <p class="lh-note">メールアドレスのアカウント、または部内共有アカウントでログインしてご覧いただけます。</p>
       </div>
     </div>
 
@@ -173,10 +173,10 @@
   <dialog id="viewLoginDialog" class="lp-dialog">
     <form method="dialog" id="viewLoginForm">
       <h3>ログイン</h3>
-      <label>ユーザー名<input id="viewLoginUser" type="text" autocomplete="username" list="viewLoginUserList" required /></label>
+      <label>メールアドレス(部内共有アカウントはユーザー名)<input id="viewLoginUser" type="text" autocomplete="username" list="viewLoginUserList" required /></label>
       <datalist id="viewLoginUserList"></datalist>
       <label>パスワード<input id="viewLoginPassword" type="password" autocomplete="current-password" required /></label>
-      <p id="viewLoginError" class="error" hidden>ユーザー名またはパスワードが違います</p>
+      <p id="viewLoginError" class="error" hidden>メールアドレス(ユーザー名)またはパスワードが違います</p>
       <menu>
         <button type="button" id="viewLoginCancel" class="lp-btn lp-btn-ghost">キャンセル</button>
         <button type="submit" id="viewLoginSubmit" class="lp-btn lp-btn-primary">ログイン</button>

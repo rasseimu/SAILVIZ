@@ -226,6 +226,9 @@ test('(3) 閲覧ゲート無効でもアカウント機能がある版は、未�
     assert.equal(sess.json.loggedIn, false);
     assert.equal(sess.json.gate, false);
     assert.equal((await call(base, 'GET', '/api/session', { auth: TOKEN })).json.loggedIn, true);
+    // 共有ログインは無いので、成功を装わず 401(Cookie の無い「ログイン済み」にしない)
+    const login = await call(base, 'POST', '/api/login', { body: { user: 'x', password: 'y' } });
+    assert.equal(login.status, 401);
     assert.equal((await call(base, 'GET', '/api/projects', { auth: TOKEN })).status, 200);
     assert.equal((await call(base, 'PUT', `/api/projects/${pid(D4)}`, { body: proj() })).status, 401);
     assert.equal((await call(base, 'PUT', `/api/projects/${pid(D4)}`, { body: proj({ reflections: [refl('rAll', '全部見える')] }), auth: TOKEN })).status, 200);

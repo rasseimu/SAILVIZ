@@ -109,7 +109,12 @@ export async function compatRoute(req, res, ctx) {
 
   // 閲覧ログイン。user/password を照合し、成功で sailviz_view Cookie を発行。
   if (path === '/api/login' && method === 'POST') {
-    if (!viewEnabled) { send(res, 200, { loggedIn: true }); return true; }
+    if (!viewEnabled) {
+      // アカウント機能がある版でゲートが無効なら、共有ログインは無い(成功を装うと Cookie が無いまま 401 になる)。
+      if (accounts) send(res, 401, { error: 'メールアドレスとパスワードでログインしてください' });
+      else send(res, 200, { loggedIn: true });
+      return true;
+    }
     const body = await readBody(req) || {};
     if (body.user === viewUser && body.password === viewPassword) {
       send(res, 200, { loggedIn: true }, {
