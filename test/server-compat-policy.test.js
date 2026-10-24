@@ -507,7 +507,29 @@ test('S6: 削除済みユーザーのトークンでは /api/session は loggedI
   assert.equal(await sessionOf(baseA, { auth: tok }), false);
 });
 
+test('S7: /api/session の noOrg は組織に所属していないアカウントだけ true(共有ログイン・所属ありは false)', { skip }, async () => {
+  const noOrgOf = async (opts) => (await call(baseA, 'GET', '/api/session', opts)).json.noOrg;
+  const lone = issueAuthToken(accounts, mkSessionUser([])).token;
+  assert.equal(await noOrgOf({ ck: `sailviz_session=${lone}` }), true);
+  assert.equal(await noOrgOf({ auth: lone }), true);
+  assert.equal(await noOrgOf({ auth: memberTok }), false);
+  assert.equal(await noOrgOf({ ck: cookie }), false);
+  assert.equal(await noOrgOf({}), false);
+});
+
 // ===== メンバー候補(GET /api/members): 読み書きの主体と同じ判定で名簿を決める =====
+test('GET /api/members: 組織に所属していないアカウントは空(従来の名簿の部員名を返さない)。進捗も空', { skip }, async () => {
+  const lone = issueAuthToken(accounts, mkSessionUser([])).token;
+  for (const opts of [{ auth: lone }, { ck: `sailviz_session=${lone}` }]) {
+    const r = await call(baseA, 'GET', '/api/members', opts);
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json, []);
+    const p = await call(baseA, 'GET', '/api/overlays/progress', opts);
+    assert.equal(p.status, 200);
+    assert.deepEqual(p.json, {});
+  }
+});
+
 test('GET /api/members: 共有ログイン(閲覧ゲートの Cookie)・書込トークンは従来の名簿、アカウントは表示中の組織のメンバー', { skip }, async () => {
   const { legacyMemberList } = await import('../src/members.js');
   const legacy = legacyMemberList().map((m) => m.fullName);

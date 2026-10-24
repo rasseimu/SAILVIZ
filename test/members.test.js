@@ -72,14 +72,14 @@ test('orgRoster: 旧名簿の氏名があればそれをキーにし(既存の�
   assert.deepEqual([x.fullName, x.displayName, x.family, x.given], ['旧 名前', '佐々木 次郎', '佐々木', '次郎']);
 });
 
-test('setMemberRoster / memberList / memberLabel: 組織の名簿があればそれ、無ければ従来の名簿', () => {
+test('setMemberRoster / memberList / memberLabel: 組織の名簿があればそれ(空も空のまま)、null なら従来の名簿', () => {
   try {
     setMemberRoster(orgRoster([{ userId: 'u1', name: '山田 太郎', legacyName: '旧 太郎' }]));
     assert.deepEqual(memberList().map((m) => m.fullName), ['旧 太郎']);
     assert.equal(memberLabel('旧 太郎'), '山田 太郎');
     assert.equal(memberLabel('名簿外'), '名簿外');
-    setMemberRoster([]); // 空なら従来の名簿へ戻す
-    assert.equal(memberList().length, MEMBERS.length);
+    setMemberRoster([]); // 空(組織に所属していないアカウント)は空のまま。従来の名簿へ戻さない
+    assert.deepEqual(memberList(), []);
   } finally {
     setMemberRoster(null);
   }
