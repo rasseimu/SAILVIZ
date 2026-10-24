@@ -22,10 +22,18 @@ test('書込トークン (Bearer / Cookie sailviz_token) → 共有ログイン(
   }
 });
 
-test('閲覧ゲート無効: Cookie なしでも読める共有ログイン(書込不可)。トークンがあれば書込可', () => {
+test('閲覧ゲート無効(アカウント機能なし=ファイル版): Cookie なしでも読める共有ログイン(書込不可)。トークンがあれば書込可', () => {
   const open = { ...base, viewEnabled: false, viewSecret: null };
   assert.equal(resolveSubject(req(), open).canWrite, false);
   assert.equal(resolveSubject(req({ authorization: `Bearer ${TOKEN}` }), open).canWrite, true);
+});
+
+test('閲覧ゲート無効でもアカウント機能があれば、未ログインは null(共有ログインにしない)。トークンは共有ログイン', () => {
+  const accounts = { getAuthTokenByHash: () => null, listMembershipsOfUser: () => [] };
+  const open = { ...base, viewEnabled: false, viewSecret: null, accounts };
+  assert.equal(resolveSubject(req(), open), null);
+  assert.equal(resolveSubject(req({ cookie: 'sailviz_view=anything' }), open), null);
+  assert.equal(resolveSubject(req({ authorization: `Bearer ${TOKEN}` }), open).kind, 'legacy');
 });
 
 test('未ログイン・誤ったトークンは null', () => {

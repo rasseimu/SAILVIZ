@@ -215,11 +215,18 @@ test('(3) 新しい器は MIGRATION_ORG_ID の組織で作られる', { skip }, 
   assert.equal(pd.org_id, ORG);
 });
 
-test('(3) 書込権限なし(共有トークン/閲覧ゲート無効)の PUT は 401', { skip }, async () => {
+test('(3) 閲覧ゲート無効でもアカウント機能がある版は、未ログインを共有ログインにしない(読みも 401・ランディングへ)。書込トークンなら書ける', { skip }, async () => {
   const apiOpen = createApi({ repo, token: TOKEN, accounts, migrationOrgId: ORG }); // 閲覧ゲート無効
   const { s, base } = await listen(apiOpen);
   try {
-    assert.equal((await call(base, 'GET', '/api/projects')).status, 200);
+    assert.equal((await call(base, 'GET', '/api/projects')).status, 401);
+    assert.equal((await call(base, 'GET', '/api/overlays/progress')).status, 401);
+    assert.equal((await call(base, 'GET', '/api/members')).status, 401);
+    const sess = await call(base, 'GET', '/api/session');
+    assert.equal(sess.json.loggedIn, false);
+    assert.equal(sess.json.gate, false);
+    assert.equal((await call(base, 'GET', '/api/session', { auth: TOKEN })).json.loggedIn, true);
+    assert.equal((await call(base, 'GET', '/api/projects', { auth: TOKEN })).status, 200);
     assert.equal((await call(base, 'PUT', `/api/projects/${pid(D4)}`, { body: proj() })).status, 401);
     assert.equal((await call(base, 'PUT', `/api/projects/${pid(D4)}`, { body: proj({ reflections: [refl('rAll', '全部見える')] }), auth: TOKEN })).status, 200);
   } finally { await new Promise((r) => s.close(r)); }

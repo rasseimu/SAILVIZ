@@ -3,7 +3,7 @@
 // api.js から挙動不変で切り出した。判定順序・バリデーション・戻り値をそのまま保つ。
 // 処理したら true、どのパスにも一致しなければ false(呼び出し側が 404 を返す)。
 import { send, readBody } from './http.js';
-import { isAuthorized, isViewer } from '../auth.js';
+import { isAuthorized } from '../auth.js';
 import {
   OVERLAY_NAMES, isValidProjectName, isValidProjectId, isValidImportId, isValidUploadFile,
 } from '../storage.js';
@@ -98,7 +98,8 @@ export async function compatRoute(req, res, ctx) {
     // noOrg: 個人アカウントで、どの組織にも所属していない(進捗管理などの組織の画面を出さない目印)。
     const subject = ctx.getSubject();
     send(res, 200, {
-      loggedIn: isViewer(req, viewSecret, token) || subject?.kind === 'user',
+      // 主体があればログイン済み(閲覧ゲートの Cookie・書込トークン・アカウント。ゲート無効のファイル版は誰でも)。
+      loggedIn: subject != null,
       noOrg: subject?.kind === 'user' && !(subject.orgIds || []).length,
       gate: viewEnabled,
       users: viewEnabled ? [viewUser] : [],

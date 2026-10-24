@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { importFromFiles } from '../server/db/importFromFiles.js';
 import { migrate, loadMigrations } from '../server/db/migrate.js';
 import { openDb } from '../server/db/connection.js';
@@ -99,7 +99,11 @@ async function measure(storage, dataDir, name, orgId = null) {
   delete env.MIGRATION_ORG_ID;
   if (storage === 'db' && orgId) env.MIGRATION_ORG_ID = orgId;
   delete env.NODE_ENV; delete env.SAILVIZ_VIEW_USER; delete env.SAILVIZ_VIEW_PASSWORD;
-  delete env.SAILVIZ_WRITE_TOKEN; delete env.GEMINI_API_KEY;
+  delete env.GEMINI_API_KEY;
+  // DB 版(アカウント機能あり)は閲覧ゲートが無効でも未ログインでは読めないので、使い捨ての書込トークン(共有ログイン)で読む。
+  const token = randomBytes(16).toString('hex');
+  env.SAILVIZ_WRITE_TOKEN = token;
+  const headers = { authorization: `Bearer ${token}` };
   // stderr は継承して、子の失敗理由が見えるようにする
   const child = spawn(process.execPath, [join(ROOT, 'server', 'index.js')], { env, stdio: ['ignore', 'ignore', 'inherit'] });
   children.add(child);
@@ -108,13 +112,13 @@ async function measure(storage, dataDir, name, orgId = null) {
   try {
     await waitUp(port, exited);
     // 1 件の取得は練習 ID で引く(DB 版は pd_…、ファイル版はファイル名)。一覧から名前で ID を探す。
-    const list = await (await fetch(`http://127.0.0.1:${port}/api/projects`)).json();
+    const list = await (await fetch(`http://127.0.0.1:${port}/api/projects`, { headers })).json();
     const id = (Array.isArray(list) ? list.find((p) => p.name === name)?.id : null) ?? name;
     const url = `http://127.0.0.1:${port}/api/projects/${encodeURIComponent(id)}`;
     const times = []; let body = null; let status = 0;
     for (let i = 0; i < WARMUP + RUNS; i++) {
       const t0 = performance.now();
-      const r = await fetch(url);
+      const r = await fetch(url, { headers });
       const text = await r.text();
       const dt = performance.now() - t0;
       status = r.status; body = text;

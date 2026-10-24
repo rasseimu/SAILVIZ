@@ -3,7 +3,7 @@
 //   共有の書込トークン(Bearer / Cookie sailviz_token) → legacySharedPrincipal({orgId, canWrite: true})
 //   アカウントのトークン(Bearer / Cookie sailviz_session) → user(userId, 所属組織, 表示中の組織)
 //        表示中の組織 = ヘッダー X-Sailviz-Org(所属外は orgForbidden: true)、なければ所属の先頭。共有ログインはヘッダーを無視。
-//   閲覧ゲートの Cookie sailviz_view(ゲート無効時は誰でも) → legacySharedPrincipal
+//   閲覧ゲートの Cookie sailviz_view(ゲート無効時は、アカウント機能が無い版(ファイル版)に限り誰でも) → legacySharedPrincipal
 //        canWrite は「閲覧ゲート有効なら true(閲覧ログイン=書き込み可。現行の requireWrite と同じ)、無効なら false」
 //   どれでもなければ null(未ログイン。呼び出し側が 401)。
 // orgId は MIGRATION_ORG_ID(未設定なら null = 共有ログインは何も読めない・書けない)。
@@ -31,6 +31,8 @@ export function resolveSubject(req, {
     if (orgIds.includes(wanted)) return user(id.user.id, orgIds, wanted);
     return { ...user(id.user.id, orgIds, null), orgForbidden: true };
   }
+  // アカウント機能がある版では、閲覧ゲートが無効でも未ログインの人を共有ログイン(組織のデータが見える)にしない。
+  if (!viewEnabled && accounts) return null;
   if (isViewer(req, viewSecret, token)) return legacySharedPrincipal({ orgId, canWrite: !!viewEnabled });
   return null;
 }
