@@ -506,3 +506,32 @@ test('S6: 削除済みユーザーのトークンでは /api/session は loggedI
   assert.equal(await sessionOf(baseA, { ck: `sailviz_session=${tok}` }), false);
   assert.equal(await sessionOf(baseA, { auth: tok }), false);
 });
+
+// ===== メンバー候補(GET /api/members): 読み書きの主体と同じ判定で名簿を決める =====
+test('GET /api/members: 共有ログイン(閲覧ゲートの Cookie)・書込トークンは従来の名簿、アカウントは表示中の組織のメンバー', { skip }, async () => {
+  const { legacyMemberList } = await import('../src/members.js');
+  const legacy = legacyMemberList().map((m) => m.fullName);
+  const viaCookie = await call(baseA, 'GET', '/api/members', { ck: cookie });
+  assert.equal(viaCookie.status, 200);
+  assert.deepEqual(viaCookie.json.map((m) => m.fullName), legacy);
+  assert.deepEqual((await call(baseA, 'GET', '/api/members', { auth: TOKEN })).json.map((m) => m.fullName), legacy);
+  const viaUser = await call(baseA, 'GET', '/api/members', { auth: outsiderTok });
+  assert.equal(viaUser.status, 200);
+  assert.deepEqual(viaUser.json.map((m) => [m.fullName, m.displayName]), [['テスト', 'テスト']]); // OTHER の唯一のメンバー
+  assert.equal((await call(baseA, 'GET', '/api/members')).status, 401);
+});
+
+test('GET /api/members: 閲覧ゲートの Cookie とアカウントのセッション Cookie の両方がある Web は、データと同じく共有ログイン扱い(従来の名簿)', { skip }, async () => {
+  const { legacyMemberList } = await import('../src/members.js');
+  // 対照: セッション Cookie だけならアカウント(OTHER のメンバー)
+  const onlySession = await call(baseA, 'GET', '/api/members', { ck: `sailviz_session=${outsiderTok}` });
+  assert.deepEqual(onlySession.json.map((m) => m.fullName), ['テスト']);
+  const both = `${cookie}; sailviz_session=${outsiderTok}`;
+  const r = await call(baseA, 'GET', '/api/members', { ck: both });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.json.map((m) => m.fullName), legacyMemberList().map((m) => m.fullName));
+  // 議事録の取込の検証も同じ名簿: 従来の名簿の名前が通る
+  const day = Date.UTC(2026, 6, 1, 15, 0, 0);
+  const ok = await call(baseA, 'POST', '/api/minutes-imports/commit', { ck: both, body: { practiceDate: day, rows: [{ fullName: legacyMemberList()[0].fullName, goal: '両方の Cookie' }] } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.json));
+});

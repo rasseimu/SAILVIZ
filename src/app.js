@@ -19,6 +19,7 @@ import { minuteWinnersDetailed } from './vmgminute.js';
 import { assessComparison, formatConfidenceLabel, windAxisReasonRows } from './analysisconfidence.js';
 import { nextRotation, rotatedFitBox } from './videoview.js';
 import { memberList, filterMembers } from './members.js';
+import { loadMemberRoster } from './memberroster.js';
 import { parseMinutes, matchMember, parseMinutesDate } from './minutes.js';
 import { jstWallToMs, msToJstWall } from './time.js';
 import { DIR_NAMES, fetchWind } from './wind.js';
@@ -1466,6 +1467,8 @@ function enterApp() { showTop(); }
   // このページの組織をここで固定する(以後の読み書きはすべてこの組織。別タブ等で変わったら読み込み直す)。
   // me が取れなかったときも覚えている組織で固定する(ヘッダー無しで送って所属の先頭へ書かない)。
   lockActiveOrg(getActiveOrgId());
+  // 反省・議事録・進捗のメンバー候補(サーバーが読み書きの主体と同じ判定で決める。取れなければ従来の名簿のまま)
+  if (sess.loggedIn) await loadMemberRoster();
   if (sess.loggedIn) enterApp(); else showLanding();
 })();
 
@@ -2280,7 +2283,7 @@ function renderMention() {
   mention.active = true;
   box.innerHTML = mention.items.map((m, i) =>
     `<li data-i="${i}" class="${i === mention.index ? 'active' : ''}">`
-    + `${escapeHtml(m.fullName)}<span class="m-kana">${escapeHtml(m.kana)}</span></li>`).join('');
+    + `${escapeHtml(m.displayName ?? m.fullName)}<span class="m-kana">${escapeHtml(m.kana)}</span></li>`).join('');
   box.classList.remove('hidden');
   box.querySelectorAll('li').forEach((li) =>
     li.addEventListener('mousedown', (e) => { // mousedownでtextareaのblur前に確定
@@ -2396,7 +2399,7 @@ function renderImportPreview(roster = memberList()) {
   const el = $('import-preview');
   if (!importRows.length) { el.innerHTML = '<p>議事録を入力するとプレビューされます。</p>'; return; }
   const opts = (sel) => ['<option value="">(未割当)</option>']
-    .concat(roster.map((m) => `<option value="${escapeHtml(m.fullName)}"${m.fullName === sel ? ' selected' : ''}>${escapeHtml(m.fullName)}</option>`)).join('');
+    .concat(roster.map((m) => `<option value="${escapeHtml(m.fullName)}"${m.fullName === sel ? ' selected' : ''}>${escapeHtml(m.displayName ?? m.fullName)}</option>`)).join('');
   el.innerHTML = importRows.map((row, i) => {
     const b = row.block;
     return `<div class="import-row${row.memberFullName ? '' : ' unmatched'}">`

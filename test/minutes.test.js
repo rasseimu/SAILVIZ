@@ -155,3 +155,22 @@ test('buildMinutesSystemPrompt は全部員の fullName を含む', () => {
   for (const m of memberList()) assert.ok(s.includes(m.fullName), `${m.fullName} が無い`);
   assert.match(s, /JSON/);
 });
+
+test('matchMember: 組織の名簿(読み・姓が空の人を含む)。表示名で一致し、空の姓・読みは誰にでも一致しない', async () => {
+  const { orgRoster } = await import('../src/members.js');
+  const roster = orgRoster([{ userId: 'u1', name: 'Hanako' }, { userId: 'u2', name: '山田 太郎' }]);
+  assert.equal(matchMember('山田', null, roster).member.id, 'u2'); // 姓
+  assert.equal(matchMember('Hanako', null, roster).member.id, 'u1'); // 表示名(姓が空)
+  assert.equal(matchMember('太郎', '山田太郎', roster).member.id, 'u2'); // フルネームのヒント
+  assert.equal(matchMember('鈴木', null, roster).member, null); // 空の姓に引っかからない
+  assert.equal(matchMember('', null, roster).member, null);
+});
+
+test('matchMember: 旧名簿の氏名で結び付いた人は、アカウント名の姓・名でも一致する', async () => {
+  const { orgRoster, legacyMemberList } = await import('../src/members.js');
+  const old = legacyMemberList()[0];
+  const roster = orgRoster([{ userId: 'u1', name: '佐々木 花子', legacyName: old.fullName }]);
+  assert.equal(matchMember('佐々木', null, roster).member.fullName, old.fullName); // キーは旧名簿の氏名のまま
+  assert.equal(matchMember('花子', null, roster).member.fullName, old.fullName);
+  assert.equal(matchMember(old.family, null, roster).member.fullName, old.fullName); // 旧名簿の姓でも
+});
