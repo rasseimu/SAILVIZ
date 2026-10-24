@@ -101,3 +101,9 @@ test('filterMembers: 旧名簿の氏名で結び付いた人は、アカウン�
   assert.equal(filterMembers('花', list).length, 1);
   assert.equal(filterMembers('佐々', list).length, 1);
 });
+
+test('filterMembers: 英字は大文字・小文字を区別しない', () => {
+  const list = orgRoster([{ userId: 'u1', name: 'Hanako Yamada' }]);
+  assert.equal(filterMembers('ha', list).length, 1);
+  assert.equal(filterMembers('YAM', list).length, 1);
+});

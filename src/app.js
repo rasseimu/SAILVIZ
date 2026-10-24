@@ -19,7 +19,7 @@ import { minuteWinnersDetailed } from './vmgminute.js';
 import { assessComparison, formatConfidenceLabel, windAxisReasonRows } from './analysisconfidence.js';
 import { nextRotation, rotatedFitBox } from './videoview.js';
 import { memberList, filterMembers } from './members.js';
-import { loadOrgMemberRoster } from './memberroster.js';
+import { loadMemberRoster } from './memberroster.js';
 import { parseMinutes, matchMember, parseMinutesDate } from './minutes.js';
 import { jstWallToMs, msToJstWall } from './time.js';
 import { DIR_NAMES, fetchWind } from './wind.js';
@@ -1462,16 +1462,13 @@ function enterApp() { showTop(); }
   // 未ログイン(401)・共有ログイン・ファイル版(503)は何もしない=ヘッダー無しのまま。
   try {
     const me = await store.me();
-    if (me) {
-      const orgId = resolveActiveOrg(me.orgs);
-      renderAccountOrg((me.orgs || []).find((o) => o?.id === orgId));
-      // 反省・議事録・進捗のメンバー候補を、その組織に所属するアカウントにする(取れなければ従来の名簿のまま)
-      await loadOrgMemberRoster(orgId);
-    }
+    if (me) renderAccountOrg((me.orgs || []).find((o) => o?.id === resolveActiveOrg(me.orgs)));
   } catch { /* 取れなくても今のまま動く */ }
   // このページの組織をここで固定する(以後の読み書きはすべてこの組織。別タブ等で変わったら読み込み直す)。
   // me が取れなかったときも覚えている組織で固定する(ヘッダー無しで送って所属の先頭へ書かない)。
   lockActiveOrg(getActiveOrgId());
+  // 反省・議事録・進捗のメンバー候補(サーバーが読み書きの主体と同じ判定で決める。取れなければ従来の名簿のまま)
+  if (sess.loggedIn) await loadMemberRoster();
   if (sess.loggedIn) enterApp(); else showLanding();
 })();
 

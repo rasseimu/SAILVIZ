@@ -98,10 +98,10 @@ export async function apiUnlock(password) {
 }
 export async function apiLock() { await send('/api/lock', 'POST'); }
 
-// アカウントのログイン(所属組織の一覧)。未ログイン(401)・ファイル版(503)は null。
-// 組織のメンバー [{ userId, name, legacyName, isAdmin }](組織メンバーのみ)。
-export async function apiOrgMembers(orgId) { return getJson(`/api/orgs/${encodeURIComponent(orgId)}/members`); }
+// メンバー候補(サーバーが読み書きの主体と同じ判定で決めた名簿。src/members.js の形)。未ログインは例外。
+export async function apiMembers() { return getJson('/api/members'); }
 
+// アカウントのログイン(所属組織の一覧)。未ログイン(401)・ファイル版(503)は null。
 export async function apiMe() {
   const res = await request('/api/me');
   if (!res.ok) return null;

@@ -55,6 +55,9 @@ export async function compatRoute(req, res, ctx) {
     if (!isCompatWriter(s)) { send(res, 403, { error: 'forbidden' }); return null; }
     return s;
   };
+  // 反省・議事録・進捗のメンバー候補。読み書きの主体と同じ判定(個人アカウントで表示中の組織があればそのメンバー、
+  // 共有ログイン・閲覧ゲートの Cookie がある Web・ファイル版(主体 true)は従来の名簿)。
+  const rosterOf = (s) => (s === true || !s ? rosterForSubject(null, null, null) : rosterForSubject(accounts, s, activeOrgOf(s)));
   // 既存の器の書き込み(無ければ repo が code: 'not_found' を投げる)。
   // ポリシー有効時は見えない・書けない反省には触らない。
   const putProject = (id, proj, s) => {
@@ -154,9 +157,7 @@ export async function compatRoute(req, res, ctx) {
     const body = await readBody(req) || {};
     const practiceDate = Number(body.practiceDate);
     const rows = Array.isArray(body.rows) ? body.rows : [];
-    // 名簿: 個人アカウントなら表示中の組織のメンバー、共有ログイン・ファイル版は従来の名簿
-    const roster = rosterForSubject(accounts, writer === true ? null : writer, writer === true ? null : activeOrgOf(writer));
-    const bad = validateCommitRows(rows, practiceDate, roster);
+    const bad = validateCommitRows(rows, practiceDate, rosterOf(writer));
     if (bad) { send(res, 400, { error: bad }); return true; }
 
     const reflections = reflectionsFromRows({ rows: mergeRowsByMember(rows), now: Date.now() });
@@ -303,6 +304,12 @@ export async function compatRoute(req, res, ctx) {
       send(res, 409, { error: 'exists' });
     }
     return true;
+  }
+
+  // メンバー候補(画面の @メンション・議事録の取込・進捗の部員一覧)。名簿の1人は src/members.js の形。
+  if (path === '/api/members' && method === 'GET') {
+    const subject = gateRead(); if (!subject) return true;
+    send(res, 200, rosterOf(subject)); return true;
   }
 
   if (path === '/api/summaries' && method === 'GET') {

@@ -120,31 +120,14 @@ test('GET /members: 組織メンバーは見られる(紐付け済み・{userId,
   assert.equal((await call('GET', '/api/orgs/o_nope/members', memberTok)).status, 404);
 });
 
-test('GET /members: 各要素に isAdmin(管理者・作成者 true、非管理者 false)。形は {userId,name,legacyName,isAdmin}', { skip }, async () => {
+test('GET /members: 各要素に isAdmin(管理者・作成者 true、非管理者 false)。既存の形 {userId,name,isAdmin}', { skip }, async () => {
   const list = await (await call('GET', `/api/orgs/${org.id}/members`, memberTok)).json();
   const a = list.find((x) => x.userId === admin.id);
   const m = list.find((x) => x.userId === member.id);
   assert.equal(a.isAdmin, true); // 作成者(roster_id NULL)
   assert.equal(m.isAdmin, false);
   assert.ok(list.every((x) => typeof x.isAdmin === 'boolean'));
-  assert.deepEqual(Object.keys(a).sort(), ['isAdmin', 'legacyName', 'name', 'userId']);
-});
-
-test('GET /members: legacyName は結び付いた名簿行(無ければメールが一致する名簿行)の旧名簿の氏名。無ければ null', { skip }, async () => {
-  const a = mk('lg-admin@example.test', 'LG管理者');
-  const m = mk('lg-m@example.test', 'LG部員');
-  const o = accounts.createOrg({ name: 'LG部', adminUserIds: [a.u.id], now: clock });
-  accounts.linkMember({ orgId: o.id, userId: a.u.id, rosterId: null, now: clock });
-  const put = await call('PUT', `/api/orgs/${o.id}/roster`, a.tok, { roster: [
-    { name: 'LG部員', email: 'lg-m@example.test', legacyName: '旧 部員' },
-    { name: 'LG管理者', email: 'lg-admin@example.test', legacyName: '旧 管理者' },
-  ] });
-  assert.equal(put.status, 200);
-  const list = await (await call('GET', `/api/orgs/${o.id}/members`, m.tok)).json();
-  assert.equal(list.find((x) => x.userId === m.u.id).legacyName, '旧 部員'); // roster_id で結び付く
-  assert.equal(list.find((x) => x.userId === a.u.id).legacyName, '旧 管理者'); // 作成者はメールで
-  const plain = await (await call('GET', `/api/orgs/${org.id}/members`, memberTok)).json();
-  assert.ok(plain.some((x) => x.legacyName === null));
+  assert.deepEqual(Object.keys(a).sort(), ['isAdmin', 'name', 'userId']);
 });
 
 // 他のテストの状態に影響しないよう、専用の組織・ユーザーで isAdmin の推移を見る(H26=a・H23=b・H25)。

@@ -5,13 +5,12 @@ import { geminiGenerate } from './gemini.js';
 import { buildMinutesSystemPrompt, parseAiMinutes, parseMinutes, parseMinutesDate } from './minutes.js';
 import { aiToRows, blocksToRows, toCommitRows } from './minutes-rows.js';
 import { memberList } from './members.js';
-import { loadActiveOrgMemberRoster } from './memberroster.js';
+import { loadMemberRoster } from './memberroster.js';
 import { jstWallToMs, msToJstWall } from './time.js';
 
 const $ = (id) => document.getElementById(id);
-// メンバー候補。個人アカウントなら表示中の組織に所属するアカウント(起動時に読み込む)、それ以外は従来の名簿
+// メンバー候補。ロック解除後にサーバーの名簿(GET /api/members)を読み込んでから画面を出す(読み込み前に整形されない)
 let roster = memberList();
-loadActiveOrgMemberRoster().then((ok) => { if (ok) roster = memberList(); });
 let rows = []; // Row[]（minutes-rows の形状）
 
 function setStatus(msg) { $('mn-status').textContent = msg || ''; }
@@ -58,7 +57,7 @@ function renderPreview() {
     sel.appendChild(none);
     for (const m of roster) {
       const o = document.createElement('option');
-      o.value = m.fullName; o.textContent = m.fullName;
+      o.value = m.fullName; o.textContent = m.displayName ?? m.fullName;
       if (m.fullName === row.fullName) o.selected = true;
       sel.appendChild(o);
     }
@@ -133,6 +132,7 @@ async function doCommit() {
 
 async function refreshLock() {
   const unlocked = await apiAuthStatus().catch(() => false);
+  if (unlocked && await loadMemberRoster()) roster = memberList();
   $('mn-lock').classList.toggle('hidden', unlocked);
   $('mn-app').classList.toggle('hidden', !unlocked);
 }

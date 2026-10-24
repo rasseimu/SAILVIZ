@@ -89,11 +89,11 @@ export function toHiragana(s) {
 }
 
 // @に続く入力(query)で部員を絞り込む。ひらがな読み・下の名前・姓・フルネーム・表示名の前方一致。
-// query が空なら全員。大文字カタカナ入力もひらがなに寄せて一致させる。読み・姓が無い人('')はその項目では一致しない。
+// query が空なら全員。大文字カタカナ入力もひらがなに寄せ、英字は大文字・小文字を区別しない。読み・姓が無い人('')はその項目では一致しない。
 export function filterMembers(query, list = memberList()) {
-  const q = toHiragana(String(query || '').trim());
+  const q = toHiragana(String(query || '').trim()).toLowerCase();
   if (!q) return list;
-  const starts = (s) => !!s && toHiragana(s).startsWith(q);
+  const starts = (s) => !!s && toHiragana(s).toLowerCase().startsWith(q);
   // 表示名(アカウント名)の名の部分でも一致させる(旧名簿の氏名で結び付いた人は given が旧名簿のもの)
   const words = (s) => String(s || '').trim().split(/\s+/);
   return list.filter((m) => starts(m.kana) || starts(m.given) || starts(m.family)
