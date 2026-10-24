@@ -82,3 +82,19 @@ test('logout still calls the other when one rejects (shared failure is propagate
   await s2.logout();
   assert.equal(sharedCalled, true);
 });
+
+test('loginAny: 共有ログインが通ればそれ。だめでメールアドレスの形ならアカウントで試す。それ以外は共有ログインの理由', async () => {
+  const calls = [];
+  const mk = (sharedOk, accountOk) => createStore({
+    apiLogin: async (u) => { calls.push(['shared', u]); return sharedOk ? { ok: true } : { ok: false, error: '共有だめ' }; },
+    apiAccountLogin: async (e) => { calls.push(['account', e]); return accountOk ? { ok: true } : { ok: false, error: 'アカウントだめ' }; },
+  });
+  assert.deepEqual(await mk(true, false).loginAny('a@example.test', 'pw'), { ok: true, kind: 'shared' });
+  assert.deepEqual(calls.splice(0), [['shared', 'a@example.test']]);
+  assert.deepEqual(await mk(false, true).loginAny('a@example.test', 'pw'), { ok: true, kind: 'account' });
+  assert.deepEqual(calls.splice(0), [['shared', 'a@example.test'], ['account', 'a@example.test']]);
+  assert.deepEqual(await mk(false, false).loginAny('a@example.test', 'pw'), { ok: false, error: 'アカウントだめ' });
+  calls.splice(0);
+  assert.deepEqual(await mk(false, true).loginAny('club-user', 'pw'), { ok: false, error: '共有だめ' });
+  assert.deepEqual(calls, [['shared', 'club-user']]); // メールアドレスの形でなければアカウントでは試さない
+});

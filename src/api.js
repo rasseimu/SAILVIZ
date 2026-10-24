@@ -124,6 +124,13 @@ export async function apiLogin(user, password) {
   if (!res.ok) return { ok: false, error: `ログインに失敗 (${res.status})` };
   return { ok: true };
 }
+// アカウントのログイン(メールアドレス+パスワード)。成功するとセッション Cookie(sailviz_session)が付く。
+export async function apiAccountLogin(email, password) {
+  const res = await send('/api/auth/login', 'POST', { email, password }, { noOrg: true });
+  if (res.ok) return { ok: true };
+  const d = await res.json().catch(() => ({}));
+  return { ok: false, error: d.error?.message || `ログインに失敗 (${res.status})` };
+}
 export async function apiLogout() { await send('/api/logout', 'POST', undefined, { noOrg: true }); }
 // アカウントのセッションも失効させる。未ログイン(401)・ファイル版(503)・通信失敗は無視する。
 export async function apiAccountLogout() {
