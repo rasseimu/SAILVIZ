@@ -26,7 +26,7 @@ export function createApi({
   const authRoute = accounts
     ? createAuthRoute({
       accounts, mailer: mailer || createMailer({ redactToken: process.env.NODE_ENV === 'production' }), baseUrl: baseUrl || 'http://localhost:8000', writeToken: token,
-      secureCookie: process.env.NODE_ENV === 'production' ? '; Secure' : '', ...authOptions,
+      secureCookie: process.env.NODE_ENV === 'production' ? '; Secure' : '', migrationOrgId, ...authOptions,
     })
     : unavailableRoute;
   const orgsRoute = accounts

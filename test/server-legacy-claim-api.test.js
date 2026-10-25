@@ -1,4 +1,4 @@
-// test/server-legacy-claim-api.test.js — 旧名簿の氏名の本人確認(GET/POST /api/orgs/:orgId/legacy-claim)。合成データのみ。Node 24 が要る。
+// test/server-legacy-claim-api.test.js — 旧名簿の氏名への自動の結び付け(氏名の空白を除く一致)と GET /api/orgs/:orgId/legacy-claim。合成データのみ。Node 24 が要る。
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -42,7 +42,7 @@ before(async () => {
   // 旧データ: 取込み組織に「旧 一郎」「旧 二郎」。別の組織にも同姓同名の「旧 一郎」。
   db.prepare('INSERT INTO practice_days (id, org_id, date, rev) VALUES (?, ?, ?, 0)').run('pd1', legacyOrg.id, '2026-10-01');
   db.prepare('INSERT INTO practice_days (id, org_id, date, rev) VALUES (?, ?, ?, 0)').run('pd2', otherOrg.id, '2026-10-01');
-  for (const [id, pd, name] of [['r1', 'pd1', '旧 一郎'], ['r2', 'pd1', '旧 一郎'], ['r3', 'pd1', '旧 二郎'], ['r4', 'pd2', '旧 一郎']]) {
+  for (const [id, pd, name] of [['r1', 'pd1', '旧 一郎'], ['r2', 'pd1', '旧 一郎'], ['r3', 'pd1', '旧 二郎'], ['r4', 'pd2', '旧 一郎'], ['r5', 'pd1', '旧 三郎']]) {
     db.prepare("INSERT INTO reflections (id, practice_day_id, legacy_author_name, visibility) VALUES (?, ?, ?, 'org')").run(id, pd, name);
   }
   db.prepare("INSERT INTO rec_sessions (id, legacy_owner_name, kind, practice_day_id, visibility) VALUES ('s1','旧 一郎','practice','pd1','org')").run();
@@ -58,62 +58,56 @@ after(async () => {
 });
 
 const claimPath = (orgId) => `/api/orgs/${orgId}/legacy-claim`;
+const ownerOf = (id) => owners().find((x) => x.id === id).u;
 
-test('GET legacy-claim: メンバー本人だけ。名前が空白違いで一致する旧氏名を提案し、候補は未紐付けの旧氏名', { skip }, async () => {
-  const me = mkMember(legacyOrg.id, { name: '旧二郎' }); // 空白なしで登録
+test('氏名が空白違いで一致するメンバーは自動で結び付く(GET legacy-claim)。本人以外・未ログインは見られない', { skip }, async () => {
+  const me = mkMember(legacyOrg.id, { name: '旧二郎' }); // スペースなしで登録
   const outsider = mkMember(otherOrg.id);
   assert.equal((await call('GET', claimPath(legacyOrg.id))).status, 401);
   assert.equal((await call('GET', claimPath(legacyOrg.id), outsider.tok)).status, 403);
   const j = await (await call('GET', claimPath(legacyOrg.id), me.tok)).json();
-  assert.equal(j.available, true);
-  assert.equal(j.linked, null);
-  assert.equal(j.suggested, '旧 二郎');
-  assert.ok(j.candidates.includes('旧 二郎'));
+  assert.deepEqual(j, { available: true, linked: '旧 二郎' });
+  assert.equal(ownerOf('r3'), me.user.id);
 });
 
-test('ほかの組織では、同姓同名がいても available: false・POST は 403。記録は動かない', { skip }, async () => {
-  const same = mkMember(otherOrg.id, { name: '旧 一郎' });
-  const v = await (await call('GET', claimPath(otherOrg.id), same.tok)).json();
-  assert.deepEqual(v, { available: false, linked: null, suggested: null, candidates: [] });
+test('ほかの組織では、同姓同名がいても結び付かない(記録は動かない)', { skip }, async () => {
+  const same = mkMember(otherOrg.id, { name: '旧一郎' });
   const before = JSON.stringify(owners());
-  const r = await call('POST', claimPath(otherOrg.id), same.tok, { legacyName: '旧 一郎' });
-  assert.equal(r.status, 403);
-  assert.equal((await r.json()).error.code, 'legacy_unavailable');
+  assert.deepEqual(await (await call('GET', claimPath(otherOrg.id), same.tok)).json(), { available: false, linked: null });
+  assert.equal((await call('GET', '/api/me', same.tok)).status, 200);
   assert.equal(JSON.stringify(owners()), before);
 });
 
-test('POST legacy-claim: 「はい」で取込み組織の記録だけが本人のものになり、名簿の氏名が旧氏名になる', { skip }, async () => {
-  const me = mkMember(legacyOrg.id, { name: 'ニックネーム' }); // 名前が一致しなくても一覧から選べる
-  const v = await (await call('GET', claimPath(legacyOrg.id), me.tok)).json();
-  assert.equal(v.suggested, null);
-  assert.ok(v.candidates.includes('旧 一郎'));
-  assert.equal((await call('POST', claimPath(legacyOrg.id), me.tok, { legacyName: '旧 三郎' })).status, 409); // 記録に無い
-  assert.equal((await call('POST', claimPath(legacyOrg.id), me.tok, {})).status, 422);
-  const r = await call('POST', claimPath(legacyOrg.id), me.tok, { legacyName: '旧 一郎' });
-  assert.equal(r.status, 200);
-  assert.deepEqual((await r.json()).moved, { reflections: 2, sessions: 1, roadmaps: 0 });
-  const o = Object.fromEntries(owners().map((x) => [x.id, x.u]));
-  assert.equal(o.r1, me.user.id);
-  assert.equal(o.r2, me.user.id);
-  assert.equal(o.r3, null);
-  assert.equal(o.r4, null); // 別の組織の同姓同名の記録は動かない
-  const after = await (await call('GET', claimPath(legacyOrg.id), me.tok)).json();
-  assert.equal(after.linked, '旧 一郎');
+test('氏名が一致しなければ結び付かず、氏名を直す(PATCH /api/me)と結び付く。取込み組織の記録だけが動く', { skip }, async () => {
+  const me = mkMember(legacyOrg.id, { name: 'ニックネーム' });
+  assert.deepEqual(await (await call('GET', claimPath(legacyOrg.id), me.tok)).json(), { available: true, linked: null });
+  assert.equal(ownerOf('r1'), null);
+  assert.equal((await call('PATCH', '/api/me', me.tok, { name: '旧一郎' })).status, 200);
+  assert.equal(ownerOf('r1'), me.user.id);
+  assert.equal(ownerOf('r2'), me.user.id);
+  assert.equal(ownerOf('r4'), null); // 別の組織の同姓同名の記録は動かない
+  assert.equal(db.prepare("SELECT owner_user_id AS u FROM rec_sessions WHERE id = 's1'").get().u, me.user.id);
   const roster = rosterForSubject(accounts, { kind: 'user', userId: me.user.id, orgIds: [legacyOrg.id] }, legacyOrg.id);
   assert.equal(roster.find((m) => m.id === me.user.id).fullName, '旧 一郎');
   const members = await (await call('GET', `/api/orgs/${legacyOrg.id}/members`, me.tok)).json();
   assert.equal(members.find((m) => m.userId === me.user.id).legacyName, '旧 一郎');
 
-  // 別のメンバーは同じ氏名を選べない(候補にも出ない)。自分は別の氏名へ付け替えられない。やり直しは 200(0 件)。
-  const another = mkMember(legacyOrg.id, { name: '旧 一郎' });
-  const av = await (await call('GET', claimPath(legacyOrg.id), another.tok)).json();
-  assert.equal(av.suggested, null);
-  assert.ok(!av.candidates.includes('旧 一郎'));
-  assert.equal((await call('POST', claimPath(legacyOrg.id), another.tok, { legacyName: '旧 一郎' })).status, 409);
-  const relink = await call('POST', claimPath(legacyOrg.id), me.tok, { legacyName: '旧 二郎' });
-  assert.equal(relink.status, 409);
-  assert.equal((await relink.json()).error.code, 'member_linked');
-  const again = await call('POST', claimPath(legacyOrg.id), me.tok, { legacyName: '旧 一郎' });
-  assert.equal(again.status, 200);
-  assert.deepEqual((await again.json()).moved, { reflections: 0, sessions: 0, roadmaps: 0 });
+  // 後から同じ氏名で入った人は結び付かない(先に結び付いた人の記録は動かない)。結び付いた人は氏名を変えても外れない。
+  const later = mkMember(legacyOrg.id, { name: '旧 一郎' });
+  assert.deepEqual(await (await call('GET', claimPath(legacyOrg.id), later.tok)).json(), { available: true, linked: null });
+  assert.equal(ownerOf('r1'), me.user.id);
+  assert.equal((await call('PATCH', '/api/me', me.tok, { name: '旧二郎' })).status, 200);
+  assert.equal((await (await call('GET', claimPath(legacyOrg.id), me.tok)).json()).linked, '旧 一郎');
+});
+
+test('招待リンクから登録すると、参加と同時に結び付く', { skip }, async () => {
+  const admin = mkMember(legacyOrg.id, { admin: true });
+  const inv = await (await call('POST', `/api/orgs/${legacyOrg.id}/invites`, admin.tok, {})).json();
+  const r = await call('POST', '/api/auth/register', null, {
+    email: 'reg-legacy@example.test', password: 'dummy-pass-123', name: '旧三郎', affiliationText: 'テスト部', agreedAt: clock,
+    inviteCode: inv.code,
+  });
+  assert.equal(r.status, 200);
+  const { user } = await r.json();
+  assert.equal(ownerOf('r5'), user.id);
 });
