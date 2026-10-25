@@ -2,7 +2,7 @@
 // 組織の名簿・メンバー API(設計書 v2 §10.3): /api/orgs/:orgId/roster(GET/PUT)・/api/orgs/:orgId/members(GET)。
 // 組織の作成(POST /api/orgs)は routes/auth.js。処理したら true、対象外なら false。
 // GET の応答は設計書 §10.3 どおり素の配列。PUT の本文は { roster:[...] }、応答は { linked, unlinked }。
-// 旧名簿の氏名の紐付け(管理者のみ): GET /api/orgs/:orgId/legacy-names・POST /api/orgs/:orgId/legacy-links { userId, legacyName }。
+// 旧名簿の氏名の本人確認(「この人ですか？」。メンバー本人): GET/POST /api/orgs/:orgId/legacy-claim(POST の本文は { legacyName })。
 //   旧データを取り込んだ組織(MIGRATION_ORG_ID)だけで使える。ほかの組織に同姓同名がいても、その組織からは紐付けられない。
 //   紐付け = その旧氏名で保存された反省・記録・ロードマップのうち、まだ誰のものでもない行を本人に付け替える(accounts.reattachLegacy)。
 import { send } from './http.js';
@@ -11,6 +11,7 @@ import { validateRosterRows } from '../domain/rosterInput.js';
 import { applyRoster } from '../rosterLink.js';
 import { displayNameFor } from '../domain/displayName.js';
 import { orgMemberEntries } from '../orgMembers.js';
+import { legacyClaimView } from '../domain/legacyClaim.js';
 import { inviteStatus, validateInviteInput, expiresAtFromDays } from '../domain/invites.js';
 
 const MAX_BODY = 512 * 1024; // 1000 行の名簿が収まる大きさ
@@ -31,6 +32,16 @@ export function createOrgsRoute({
   accounts, writeToken, now = () => Date.now(), baseUrl = 'http://localhost:8000', migrationOrgId = '',
 }) {
   const legacyOrg = (orgId) => !!migrationOrgId && orgId === migrationOrgId;
+  const claimViewFor = (orgId, user) => {
+    const entries = orgMemberEntries(accounts, orgId);
+    return legacyClaimView({
+      names: accounts.listLegacyNames(orgId),
+      userId: user.id,
+      userName: user.name,
+      linked: entries.find((e) => e.userId === user.id)?.legacyName ?? null,
+      takenByOthers: new Set(entries.filter((e) => e.userId !== user.id && e.legacyName).map((e) => e.legacyName)),
+    });
+  };
   // 認証→組織の存在→権限。失敗したら応答を送って null。
   const gate = (req, res, orgId, need) => {
     const id = resolveIdentity(req, { writeToken, repo: accounts, now: now() });
@@ -81,38 +92,31 @@ export function createOrgsRoute({
         legacyName: legacy.get(m.user_id) ?? null,
       })));
     },
-    'GET legacy-names': async (req, res, orgId) => {
-      if (!gate(req, res, orgId, 'admin')) return;
-      if (!legacyOrg(orgId)) return send(res, 200, { available: false, names: [] });
-      send(res, 200, {
-        available: true,
-        names: accounts.listLegacyNames(orgId).map((n) => ({
-          name: n.name, unclaimed: n.unclaimed, linkedUserIds: n.userIds,
-        })),
-      });
+    // 本人の「この人ですか？」: 自分の旧氏名(紐付け済みなら linked)・提案・選べる候補。
+    'GET legacy-claim': async (req, res, orgId) => {
+      const id = gate(req, res, orgId, 'member'); if (!id) return;
+      if (!legacyOrg(orgId)) return send(res, 200, { available: false, linked: null, suggested: null, candidates: [] });
+      send(res, 200, { available: true, ...claimViewFor(orgId, id.user) });
     },
-    'POST legacy-links': async (req, res, orgId) => {
-      if (!gate(req, res, orgId, 'admin')) return;
+    // 本人が「はい(この人です)」を押した。自分の分だけ付け替える。
+    'POST legacy-claim': async (req, res, orgId) => {
+      const id = gate(req, res, orgId, 'member'); if (!id) return;
       if (!legacyOrg(orgId)) return err(res, 403, 'legacy_unavailable', 'この組織では旧名簿の氏名を紐付けられません');
       let body;
       try { body = await readJson(req); } catch (e) {
         return err(res, 422, 'invalid_input', e && e.code === 'too_large' ? '本文が大きすぎます' : 'JSON を読めません');
       }
-      const userId = typeof body?.userId === 'string' ? body.userId : '';
       const legacyName = typeof body?.legacyName === 'string' ? body.legacyName.trim() : '';
-      if (!userId || !legacyName) return err(res, 422, 'invalid_input', 'メンバーと旧名簿の氏名を選んでください');
-      if (!accounts.isMember(orgId, userId)) return err(res, 422, 'not_member', 'この組織のメンバーではありません');
-      const target = accounts.listLegacyNames(orgId).find((n) => n.name === legacyName);
-      if (!target) return err(res, 422, 'legacy_not_found', 'この組織の記録にその氏名はありません');
-      if (target.userIds.some((u) => u !== userId)) {
-        return err(res, 409, 'legacy_taken', 'この氏名は既に別のメンバーに紐付いています');
+      if (!legacyName) return err(res, 422, 'invalid_input', '旧名簿の氏名を選んでください');
+      const view = claimViewFor(orgId, id.user);
+      if (view.linked) {
+        if (view.linked !== legacyName) return err(res, 409, 'member_linked', `既に「${view.linked}」に紐付いています`);
+        return send(res, 200, { legacyName, moved: accounts.reattachLegacy({ orgId, userId: id.user.id, legacyName }) });
       }
-      const current = orgMemberEntries(accounts, orgId).find((e) => e.userId === userId)?.legacyName ?? null;
-      if (current && current !== legacyName) {
-        return err(res, 409, 'member_linked', `このメンバーは既に「${current}」に紐付いています`);
+      if (!view.candidates.includes(legacyName)) {
+        return err(res, 409, 'legacy_unavailable_name', 'その氏名は選べません(記録が無いか、既に別のメンバーに紐付いています)');
       }
-      const moved = accounts.reattachLegacy({ orgId, userId, legacyName });
-      send(res, 200, { userId, legacyName, moved });
+      send(res, 200, { legacyName, moved: accounts.reattachLegacy({ orgId, userId: id.user.id, legacyName }) });
     },
   };
 
@@ -203,7 +207,7 @@ export function createOrgsRoute({
       await handleInviteRevoke(req, res, orgId, inviteId);
       return true;
     }
-    m = /^\/api\/orgs\/([^/]+)\/(roster|members|invites|legacy-names|legacy-links)$/.exec(ctx.path);
+    m = /^\/api\/orgs\/([^/]+)\/(roster|members|invites|legacy-claim)$/.exec(ctx.path);
     if (!m) return false;
     const h = handlers[`${ctx.method} ${m[2]}`] || inviteHandlers[`${ctx.method} ${m[2]}`];
     if (!h) return false;

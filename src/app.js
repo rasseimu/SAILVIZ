@@ -34,7 +34,8 @@ import { store } from './store.js';
 import { resolveActiveOrg, getActiveOrgId } from './activeorg.js';
 import { orgAvatar } from './orgavatar.js';
 import { icon } from './icons.js';
-import { lockActiveOrg } from './api.js';
+import { lockActiveOrg, apiLegacyClaim, apiLegacyClaimSubmit } from './api.js';
+import { legacyClaimPrompt, isLegacyClaimSkipped, skipLegacyClaim } from './legacyclaim.js';
 import { earliestContentMs } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
 import { createDashboard } from './dashboard.js';
@@ -1466,8 +1467,9 @@ function enterApp() { showTop(); }
   noOrgAccount = sess.noOrg === true;
   // アカウントでログインしていれば、表示中の組織を所属から決める(覚えている ID が外れていれば先頭)。
   // 未ログイン(401)・共有ログイン・ファイル版(503)は何もしない=ヘッダー無しのまま。
+  let me = null;
   try {
-    const me = await store.me();
+    me = await store.me();
     if (me) renderAccountOrg((me.orgs || []).find((o) => o?.id === resolveActiveOrg(me.orgs)));
   } catch { /* 取れなくても今のまま動く */ }
   // このページの組織をここで固定する(以後の読み書きはすべてこの組織。別タブ等で変わったら読み込み直す)。
@@ -1477,7 +1479,61 @@ function enterApp() { showTop(); }
   // 反省・議事録・進捗のメンバー候補(サーバーが読み書きの主体と同じ判定で決める。取れなければ従来の名簿のまま)
   if (sess.loggedIn) await loadMemberRoster();
   if (sess.loggedIn) enterApp(); else showLanding();
+  if (sess.loggedIn && me?.user?.id && getActiveOrgId()) askLegacyClaim(me.user.id, getActiveOrgId());
 })();
+
+// ===== 旧名簿の氏名の本人確認(「この人ですか？」) =====
+// アカウント作成前の反省・記録は旧名簿の氏名で保存されている。旧データのある組織(サーバーが available で返す)で、
+// まだ結び付いていない本人に、名前が一致する旧氏名を「この人ですか？」と聞く(一致が無ければ一覧から選ぶ)。
+// 「いいえ」「該当なし」で閉じた組織は次から聞かない(組織管理の画面から選べる)。結び付けたら読み込み直す。
+async function askLegacyClaim(userId, orgId) {
+  if (isLegacyClaimSkipped(userId, orgId)) return;
+  let view = null;
+  try { view = await apiLegacyClaim(orgId); } catch { return; }
+  const prompt = legacyClaimPrompt(view);
+  if (!prompt) return;
+  const dlg = $('legacyClaimDialog');
+  const select = $('legacyClaimSelect');
+  const error = $('legacyClaimError');
+  const yes = $('legacyClaimYes');
+  const no = $('legacyClaimNo');
+  let mode = prompt.mode;
+  const draw = () => {
+    error.hidden = true;
+    if (mode === 'suggest') {
+      $('legacyClaimTitle').textContent = `あなたは「${prompt.name}」さんですか？`;
+      $('legacyClaimLead').textContent = 'このアカウントを作る前に、この名前で反省・記録が保存されています。';
+      $('legacyClaimPick').hidden = true;
+      no.textContent = 'いいえ';
+    } else {
+      $('legacyClaimTitle').textContent = 'この中にあなたの名前はありますか？';
+      $('legacyClaimLead').textContent = 'このアカウントを作る前の反省・記録は、部の名簿の名前で保存されています。あなたの名前を選んでください。';
+      select.replaceChildren(new Option('名前を選ぶ', ''), ...prompt.candidates.map((n) => new Option(n, n)));
+      $('legacyClaimPick').hidden = false;
+      no.textContent = '該当なし';
+    }
+  };
+  no.onclick = () => {
+    if (mode === 'suggest' && prompt.candidates.length > 1) { mode = 'choose'; draw(); return; }
+    skipLegacyClaim(userId, orgId);
+    dlg.close();
+  };
+  yes.onclick = async () => {
+    const name = mode === 'suggest' ? prompt.name : select.value;
+    if (!name) { error.textContent = '名前を選んでください'; error.hidden = false; return; }
+    yes.disabled = true;
+    try {
+      const r = await apiLegacyClaimSubmit(orgId, name);
+      if (!r.ok) { error.textContent = r.error; error.hidden = false; return; }
+      dlg.close();
+      location.reload();
+    } catch (e) {
+      error.textContent = e?.message || '通信できませんでした'; error.hidden = false;
+    } finally { yes.disabled = false; }
+  };
+  draw();
+  dlg.showModal();
+}
 
 // ===== サイドバー(ログイン後の共通ナビ) =====
 // アカウント欄を表示中の組織の名前・アバターにする。組織が無い(共有ログイン・ファイル版)ときは index.html の既定表示のまま。

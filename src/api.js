@@ -102,6 +102,18 @@ export async function apiLock() { await send('/api/lock', 'POST'); }
 // メンバー候補(サーバーが読み書きの主体と同じ判定で決めた名簿。src/members.js の形)。未ログインは例外。
 export async function apiMembers() { return getJson('/api/members'); }
 
+// 旧名簿の氏名の本人確認(「この人ですか？」)。組織を明示して送る(表示中の組織の固定とは別に、その組織の自分の分だけ)。
+// GET: { available, linked, suggested, candidates }。取れなければ null。
+export async function apiLegacyClaim(orgId) {
+  const res = await request(`/api/orgs/${encodeURIComponent(orgId)}/legacy-claim`, {}, { noOrg: true });
+  return res.ok ? res.json() : null;
+}
+export async function apiLegacyClaimSubmit(orgId, legacyName) {
+  const res = await send(`/api/orgs/${encodeURIComponent(orgId)}/legacy-claim`, 'POST', { legacyName }, { noOrg: true });
+  const d = await res.json().catch(() => ({}));
+  return res.ok ? { ok: true, ...d } : { ok: false, error: d.error?.message || `紐付けに失敗 (${res.status})` };
+}
+
 // アカウントのログイン(所属組織の一覧)。未ログイン(401)・ファイル版(503)は null。
 export async function apiMe() {
   const res = await request('/api/me');
