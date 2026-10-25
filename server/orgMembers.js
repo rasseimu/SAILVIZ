@@ -2,6 +2,7 @@
 // 反省・議事録・進捗のメンバー候補(互換 API の GET /api/members と議事録の取込の検証で共通)。同期関数だけ。HTTP には触れない。
 // legacyName は、そのメンバーに結び付いた名簿行(roster_id。組織の作成者など無い人は、誰にも結び付いていない名簿行のうち
 // メールが一致するもの)の「旧名簿の氏名」。既存の記録(旧名簿の氏名で保存された反省・進捗・ロードマップ)を引き継ぐキーに使う。
+// 名簿行が無い人(招待で入った人)は、組織管理で付け替えた旧氏名(accounts.legacyNameOfMember)。
 import { displayNameFor } from './domain/displayName.js';
 import { normalizeEmail } from './domain/accountInput.js';
 import { orgRoster, legacyMemberList } from '../src/members.js';
@@ -16,7 +17,9 @@ export function orgMemberEntries(accounts, orgId) {
   return members.map((m) => {
     const user = accounts.getUser(m.user_id) ?? { id: m.user_id };
     const row = (m.roster_id && byId.get(m.roster_id)) || (user.email ? byEmail.get(normalizeEmail(user.email)) : null);
-    return { userId: m.user_id, name: displayNameFor(user), legacyName: row?.legacy_name ?? null };
+    const legacyName = row?.legacy_name
+      ?? (typeof accounts.legacyNameOfMember === 'function' ? accounts.legacyNameOfMember(orgId, m.user_id) : null);
+    return { userId: m.user_id, name: displayNameFor(user), legacyName: legacyName ?? null };
   });
 }
 

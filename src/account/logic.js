@@ -246,3 +246,17 @@ export function orgSwitchItems(orgs, activeId) {
   if (list.length <= 1) return [];
   return list.map((o) => ({ id: o.id, name: o.name, active: o.id === activeId }));
 }
+
+// 組織管理の「旧名簿の氏名」の紐付け(GET /api/orgs/:orgId/legacy-names と GET members の応答から)。
+// 紐付けていないメンバーごとに、選べる旧氏名(まだ別のメンバーに紐付いておらず、未付け替えの記録があるもの)を返す。
+// [{ userId, name, legacyName(紐付け済みなら氏名、未なら null), options: [氏名,…] }]
+export function legacyLinkRows(members, legacyNames) {
+  const names = Array.isArray(legacyNames) ? legacyNames : [];
+  const taken = new Set((Array.isArray(members) ? members : []).map((m) => m?.legacyName).filter(Boolean));
+  const free = names
+    .filter((n) => n && n.unclaimed > 0 && !(n.linkedUserIds || []).length && !taken.has(n.name))
+    .map((n) => n.name);
+  return (Array.isArray(members) ? members : []).map((m) => ({
+    userId: m.userId, name: m.name, legacyName: m.legacyName || null, options: m.legacyName ? [] : free,
+  }));
+}

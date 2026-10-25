@@ -31,7 +31,7 @@ export function createApi({
     : unavailableRoute;
   const orgsRoute = accounts
     ? createOrgsRoute({
-      accounts, writeToken: token, now: authOptions.now, baseUrl: baseUrl || 'http://localhost:8000',
+      accounts, writeToken: token, now: authOptions.now, baseUrl: baseUrl || 'http://localhost:8000', migrationOrgId,
     })
     : async () => false;
   // 閲覧ゲート: user/password が両方設定されている時のみ有効。

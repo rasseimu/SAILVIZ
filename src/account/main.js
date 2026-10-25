@@ -5,7 +5,7 @@
 import {
   pageModeForPath, tokenFromSearch, apiErrorMessage, parseRosterText, rosterToText, checkNewPassword, checkRegisterForm, membersView,
   soleAdminOrgs, unloadedAdminOrgs, frozenSuccessionNotices, isOrgAdmin, unloadedNotice, displayName, buildDeleteBody, inviteCodeFromPath, parseInviteForm, inviteLimitLabel, joinFailureView, resendFailureView, accountExtrasFromMeta, SESSION_EXPIRED_MESSAGE,
-  pickOrg, orgRoleLabel, checkEmailChange, orgSwitchItems,
+  pickOrg, orgRoleLabel, checkEmailChange, orgSwitchItems, legacyLinkRows,
 } from './logic.js';
 import { resolveActiveOrg, setActiveOrgId } from '../activeorg.js';
 
@@ -472,6 +472,7 @@ async function orgDetailCards(org) {
   const title = h('h2', {}, `${org.name} のメンバー`);
   const card = h('section', { id: 'ac-org-members-card', class: 'ac-card' }, title, h('p', { class: 'ac-note' }, '読み込み中…'));
   const out = [card];
+  if (org.isAdmin === true) out.push(legacyLinkCard(orgId));
   if (org.isAdmin === true) out.push(invitesCard(orgId));
   else out.push(h('section', { class: 'ac-card' }, h('h2', {}, '招待リンク'), h('p', { class: 'ac-note' }, '招待リンクを発行できるのは、この組織の管理者だけです。')));
   api('GET', `/api/orgs/${orgId}/members`).then((mr) => {
@@ -488,6 +489,40 @@ async function orgDetailCards(org) {
       : h('p', { class: 'ac-note' }, 'まだ紐付け済みのメンバーはいません。'));
   });
   return out;
+}
+
+// 旧名簿の氏名の紐付け(管理者のみ)。旧データを取り込んだ組織でだけ出す(サーバが available: false なら何も出さない)。
+// 紐付けると、その氏名で保存された反省・記録・ロードマップがメンバー本人のものになる。取り消しは画面からはできない。
+function legacyLinkCard(orgId) {
+  const card = h('section', { id: 'ac-legacy-card', class: 'ac-card', hidden: true });
+  const draw = async () => {
+    const [lr, mr] = await Promise.all([api('GET', `/api/orgs/${orgId}/legacy-names`), api('GET', `/api/orgs/${orgId}/members`)]);
+    if (!card.isConnected) return;
+    if (lr.status !== 200 || lr.json?.available !== true || mr.status !== 200) { card.hidden = true; return; }
+    const rows = legacyLinkRows(mr.json, lr.json.names);
+    card.hidden = false;
+    card.replaceChildren(h('h2', {}, '旧名簿の氏名との紐付け'),
+      h('p', { class: 'ac-note' }, 'アカウント作成前の反省・記録・ロードマップは、旧名簿の氏名で保存されています。メンバーごとに本人の氏名を選んで紐付けると、その記録が本人のものになります。紐付けは取り消せないので、本人であることを確かめてから行ってください。'),
+      h('ul', { id: 'ac-legacy-list', class: 'ac-list' }, ...rows.map((r) => {
+        if (r.legacyName) return h('li', { 'data-user-id': r.userId }, displayName(r.name), ` → ${r.legacyName}`, h('span', { class: 'ac-badge', 'data-ok': 'true' }, '紐付け済み'));
+        if (!r.options.length) return h('li', { 'data-user-id': r.userId }, displayName(r.name), h('span', { class: 'ac-note' }, '(選べる氏名がありません)'));
+        const sel = h('select', { class: 'ac-legacy-select', 'aria-label': `${displayName(r.name)} の旧名簿の氏名` },
+          h('option', { value: '' }, '氏名を選ぶ'), ...r.options.map((n) => h('option', { value: n }, n)));
+        const btn = h('button', { class: 'ac-btn ac-btn-ghost', type: 'button' }, '紐付ける');
+        btn.addEventListener('click', () => submitting(btn, async () => {
+          if (!sel.value) return setMsg('旧名簿の氏名を選んでください。', 'error');
+          const res = await api('POST', `/api/orgs/${orgId}/legacy-links`, { userId: r.userId, legacyName: sel.value });
+          if (res.status === 401) return dropToAccountLogin();
+          if (res.status !== 200) return setMsg(apiErrorMessage(res.status, res.json), 'error');
+          const m = res.json.moved || {};
+          setMsg(`${displayName(r.name)} を「${res.json.legacyName}」に紐付けました(反省 ${m.reflections ?? 0} 件・記録 ${m.sessions ?? 0} 件・ロードマップ ${m.roadmaps ?? 0} 件)。`, 'ok');
+          await draw();
+        }));
+        return h('li', { 'data-user-id': r.userId }, displayName(r.name), ' ', sel, ' ', btn);
+      })));
+  };
+  draw();
+  return card;
 }
 
 function addOrgCard() {
