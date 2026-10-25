@@ -292,6 +292,44 @@ export function createAccountsRepo({ db }) {
         ).run(userId, name, orgId, userId)),
       }));
     },
+    // 組織の旧データ(反省・記録・ロードマップ)にある旧氏名と、その付け替え状況(組織管理の「旧名簿の氏名」用)。
+    // [{ name, unclaimed(未付け替えの件数), userIds(付け替え済みの本人。通常 0〜1 人) }]。名前順。
+    listLegacyNames(orgId) {
+      const rows = db.prepare(
+        `SELECT legacy_author_name AS name, author_user_id AS uid FROM reflections
+           WHERE legacy_author_name IS NOT NULL AND practice_day_id IN (SELECT id FROM practice_days WHERE org_id = ?)
+         UNION ALL
+         SELECT legacy_owner_name, owner_user_id FROM rec_sessions
+           WHERE legacy_owner_name IS NOT NULL AND practice_day_id IN (SELECT id FROM practice_days WHERE org_id = ?)
+         UNION ALL
+         SELECT legacy_name, user_id FROM roadmaps WHERE legacy_name IS NOT NULL AND org_id = ?`,
+      ).all(orgId, orgId, orgId);
+      const byName = new Map();
+      for (const r of rows) {
+        const name = String(r.name).trim();
+        if (!name) continue;
+        if (!byName.has(name)) byName.set(name, { name, unclaimed: 0, userIds: new Set() });
+        const e = byName.get(name);
+        if (r.uid == null) e.unclaimed += 1; else e.userIds.add(r.uid);
+      }
+      return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name, 'ja'))
+        .map((e) => ({ name: e.name, unclaimed: e.unclaimed, userIds: [...e.userIds].sort() }));
+    },
+    // その人に付け替え済みの旧氏名(組織の旧データのうち本人のものが最も多い名前)。無ければ null。
+    legacyNameOfMember(orgId, userId) {
+      const r = db.prepare(
+        `SELECT name, COUNT(*) AS n FROM (
+           SELECT legacy_author_name AS name FROM reflections WHERE author_user_id = ? AND legacy_author_name IS NOT NULL
+             AND practice_day_id IN (SELECT id FROM practice_days WHERE org_id = ?)
+           UNION ALL
+           SELECT legacy_owner_name FROM rec_sessions WHERE owner_user_id = ? AND legacy_owner_name IS NOT NULL
+             AND practice_day_id IN (SELECT id FROM practice_days WHERE org_id = ?)
+           UNION ALL
+           SELECT legacy_name FROM roadmaps WHERE user_id = ? AND legacy_name IS NOT NULL AND org_id = ?
+         ) GROUP BY name ORDER BY n DESC, name LIMIT 1`,
+      ).get(userId, orgId, userId, orgId, userId, orgId);
+      return r ? r.name : null;
+    },
     listMembershipsOfUser(userId) {
       return db.prepare('SELECT * FROM org_members WHERE user_id = ? ORDER BY linked_at, org_id').all(userId);
     },

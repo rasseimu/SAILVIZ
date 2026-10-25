@@ -49,3 +49,16 @@ test('rosterForSubject: アカウントの主体で表示中の組織があれ�
   assert.deepEqual(rosterForSubject(null, user, 'o1').map((m) => m.fullName), legacy); // アカウント機能なし
   assert.deepEqual(rosterForSubject(null, null, null).map((m) => m.fullName), legacy);
 });
+
+test('orgMemberEntries: 名簿行の無い人(招待で入った人)は、組織管理で付け替えた旧氏名(legacyNameOfMember)', () => {
+  const accounts = {
+    ...stubAccounts({
+      roster: [{ id: 'r1', email: 'm@example.test', legacy_name: '旧 部員' }],
+      members: [{ user_id: 'u1', roster_id: 'r1' }, { user_id: 'u2', roster_id: null }, { user_id: 'u3', roster_id: null }],
+      users: [{ id: 'u1', name: '部員 一郎', email: 'm@example.test' }, { id: 'u2', name: 'ニックネーム', email: 'n@example.test' }, { id: 'u3', name: '新人', email: 'x@example.test' }],
+    }),
+    legacyNameOfMember: (orgId, userId) => (orgId === 'o1' && userId === 'u2' ? '旧 二郎' : (userId === 'u1' ? '使われない' : null)),
+  };
+  const e = orgMemberEntries(accounts, 'o1');
+  assert.deepEqual(e.map((x) => [x.userId, x.legacyName]), [['u1', '旧 部員'], ['u2', '旧 二郎'], ['u3', null]]);
+});

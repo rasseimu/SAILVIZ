@@ -163,6 +163,12 @@ a.lp-btn { text-decoration: none; display: inline-block; line-height: normal; }
 .lp-dialog input:focus { outline: none; border-color: var(--gd-blue); }
 .lp-dialog menu { display: flex; justify-content: flex-end; gap: 10px; margin: 8px 0 0; padding: 0; }
 .lp-dialog .error { color: #c5221f; font-size: 13px; margin: 0 0 12px; }
+/* 旧名簿の氏名の本人確認(「この人ですか？」) */
+#legacyClaimDialog label[hidden] { display: none; }
+#legacyClaimDialog select { display: block; width: 100%; margin-top: 6px; padding: 10px 12px;
+  font: inherit; font-size: 14px; border: 1px solid var(--gd-border); border-radius: 8px; background: #fff; }
+#legacyClaimDialog .lp-btn-ghost { background: transparent; color: var(--gd-text2); border-color: var(--gd-border); }
+#legacyClaimDialog .lp-btn-ghost:hover { background: rgba(0,0,0,0.04); }
 .contact-lead { font-size: 13.5px; line-height: 1.8; color: var(--gd-text2); margin: 0 0 14px; }
 .contact-line { font-size: 15px; margin: 0 0 8px; }
 .contact-line a { color: var(--gd-blue); }

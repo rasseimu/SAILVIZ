@@ -472,6 +472,7 @@ async function orgDetailCards(org) {
   const title = h('h2', {}, `${org.name} のメンバー`);
   const card = h('section', { id: 'ac-org-members-card', class: 'ac-card' }, title, h('p', { class: 'ac-note' }, '読み込み中…'));
   const out = [card];
+  out.push(legacyClaimCard(orgId));
   if (org.isAdmin === true) out.push(invitesCard(orgId));
   else out.push(h('section', { class: 'ac-card' }, h('h2', {}, '招待リンク'), h('p', { class: 'ac-note' }, '招待リンクを発行できるのは、この組織の管理者だけです。')));
   api('GET', `/api/orgs/${orgId}/members`).then((mr) => {
@@ -488,6 +489,44 @@ async function orgDetailCards(org) {
       : h('p', { class: 'ac-note' }, 'まだ紐付け済みのメンバーはいません。'));
   });
   return out;
+}
+
+// 旧名簿の氏名の本人確認(自分の分)。旧データのある組織でだけ出す(サーバーが available: false なら何も出さない)。
+// アプリで「いいえ」と答えたあとでも、ここから選べる。結び付けると、その名前で保存された反省・記録が自分のものになる(取り消し不可)。
+function legacyClaimCard(orgId) {
+  const card = h('section', { id: 'ac-legacy-card', class: 'ac-card', hidden: true });
+  const draw = async () => {
+    const r = await api('GET', `/api/orgs/${orgId}/legacy-claim`);
+    if (!card.isConnected) return;
+    if (r.status !== 200 || r.json?.available !== true) { card.hidden = true; return; }
+    const v = r.json;
+    const title = h('h2', {}, '旧名簿のあなたの名前');
+    if (v.linked) {
+      card.hidden = false;
+      card.replaceChildren(title, h('p', { id: 'ac-legacy-linked' }, `「${v.linked}」と結び付いています。`, h('span', { class: 'ac-badge', 'data-ok': 'true' }, '結び付け済み')));
+      return;
+    }
+    const candidates = Array.isArray(v.candidates) ? v.candidates : [];
+    if (!candidates.length) { card.hidden = true; return; }
+    const sel = h('select', { id: 'ac-legacy-select', 'aria-label': '旧名簿のあなたの名前' },
+      h('option', { value: '' }, '名前を選ぶ'), ...candidates.map((n) => h('option', { value: n, selected: n === v.suggested }, n)));
+    const btn = h('button', { id: 'ac-legacy-submit', class: 'ac-btn', type: 'button' }, 'この名前は私です');
+    btn.addEventListener('click', () => submitting(btn, async () => {
+      if (!sel.value) return setMsg('名前を選んでください。', 'error');
+      const res = await api('POST', `/api/orgs/${orgId}/legacy-claim`, { legacyName: sel.value });
+      if (res.status === 401) return dropToAccountLogin();
+      if (res.status !== 200) return setMsg(apiErrorMessage(res.status, res.json), 'error');
+      const m = res.json.moved || {};
+      setMsg(`「${res.json.legacyName}」と結び付けました(反省 ${m.reflections ?? 0} 件・記録 ${m.sessions ?? 0} 件・ロードマップ ${m.roadmaps ?? 0} 件)。`, 'ok');
+      await draw();
+    }));
+    card.hidden = false;
+    card.replaceChildren(title,
+      h('p', { class: 'ac-note' }, 'アカウントを作る前の反省・記録は、部の名簿の名前で保存されています。あなたの名前を選ぶと、その記録があなたのものになります。取り消せないので、ご本人の名前だけを選んでください。'),
+      h('div', { class: 'ac-row' }, sel, btn));
+  };
+  draw();
+  return card;
 }
 
 function addOrgCard() {

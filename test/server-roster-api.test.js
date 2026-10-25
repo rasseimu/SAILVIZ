@@ -120,14 +120,14 @@ test('GET /members: 組織メンバーは見られる(紐付け済み・{userId,
   assert.equal((await call('GET', '/api/orgs/o_nope/members', memberTok)).status, 404);
 });
 
-test('GET /members: 各要素に isAdmin(管理者・作成者 true、非管理者 false)。既存の形 {userId,name,isAdmin}', { skip }, async () => {
+test('GET /members: 各要素に isAdmin(管理者・作成者 true、非管理者 false)。形 {userId,name,isAdmin,legacyName}', { skip }, async () => {
   const list = await (await call('GET', `/api/orgs/${org.id}/members`, memberTok)).json();
   const a = list.find((x) => x.userId === admin.id);
   const m = list.find((x) => x.userId === member.id);
   assert.equal(a.isAdmin, true); // 作成者(roster_id NULL)
   assert.equal(m.isAdmin, false);
   assert.ok(list.every((x) => typeof x.isAdmin === 'boolean'));
-  assert.deepEqual(Object.keys(a).sort(), ['isAdmin', 'name', 'userId']);
+  assert.deepEqual(Object.keys(a).sort(), ['isAdmin', 'legacyName', 'name', 'userId']);
 });
 
 // 他のテストの状態に影響しないよう、専用の組織・ユーザーで isAdmin の推移を見る(H26=a・H23=b・H25)。
