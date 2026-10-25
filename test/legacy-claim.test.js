@@ -1,8 +1,7 @@
-// test/legacy-claim.test.js — 「この人ですか？」の候補(server/domain/legacyClaim.js)と表示(src/legacyclaim.js)。名前はダミー。
+// test/legacy-claim.test.js — 旧名簿の氏名の候補と、氏名(空白を除く)の一致(server/domain/legacyClaim.js)。名前はダミー。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { legacyClaimView, nameKey } from '../server/domain/legacyClaim.js';
-import { legacyClaimPrompt, isLegacyClaimSkipped, skipLegacyClaim } from '../src/legacyclaim.js';
 
 const names = [
   { name: '旧 一郎', unclaimed: 2, userIds: [] },
@@ -24,29 +23,4 @@ test('legacyClaimView: 候補は未付け替えがあり他人に結び付いて
   // 同じキーの候補が 2 つあるときは決めつけない
   const dup = legacyClaimView({ names: [{ name: '旧 一郎', unclaimed: 1, userIds: [] }, { name: '旧一郎', unclaimed: 1, userIds: [] }], userId: 'u1', userName: '旧一郎', linked: null });
   assert.equal(dup.suggested, null);
-});
-
-test('legacyClaimPrompt: 結び付け済み・候補なし・使えない組織は聞かない。提案があれば suggest、無ければ choose', () => {
-  assert.equal(legacyClaimPrompt(null), null);
-  assert.equal(legacyClaimPrompt({ available: false, candidates: ['旧 一郎'] }), null);
-  assert.equal(legacyClaimPrompt({ available: true, linked: '旧 一郎', candidates: [] }), null);
-  assert.equal(legacyClaimPrompt({ available: true, linked: null, candidates: [] }), null);
-  assert.deepEqual(legacyClaimPrompt({ available: true, linked: null, suggested: '旧 一郎', candidates: ['旧 一郎', '旧 二郎'] }),
-    { mode: 'suggest', name: '旧 一郎', candidates: ['旧 一郎', '旧 二郎'] });
-  assert.deepEqual(legacyClaimPrompt({ available: true, linked: null, suggested: null, candidates: ['旧 二郎'] }),
-    { mode: 'choose', candidates: ['旧 二郎'] });
-});
-
-test('skipLegacyClaim: 「いいえ」はユーザー・組織ごとに覚える。storage が投げても動く', () => {
-  const mem = new Map();
-  const storage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v) };
-  assert.equal(isLegacyClaimSkipped('u1', 'o1', storage), false);
-  skipLegacyClaim('u1', 'o1', storage);
-  skipLegacyClaim('u1', 'o1', storage);
-  assert.equal(isLegacyClaimSkipped('u1', 'o1', storage), true);
-  assert.equal(isLegacyClaimSkipped('u2', 'o1', storage), false);
-  assert.equal(isLegacyClaimSkipped('u1', 'o2', storage), false);
-  const broken = { getItem: () => { throw new Error('x'); }, setItem: () => { throw new Error('x'); } };
-  assert.equal(isLegacyClaimSkipped('u1', 'o1', broken), false);
-  skipLegacyClaim('u1', 'o1', broken);
 });

@@ -200,14 +200,14 @@ function loginForm(after = toAccount, inviteCode) {
 function registerForm(after = toAccount, inviteCode) {
   const email = h('input', { id: 'ac-reg-email', type: 'email', autocomplete: 'email', required: true });
   const pw = h('input', { id: 'ac-reg-password', type: 'password', autocomplete: 'new-password', required: true, minlength: '8' });
-  const name = h('input', { id: 'ac-reg-name', type: 'text', autocomplete: 'name', required: true });
+  const name = h('input', { id: 'ac-reg-name', type: 'text', autocomplete: 'name', required: true, placeholder: '例: 山田太郎' });
   const affil = h('input', { id: 'ac-reg-affil', type: 'text', required: true });
   const agree = h('input', { id: 'ac-reg-agree', type: 'checkbox' });
   const btn = h('button', { id: 'ac-reg-submit', class: 'ac-btn', type: 'submit' }, '登録する');
   const form = h('form', { class: 'ac-form', novalidate: true },
     h('p', { class: 'ac-note' }, '登録すると確認メールが届きます。メールのリンクを開くとアカウントが有効になります。'),
     EXTRAS && h('p', { id: 'ac-reg-roster-note', class: 'ac-note' }, '部の名簿に載っているアドレスで登録してください。名簿と違うアドレスでは、部に自動で紐付きません。'),
-    field('メールアドレス', email), field('パスワード(8文字以上)', pw), field('氏名', name), field('所属(例: ○○大学ヨット部)', affil),
+    field('メールアドレス', email), field('パスワード(8文字以上)', pw), field('氏名(漢字フルネーム・スペースなし)', name), field('所属(例: ○○大学ヨット部)', affil),
     h('label', { id: 'ac-reg-agree-label', class: 'ac-check' }, agree, '利用規約・プライバシーポリシー・位置情報と録音の用途に同意します'), btn);
   form.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -491,39 +491,40 @@ async function orgDetailCards(org) {
   return out;
 }
 
-// 旧名簿の氏名の本人確認(自分の分)。旧データのある組織でだけ出す(サーバーが available: false なら何も出さない)。
-// アプリで「いいえ」と答えたあとでも、ここから選べる。結び付けると、その名前で保存された反省・記録が自分のものになる(取り消し不可)。
+// 旧名簿の氏名との結び付き(自分の分)。旧データのある組織でだけ出す(サーバーが available: false なら何も出さない)。
+// 結び付けは氏名(空白を除く)が旧名簿の氏名と一致したときにサーバーが自動で行う。まだなら、ここで氏名を直せる。
 function legacyClaimCard(orgId) {
   const card = h('section', { id: 'ac-legacy-card', class: 'ac-card', hidden: true });
   const draw = async () => {
     const r = await api('GET', `/api/orgs/${orgId}/legacy-claim`);
     if (!card.isConnected) return;
     if (r.status !== 200 || r.json?.available !== true) { card.hidden = true; return; }
-    const v = r.json;
-    const title = h('h2', {}, '旧名簿のあなたの名前');
-    if (v.linked) {
-      card.hidden = false;
-      card.replaceChildren(title, h('p', { id: 'ac-legacy-linked' }, `「${v.linked}」と結び付いています。`, h('span', { class: 'ac-badge', 'data-ok': 'true' }, '結び付け済み')));
+    const title = h('h2', {}, '以前の反省・記録');
+    card.hidden = false;
+    if (r.json.linked) {
+      card.replaceChildren(title, h('p', { id: 'ac-legacy-linked' }, `旧名簿の「${r.json.linked}」の反省・記録と結び付いています。`, h('span', { class: 'ac-badge', 'data-ok': 'true' }, '結び付け済み')));
       return;
     }
-    const candidates = Array.isArray(v.candidates) ? v.candidates : [];
-    if (!candidates.length) { card.hidden = true; return; }
-    const sel = h('select', { id: 'ac-legacy-select', 'aria-label': '旧名簿のあなたの名前' },
-      h('option', { value: '' }, '名前を選ぶ'), ...candidates.map((n) => h('option', { value: n, selected: n === v.suggested }, n)));
-    const btn = h('button', { id: 'ac-legacy-submit', class: 'ac-btn', type: 'button' }, 'この名前は私です');
-    btn.addEventListener('click', () => submitting(btn, async () => {
-      if (!sel.value) return setMsg('名前を選んでください。', 'error');
-      const res = await api('POST', `/api/orgs/${orgId}/legacy-claim`, { legacyName: sel.value });
-      if (res.status === 401) return dropToAccountLogin();
-      if (res.status !== 200) return setMsg(apiErrorMessage(res.status, res.json), 'error');
-      const m = res.json.moved || {};
-      setMsg(`「${res.json.legacyName}」と結び付けました(反省 ${m.reflections ?? 0} 件・記録 ${m.sessions ?? 0} 件・ロードマップ ${m.roadmaps ?? 0} 件)。`, 'ok');
-      await draw();
-    }));
-    card.hidden = false;
+    const name = h('input', { id: 'ac-legacy-name', type: 'text', autocomplete: 'name', placeholder: '例: 山田太郎', value: me.user.name || '' });
+    const btn = h('button', { id: 'ac-legacy-submit', class: 'ac-btn', type: 'submit' }, '氏名を変更');
+    const form = h('form', { class: 'ac-form', novalidate: true }, field('氏名(漢字フルネーム・スペースなし)', name), btn);
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      submitting(btn, async () => {
+        const res = await api('PATCH', '/api/me', { name: name.value });
+        if (res.status === 401) return dropToAccountLogin();
+        if (res.status !== 200) return setMsg(apiErrorMessage(res.status, res.json), 'error');
+        const st = await api('GET', `/api/orgs/${orgId}/legacy-claim`);
+        await loadMe();
+        renderNav();
+        await renderOrgAdmin(); // メンバー一覧の氏名も描き直す
+        if (st.json?.linked) setMsg('氏名を変更し、以前の反省・記録と結び付けました。', 'ok');
+        else setMsg('氏名を変更しました。旧名簿に同じ氏名が見つからないため、まだ結び付いていません。', 'error');
+      });
+    });
     card.replaceChildren(title,
-      h('p', { class: 'ac-note' }, 'アカウントを作る前の反省・記録は、部の名簿の名前で保存されています。あなたの名前を選ぶと、その記録があなたのものになります。取り消せないので、ご本人の名前だけを選んでください。'),
-      h('div', { class: 'ac-row' }, sel, btn));
+      h('p', { class: 'ac-note' }, 'アカウントを作る前の反省・記録は、部の名簿の氏名で保存されています。氏名を漢字のフルネーム(スペースなし。例: 山田太郎)にすると、同じ氏名の記録と自動で結び付きます。'),
+      form);
   };
   draw();
   return card;

@@ -14,6 +14,7 @@ import { createRateLimiter } from '../domain/rateLimit.js';
 import { validateOrgName, MAX_ORGS_PER_USER } from '../domain/orgCreate.js';
 import { buildLink } from '../mail.js';
 import { linkVerifiedUser } from '../rosterLink.js';
+import { autoLinkLegacy } from '../legacyAutoLink.js';
 import { displayNameFor, visibilityFor } from '../domain/displayName.js';
 
 const MIN = 60 * 1000;
@@ -57,7 +58,7 @@ export const publicUser = (u) => ({
 
 // 設定を束ねた状態を作る。テストでは now・hashParams・mailer を差し替える。
 export function createAuthRoute({
-  accounts, mailer, baseUrl, writeToken, now = () => Date.now(), hashParams = SCRYPT_PARAMS, secureCookie = '',
+  accounts, mailer, baseUrl, writeToken, now = () => Date.now(), hashParams = SCRYPT_PARAMS, secureCookie = '', migrationOrgId = '',
   logger = console.error, hash = hashPassword, // hash: テストでハッシュ計算中の競合を再現するための差し替え口
 }) {
   const limiters = Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, createRateLimiter(v)]));
@@ -136,6 +137,7 @@ export function createAuthRoute({
       const verify = issueVerify(user);
       await sendMail(user.email, 'verify', verify.token); // 失敗しても登録は成功(再送できる)
       const invite = joinByInvite(user.id, body.inviteCode);
+      autoLinkLegacy(accounts, migrationOrgId, user.id);
       const t = issueAuthToken(accounts, user.id, now());
       send(res, 200, withInvite({ token: t.token, user: publicUser(user) }, invite), cookieHeader(t.token));
     },
@@ -191,6 +193,7 @@ export function createAuthRoute({
         accounts.updateUser(user.id, { passwordHash: await hashPassword(body.password, hashParams) });
       }
       const invite = joinByInvite(user.id, body.inviteCode);
+      autoLinkLegacy(accounts, migrationOrgId, user.id);
       const t = issueAuthToken(accounts, user.id, now());
       send(res, 200, withInvite({ token: t.token, user: publicUser(accounts.getUser(user.id)) }, invite), cookieHeader(t.token));
     },
@@ -255,6 +258,8 @@ export function createAuthRoute({
     // ---- GET /api/me ----
     async me(req, res) {
       const id = requireUser(req, res); if (!id) return;
+      // 旧名簿の氏名への自動の結び付け(ログイン済みのまま開いた人の分。結び付け済みなら何もしない)
+      autoLinkLegacy(accounts, migrationOrgId, id.user.id);
       // orgs: linked_at 昇順・同時刻は組織 ID 順。org は互換のため orgs[0] の {id,name}。
       const orgs = [];
       for (const m of accounts.listMembershipsOfUser(id.user.id)) {
@@ -299,6 +304,7 @@ export function createAuthRoute({
         throw e;
       }
       if (verify) await sendMail(patch.email, 'verify', verify.token);
+      if (patch.name !== undefined) autoLinkLegacy(accounts, migrationOrgId, id.user.id); // 氏名を直したら結び付けを試みる
       send(res, 200, { user: publicUser(accounts.getUser(id.user.id)) });
     },
 
