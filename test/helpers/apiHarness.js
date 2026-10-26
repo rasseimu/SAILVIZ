@@ -16,13 +16,15 @@ export async function startApi(extra = {}) {
   const { createAccountsRepo } = await import('../../server/repos/accountsRepo.js');
   const { createDbRepo } = await import('../../server/repos/dbRepo.js');
   const { createSessionsRepo } = await import('../../server/repos/sessionsRepo.js');
+  const { createAppRepo } = await import('../../server/repos/appRepo.js');
   const { issueAuthToken } = await import('../../server/accountAuth.js');
   const db = openDb(':memory:');
   migrate(db, loadMigrations(MIG_DIR));
   const accounts = createAccountsRepo({ db });
   const repo = createDbRepo({ db, dataDir: '/nonexistent' });
   const sessions = createSessionsRepo({ db });
-  const api = createApi({ repo, token: 'shared-secret', accounts, sessions, authOptions: { now: () => clock }, ...extra });
+  const app = createAppRepo({ db });
+  const api = createApi({ repo, token: 'shared-secret', accounts, sessions, app, authOptions: { now: () => clock }, ...extra });
   const server = createServer(async (req, res) => { if (await api(req, res)) return; res.writeHead(404).end(); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -52,5 +54,5 @@ export async function startApi(extra = {}) {
     await new Promise((r) => server.close(r));
     db.close();
   };
-  return { base, db, accounts, repo, sessions, mkUser, mkOrg, call, close };
+  return { base, db, accounts, repo, sessions, app, mkUser, mkOrg, call, close };
 }
