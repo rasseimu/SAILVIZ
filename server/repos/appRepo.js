@@ -1,5 +1,5 @@
 // server/repos/appRepo.js
-// アプリ向け API(Phase 4。設計書 §4・§6)の DB 窓口。反省(reflections)と、その進捗・コメント。
+// アプリ向け API(Phase 4。設計書 §4・§6・§7)の DB 窓口。反省(reflections)と、その進捗・コメント、練習日の器。
 // 1 行 = 反省 1 件。行の id は合成 ID、利用者が知る反省 ID(refl…)は body(JSON)の id にある。
 // body には反省オブジェクトをそのまま入れる(互換 API が body を Web へ返すので、Web とアプリで同じ内容に見える)。
 import { randomBytes } from 'node:crypto';
@@ -172,6 +172,52 @@ export function createAppRepo({ db }) {
     });
   }
 
-  return { getMyRoadmap, putMyRoadmap, findReflectionRows, upsertMyReflection, listMyReflections, deleteMyReflection, reflectionTarget, reflectionJson,
+  // ---- 練習日(設計書 §7)。見える中身の絞り込みは route(policy.js)で行う。ここは候補だけ返す。----
+  // mine:   自分のセッション・自分が乗員のセッション・自分の反省のどれかがある器と、owner_user_id = 自分の器
+  // org:    org_id = orgId の器
+  // public: public のセッションか反省がある器
+  // 並びは date の新しい順(同じ日は作成の新しい順)。不明な scope は空。
+  function listDays({ scope, userId = null, orgId = null }) {
+    const order = 'ORDER BY date DESC, created_at DESC, id';
+    if (scope === 'mine') {
+      return db.prepare(`SELECT * FROM practice_days
+        WHERE owner_user_id = ?1
+           OR id IN (SELECT practice_day_id FROM rec_sessions WHERE owner_user_id = ?1)
+           OR id IN (SELECT rs.practice_day_id FROM rec_sessions rs JOIN session_crew c ON c.session_id = rs.id WHERE c.user_id = ?1)
+           OR id IN (SELECT practice_day_id FROM reflections WHERE author_user_id = ?1)
+        ${order}`).all(userId);
+    }
+    if (scope === 'org') return db.prepare(`SELECT * FROM practice_days WHERE org_id = ? ${order}`).all(orgId);
+    if (scope === 'public') {
+      return db.prepare(`SELECT * FROM practice_days
+        WHERE id IN (SELECT practice_day_id FROM rec_sessions WHERE visibility = 'public')
+           OR id IN (SELECT practice_day_id FROM reflections WHERE visibility = 'public')
+        ${order}`).all();
+    }
+    return [];
+  }
+
+  // 器 1 つと、その中のセッション・反省の行(位置順)。器が無ければ null。
+  function dayParts(pdId) {
+    const day = db.prepare('SELECT * FROM practice_days WHERE id = ?').get(pdId);
+    if (!day) return null;
+    return {
+      day,
+      sessions: db.prepare('SELECT * FROM rec_sessions WHERE practice_day_id = ? ORDER BY position, id').all(pdId),
+      reflections: db.prepare('SELECT * FROM reflections WHERE practice_day_id = ? ORDER BY position, id').all(pdId),
+    };
+  }
+
+  // web_state を置き換えて rev を上げる。tracks・reflections は別の表が正本なので web_state に入れない
+  // (decomposeProject と同じ。送られても無視し、軌跡・反省は変わらない)。
+  function patchDayWebState(pdId, webState, now) {
+    const ws = { ...webState };
+    delete ws.tracks;
+    delete ws.reflections;
+    db.prepare('UPDATE practice_days SET web_state = ?, rev = rev + 1, updated_at = ? WHERE id = ?').run(JSON.stringify(ws), now, pdId);
+    return db.prepare('SELECT * FROM practice_days WHERE id = ?').get(pdId);
+  }
+
+  return { listDays, dayParts, patchDayWebState, getMyRoadmap, putMyRoadmap, findReflectionRows, upsertMyReflection, listMyReflections, deleteMyReflection, reflectionTarget, reflectionJson,
     readableReflection, getProgress, putProgress, listComments, addComment };
 }

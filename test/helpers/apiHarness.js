@@ -2,12 +2,21 @@
 // node:sqlite が要る(Node 24)ので、使うテストは skip を付ける。合成データのみ。
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { createHash, randomUUID } from 'node:crypto';
 import { createApi } from '../../server/api.js';
 
 const [major] = process.versions.node.split('.').map(Number);
 export const skip = major >= 24 ? undefined : 'node:sqlite(Node >=24)が要る';
 export const clock = 1_000_000;
 const MIG_DIR = fileURLToPath(new URL('../../server/db/migrations/', import.meta.url));
+// 記録の点の起点: 2026-10-26 09:00 JST から 1 秒ごと。
+export const T0 = Date.UTC(2026, 9, 26, 0, 0, 0);
+const sha = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
+const chunkCsv = (from, n, t0) => {
+  const rows = ['time,latitude,longitude,speed,horizontalaccuracy'];
+  for (let i = from; i < from + n; i++) rows.push(`${t0 + i * 1000},${(35.3 + i * 0.0001).toFixed(6)},${(139.48 + i * 0.0001).toFixed(6)},2.5,4.8`);
+  return rows.join('\n') + '\n';
+};
 
 // extra は createApi へ足す引数(例: アプリ向け API の repo)。
 export async function startApi(extra = {}) {
@@ -50,9 +59,25 @@ export async function startApi(extra = {}) {
     },
     ...(body !== undefined ? { body: typeof body === 'string' ? body : JSON.stringify(body) } : {}),
   });
+  // 登録 → 2 チャンク → finalize まで(test/sessions-api.test.js の recordFull と同じ)。失敗は例外。
+  // extra は POST の本文へ足す(例: { kind: 'race' }・{ visibility: 'org' })。t0 で点の起点日を変えられる。
+  const recordFull = async (me, extra = {}, headers = {}, t0 = T0) => {
+    const s = {
+      id: randomUUID(), kind: 'practice', boatNo: '4321',
+      crew: [{ role: 'helm', userId: me.user.id, name: me.user.name }],
+      startedMs: t0, device: { platform: 'ios', osVersion: '27.0', app: '1.0.0' }, ...extra,
+    };
+    const ok = async (r) => { if (r.status !== 200) throw new Error(`${r.status} ${await r.text()}`); return r.json(); };
+    await ok(await call('POST', '/api/sessions', me.tok, s, headers));
+    for (const [seq, csv] of [[0, chunkCsv(0, 3, t0)], [1, chunkCsv(3, 2, t0)]]) {
+      await ok(await call('PUT', `/api/sessions/${s.id}/chunks/${seq}`, me.tok, csv, { 'x-chunk-sha256': sha(csv), ...headers }));
+    }
+    const fin = await ok(await call('POST', `/api/sessions/${s.id}/finalize`, me.tok, { endedMs: t0 + 5000, chunkCount: 2 }, headers));
+    return { s, fin };
+  };
   const close = async () => {
     await new Promise((r) => server.close(r));
     db.close();
   };
-  return { base, db, accounts, repo, sessions, app, mkUser, mkOrg, call, close };
+  return { base, db, accounts, repo, sessions, app, mkUser, mkOrg, call, recordFull, close };
 }
