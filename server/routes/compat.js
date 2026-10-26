@@ -16,7 +16,7 @@ import { parseSensorCsv, jstStamp, buildTrack } from '../sensorimport.js';
 import {
   isCompatWriter, canPutDay, canDeleteDay, canSeeProject, filterProject, managedReflectionPredicate,
   buildReflectionIndex, filterProgressRead, mergeProgressWrite, filterRoadmapRead, mergeRoadmapWrite,
-  commentAuthorError,
+  commentAuthorError, commentableBy,
 } from '../domain/compatAccess.js';
 import { activeOrgOf } from '../domain/policy.js';
 import { rosterForSubject } from '../orgMembers.js';
@@ -404,18 +404,22 @@ export async function compatRoute(req, res, ctx) {
       const writer = gateWrite(); if (!writer) return true;
       const incoming = await readBody(req);
       // 新しいコメントには名簿の名前が要る(議事録の取込と同じ。ポリシーの有無によらない)。
+      // コメントを書けない反省の項目(保存で捨てられる)は問わない。
       const cur = name === 'progress' ? await store.readOverlay(name) : null;
+      const readAtHeader = Number(req.headers['x-sailviz-read-at']);
+      const readAt = Number.isFinite(readAtHeader) && readAtHeader > 0 ? readAtHeader : undefined;
+      const reflIndex = name === 'progress' && policyOn ? buildReflectionIndex(store.listReflectionAccess()) : null;
       if (name === 'progress') {
-        const bad = commentAuthorError(cur, incoming, rosterOf(policyOn ? writer : true));
+        const bad = commentAuthorError(cur, incoming, rosterOf(policyOn ? writer : true), {
+          readAt, ...(reflIndex ? { canCommentOn: commentableBy(writer, reflIndex) } : {}),
+        });
         if (bad) { send(res, 400, { error: bad }); return true; }
       }
       if (!policyOn) { await store.writeOverlay(name, incoming); send(res, 200, { ok: true }); return true; }
       // 全置き換えのうち、見えない・書けない項目は元のまま残す。
       if (name === 'progress') {
         // 進捗は全件を読み、表示中の組織の反省の項目だけを入れ替えて全件を書く(§5.7)。
-        const readAt = Number(req.headers['x-sailviz-read-at']);
-        await store.writeOverlay(name, mergeProgressWrite(writer, cur, incoming, buildReflectionIndex(store.listReflectionAccess()),
-          { readAt: Number.isFinite(readAt) && readAt > 0 ? readAt : undefined }));
+        await store.writeOverlay(name, mergeProgressWrite(writer, cur, incoming, reflIndex, { readAt }));
       } else {
         // ロードマップは表示中の組織の行だけを読み、その範囲だけを置き換える(他組織の行に触らない)。
         const scope = roadmapScope(writer);

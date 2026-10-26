@@ -244,7 +244,9 @@ test('互換の進捗: Web の新しいコメントに名前が無い・名簿�
   const u = k.mkUser(); const o = k.mkOrg(u);
   const id = await kRefl(u, o);
   const cur = await kGet(u);
-  for (const c of [{ text: '名無し', ts: 1 }, { text: '部外', ts: 2, author: '部外者' }]) {
+  // 新しいコメント(読んだ時刻より後の ts)
+  const ts = Number(cur.readAt) + 1;
+  for (const c of [{ text: '名無し', ts }, { text: '部外', ts, author: '部外者' }]) {
     const r = await kPut(u, { ...cur.body, [id]: { issueStage: 2, comments: { goal: [c] } } }, cur.readAt);
     assert.equal(r.status, 400);
     assert.match((await r.json()).error, /名前/);

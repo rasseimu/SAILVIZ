@@ -392,3 +392,16 @@ test('commentAuthorError: 新しく足したコメントは名簿の名前が要
   // 形の崩れた入力では投げない
   assert.equal(commentAuthorError(null, { r1: 'x', r2: { comments: { goal: 'x' } } }, roster), null);
 });
+
+test('commentAuthorError: 書けない反省の項目と、読んだ時刻より前の名前なしコメント(別の画面で消されたものの送り返し)は問わない', () => {
+  const roster = [{ fullName: '乗員1' }];
+  const bad = { text: '名無し', ts: 5 };
+  // 書けない反省(canCommentOn が false)の項目は保存のときに捨てられるので、断らない
+  assert.equal(commentAuthorError({}, { rX: { comments: { goal: [bad] } } }, roster, { canCommentOn: (id) => id !== 'rX' }), null);
+  assert.match(commentAuthorError({}, { rY: { comments: { goal: [bad] } } }, roster, { canCommentOn: (id) => id !== 'rX' }), /名前/);
+  // readAt より前の ts の名前なしコメントは「前からあったもの」の送り返しとして通す。readAt 以後は新しいものとして断る
+  assert.equal(commentAuthorError({}, { r1: { comments: { goal: [bad] } } }, roster, { readAt: 10 }), null);
+  assert.match(commentAuthorError({}, { r1: { comments: { goal: [{ text: '新', ts: 10 }] } } }, roster, { readAt: 10 }), /名前/);
+  // 名簿外の名前は readAt によらず断る(名前付きは新しい入力)
+  assert.match(commentAuthorError({}, { r1: { comments: { goal: [{ text: '旧', ts: 5, author: '部外者' }] } } }, roster, { readAt: 10 }), /部外者/);
+});

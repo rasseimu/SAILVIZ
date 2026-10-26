@@ -70,10 +70,15 @@ export function createProgress({
   const savedCommentName = () => { try { return globalThis.localStorage?.getItem(COMMENT_NAME_KEY) ?? null; } catch { return null; } };
   let hideComments = (() => { try { return globalThis.localStorage?.getItem(HIDE_COMMENTS_KEY) === '1'; } catch { return false; } })();
 
-  // 進捗の保存はUIを止めないよう非同期・投げっぱなし(失敗はログのみ。
-  // saveProgressData 側で localStorage ミラーも行うため最低限は残る)。
+  // 進捗の保存はUIを止めないよう非同期・投げっぱなし。失敗(名簿外の名前で断られた等)は画面に出し、
+  // サーバの内容を読み直す(手元の内容のままだと以後の保存も断られ続け、再読込で編集が消えるため)。
   function persist() {
-    Promise.resolve(saveProgressData(progress)).catch((e) => console.error('進捗の保存に失敗', e));
+    Promise.resolve(saveProgressData(progress)).catch((e) => {
+      console.error('進捗の保存に失敗', e);
+      const st = $('progress-save-status');
+      if (st) st.textContent = `保存できませんでした(${e?.message || e})。読み直しました`;
+      render().catch((err) => console.error('進捗の読み直しに失敗', err));
+    });
   }
 
   // 全エントリの反省を平坦化。id で重複排除(先勝ち)＝保存済みファイルと
@@ -179,6 +184,15 @@ export function createProgress({
   }
 
   // カード内容の下に積むコメント一覧＋(入力中なら)入力欄。field ∈ {goal,issue,discovery}。
+  // コメントの名前の選択(名簿から。前に選んだ名前が名簿にあれば初期値)。入力中の欄にだけ出す。
+  function commentNameSelect() {
+    const roster = memberList();
+    const name = commentName(roster, savedCommentName());
+    const placeholder = roster.length ? '名前' : '名簿に名前がありません';
+    return `<select class="comment-name" aria-label="名前"><option value="">${placeholder}</option>${
+      roster.map((m) => `<option value="${esc(m.fullName)}"${m.fullName === name ? ' selected' : ''}>${esc(m.displayName ?? m.fullName)}</option>`).join('')}</select>`;
+  }
+
   function commentSection(field, reflId, comments) {
     if (hideComments) return '';
     const list = (comments || []).map((c, i) => {
@@ -196,12 +210,8 @@ export function createProgress({
       return `<div class="comment-row${c.ai ? ' comment-ai' : ''}"><span class="comment-when">${fmtDateTime(c.ts)}<button class="comment-del writes-json" data-cfield="${field}" data-crefl="${esc(reflId)}" data-cidx="${i}" title="削除">×</button></span>`
         + `${badge}${who}<span class="comment-text">${esc(c.text)}${link}</span></div>`;
     }).join('');
-    const roster = memberList();
-    const name = commentName(roster, savedCommentName());
-    const nameSelect = `<select class="comment-name" aria-label="名前"><option value="">名前</option>${
-      roster.map((m) => `<option value="${esc(m.fullName)}"${m.fullName === name ? ' selected' : ''}>${esc(m.displayName ?? m.fullName)}</option>`).join('')}</select>`;
     const input = commenting === `${reflId}:${field}`
-      ? `<div class="comment-input-row">${nameSelect}<textarea class="comment-input" rows="1" data-cfield="${field}" data-crefl="${esc(reflId)}" placeholder="コメントを入力"></textarea>`
+      ? `<div class="comment-input-row">${commentNameSelect()}<textarea class="comment-input" rows="1" data-cfield="${field}" data-crefl="${esc(reflId)}" placeholder="コメントを入力"></textarea>`
         + `<button class="comment-save writes-json" data-cfield="${field}" data-crefl="${esc(reflId)}">追加</button>`
         + '<button class="comment-cancel">取消</button></div>'
       : '';
@@ -370,6 +380,8 @@ export function createProgress({
         const input = content.querySelector('.comment-input');
         if (input) addC(input);
       }));
+    content.querySelectorAll('.comment-name').forEach((sel) =>
+      sel.addEventListener('change', () => sel.classList.remove('comment-name-missing')));
     content.querySelectorAll('.comment-cancel').forEach((btn) =>
       btn.addEventListener('click', () => { commenting = null; renderBody(); }));
     content.querySelectorAll('.comment-input').forEach((input) => {
