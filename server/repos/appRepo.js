@@ -88,5 +88,29 @@ export function createAppRepo({ db }) {
     });
   }
 
-  return { findReflectionRows, upsertMyReflection, listMyReflections, deleteMyReflection, reflectionTarget, reflectionJson };
+  // 自分のロードマップ(roadmaps は user_id UNIQUE。無ければ空)。
+  function getMyRoadmap(userId) {
+    const row = db.prepare('SELECT goal, milestones FROM roadmaps WHERE user_id = ?').get(userId);
+    if (!row) return { goal: '', milestones: [] };
+    let milestones = [];
+    try { const v = JSON.parse(row.milestones); if (Array.isArray(v)) milestones = v; } catch { /* 壊れた JSON は空 */ }
+    return { goal: row.goal ?? '', milestones };
+  }
+
+  // 行があれば goal・milestones・updated_at だけ更新(legacy_name・org_id・extra は付け替え済みの値を保つ)。
+  function putMyRoadmap({ userId, orgId, legacyName, goal, milestones, now }) {
+    return tx(() => {
+      const json = JSON.stringify(milestones);
+      const row = db.prepare('SELECT id FROM roadmaps WHERE user_id = ?').get(userId);
+      if (row) {
+        db.prepare('UPDATE roadmaps SET goal = ?, milestones = ?, updated_at = ? WHERE id = ?').run(goal, json, now, row.id);
+      } else {
+        db.prepare('INSERT INTO roadmaps (id, user_id, org_id, legacy_name, goal, milestones, extra, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)')
+          .run(`rm_${randomBytes(6).toString('hex')}`, userId, orgId ?? null, legacyName, goal, json, now);
+      }
+      return { goal, milestones };
+    });
+  }
+
+  return { getMyRoadmap, putMyRoadmap, findReflectionRows, upsertMyReflection, listMyReflections, deleteMyReflection, reflectionTarget, reflectionJson };
 }

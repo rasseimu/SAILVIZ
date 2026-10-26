@@ -3,15 +3,22 @@
 //   PUT    /api/me/reflections/:reflId   反省の保存(同じ reflId の再送は同じ結果)
 //   GET    /api/me/reflections?limit=n   自分の反省(新しい順。既定 20・上限 100)
 //   DELETE /api/me/reflections/:reflId   自分の反省を消す
+//   GET / PUT /api/me/roadmap            自分のロードマップ(PUT は全置き換え。{goal, milestones} を返す)
 // /api/me 自体や他の /api/me* は auth.js の担当なので false を返す。エラーは { error: { code, message } }。
 import { send } from './http.js';
 import { err, readJson } from './jsonApi.js';
 import { practiceDateToMs } from '../repos/practiceDayFor.js';
 import { displayNameFor } from '../domain/displayName.js';
+import { orgMemberEntries } from '../orgMembers.js';
 
 const VIS = ['private', 'org', 'public'];
 const REFL_ID_RE = /^[A-Za-z0-9_-]{1,100}$/;
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+// ロードマップ本文の検証(goal は 2000 字まで、milestones は 200 件まで)。
+const validMilestone = (m) => isObj(m) && typeof m.id === 'string' && m.id !== '' && typeof m.title === 'string'
+  && typeof m.done === 'boolean' && (m.doneAt === null || (typeof m.doneAt === 'number' && Number.isFinite(m.doneAt)));
+const validRoadmap = (b) => isObj(b) && typeof b.goal === 'string' && b.goal.length <= 2000
+  && Array.isArray(b.milestones) && b.milestones.length <= 200 && b.milestones.every(validMilestone);
 
 export function createMeRoute({ app, accounts, now = () => Date.now() }) {
   return async function meRoute(req, res, ctx) {
@@ -24,7 +31,21 @@ export function createMeRoute({ app, accounts, now = () => Date.now() }) {
     if (subject?.orgForbidden) { err(res, 403, 'org_forbidden', '所属していない組織です'); return true; }
     const me = subject?.kind === 'user' ? subject : null;
     if (!me) { err(res, 401, 'unauthorized', 'ログインが必要です'); return true; }
-    if (!refl) return false; // roadmap は Task 3 以降
+    if (road) {
+      if (method === 'GET') { send(res, 200, app.getMyRoadmap(me.userId)); return true; }
+      if (method !== 'PUT') return false;
+      let b;
+      try { b = await readJson(req); } catch (e) {
+        if (e.code === 'too_large') { err(res, 413, 'too_large', '本文が大きすぎます'); return true; }
+        err(res, 422, 'invalid_input', 'JSON を読めません'); return true;
+      }
+      if (!validRoadmap(b)) { err(res, 422, 'invalid_input', 'goal / milestones の形が正しくありません'); return true; }
+      const orgId = me.activeOrgId ?? null;
+      const legacyName = (orgId && orgMemberEntries(accounts, orgId).find((e) => e.userId === me.userId)?.legacyName)
+        || displayNameFor(accounts.getUser(me.userId));
+      send(res, 200, app.putMyRoadmap({ userId: me.userId, orgId, legacyName, goal: b.goal, milestones: b.milestones, now: now() }));
+      return true;
+    }
 
     {
       if (path === '/api/me/reflections' && method === 'GET') {
