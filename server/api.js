@@ -10,6 +10,7 @@ import { aiRoute } from './routes/ai.js';
 import { compatRoute } from './routes/compat.js';
 import { createAuthRoute, unavailableRoute } from './routes/auth.js';
 import { createOrgsRoute } from './routes/orgs.js';
+import { createSessionsRoute } from './routes/sessions.js';
 import { createMailer } from './mail.js';
 import { resolveSubject } from './compatPrincipal.js';
 import { randomBytes } from 'node:crypto';
@@ -19,7 +20,7 @@ import { describeError } from './domain/errorLog.js';
 // mailer / baseUrl は確認・再設定メール用(MAIL_PROVIDER 未設定なら log)。authOptions はテスト用の差し替え。
 export function createApi({
   dataDir, repo, token, geminiKey, viewUser, viewPassword, accounts, mailer, baseUrl, authOptions = {},
-  migrationOrgId,
+  migrationOrgId, sessions,
 }) {
   // 保存の窓口。明示 repo が無ければ dataDir からファイル実装を組み立てる(既存挙動のまま)。
   const store = repo || createFileRepo(dataDir);
@@ -34,6 +35,8 @@ export function createApi({
       accounts, writeToken: token, now: authOptions.now, baseUrl: baseUrl || 'http://localhost:8000', migrationOrgId,
     })
     : async () => false;
+  // 記録セッション(Phase 3。§10.4)。sessions(sessionsRepo)は STORAGE=db のときだけ。無ければ 503。
+  const sessionsRoute = createSessionsRoute({ sessions: accounts ? sessions : null, accounts, now: authOptions.now });
   // 閲覧ゲート: user/password が両方設定されている時のみ有効。
   // 有効時はランダム秘密を発行し、ログイン成功で Cookie に載せる(パスワードは載せない)。
   const viewEnabled = Boolean(viewUser && viewPassword);
@@ -83,6 +86,7 @@ export function createApi({
       if (await aiRoute(req, res, ctx)) return true;
       if (await authRoute(req, res, ctx)) return true;
       if (await orgsRoute(req, res, ctx)) return true;
+      if (await sessionsRoute(req, res, ctx)) return true;
       if (await compatRoute(req, res, ctx)) return true;
       send(res, 404, { error: 'no route' });
       return true;
