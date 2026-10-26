@@ -7,7 +7,6 @@ import { randomBytes } from 'node:crypto';
 import { parseSensorCsv, buildTrack, jstStamp } from '../sensorimport.js';
 import { dayFor, jstDate } from './practiceDayFor.js';
 
-const two = (n) => String(n).padStart(2, '0');
 const genId = (prefix) => `${prefix}_${randomBytes(5).toString('hex')}`;
 
 // 練習日の器の決め方は practiceDayFor.js(アプリ向け API と共用)。jstDate は既存の import のため再 export する。

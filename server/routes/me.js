@@ -56,8 +56,10 @@ export function createMeRoute({ app, accounts, now = () => Date.now() }) {
       }
       const m = /^\/api\/me\/reflections\/([^/]+)$/.exec(path);
       if (!m) return false;
-      const reflId = decodeURIComponent(m[1]);
-      if (!REFL_ID_RE.test(reflId)) { err(res, 422, 'invalid_input', '反省 ID が正しくありません'); return true; }
+      // 壊れた % エスケープは 500 にせず、形の正しくない ID と同じ 422 にする(practiceDays / reflectionExtras と同じく try で受ける)
+      let reflId;
+      try { reflId = decodeURIComponent(m[1]); } catch { reflId = null; }
+      if (reflId == null || !REFL_ID_RE.test(reflId)) { err(res, 422, 'invalid_input', '反省 ID が正しくありません'); return true; }
 
       if (method === 'PUT') {
         let b;

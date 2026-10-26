@@ -30,13 +30,16 @@ test('PUT → GET: 置き換えた内容が返る', { skip }, async () => {
   assert.equal(h.db.prepare('SELECT COUNT(*) c FROM roadmaps WHERE user_id = ?').get(u.user.id).c, 1);
 });
 
-test('PUT: 作った行は表示中の組織の互換 overlay に表示名で出る', { skip }, async () => {
+test('PUT: 作った行は表示中の組織(X-Sailviz-Org で選んだ組織)の互換 overlay に表示名で出る', { skip }, async () => {
   const u = h.mkUser();
-  const org = h.mkOrg(u);
+  h.mkOrg(u); h.mkOrg(u);
+  // ヘッダーなしなら所属の先頭になるので、先頭でない方をヘッダーで選ぶ
+  const [first, org] = h.accounts.listMembershipsOfUser(u.user.id).map((m) => ({ id: m.org_id }));
   const body = { goal: '目標A', milestones: [ms()] };
-  assert.equal((await h.call('PUT', '/api/me/roadmap', u.tok, body, { 'x-org-id': org.id })).status, 200);
+  assert.equal((await h.call('PUT', '/api/me/roadmap', u.tok, body, { 'x-sailviz-org': org.id })).status, 200);
   const ov = h.repo.readOverlay('roadmap', { orgId: org.id });
   assert.deepEqual(ov[u.user.name], body);
+  assert.equal(h.repo.readOverlay('roadmap', { orgId: first.id })[u.user.name], undefined);
 });
 
 test('PUT: 旧データを付け替え済みの行は legacy_name・org_id を保って goal だけ変わる', { skip }, async () => {

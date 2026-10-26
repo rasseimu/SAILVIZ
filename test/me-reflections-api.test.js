@@ -107,6 +107,15 @@ test('PUT: visibility が不正なら 422、本文が配列なら 422', { skip }
   assert.equal((await put(rid(), u.tok, [refl()])).status, 422);
 });
 
+test('PUT / DELETE: reflId の % エスケープが壊れていても 500 にせず 422', { skip }, async () => {
+  const u = h.mkUser();
+  for (const method of ['PUT', 'DELETE']) {
+    const r = await h.call(method, '/api/me/reflections/bad%E0%A4%A', u.tok, method === 'PUT' ? refl() : undefined);
+    assert.equal(r.status, 422);
+    assert.equal((await r.json()).error.code, 'invalid_input');
+  }
+});
+
 test('PUT: 互換 GET /api/projects/:id の reflections に同じ内容で出る', { skip }, async () => {
   const u = h.mkUser(); const id = rid(); const body = refl();
   const { practiceDayId } = await (await put(id, u.tok, body)).json();
@@ -212,4 +221,27 @@ test('互換保存: Web で作った反省（作者なし）は今までどお�
   webSave(practiceDayId, stale);
   assert.equal(count(webId), 0); // 作者なしは消える
   assert.equal(count(appId), 1); // アプリの行は残る
+});
+
+test('互換保存: アプリが消した反省は、Web の古い画面からの保存で戻らない', { skip }, async () => {
+  const u = h.mkUser(); const id = rid();
+  const { practiceDayId } = await (await put(id, u.tok, refl({ visibility: 'private' }))).json();
+  const stale = h.repo.readProject(practiceDayId); // Web が読む
+  assert.equal((await h.call('DELETE', `/api/me/reflections/${id}`, u.tok)).status, 204); // アプリが消す
+  webSave(practiceDayId, stale); // 古い一覧のまま保存
+  assert.equal(count(id), 0); // 作者なし・組織公開の行として戻らない
+});
+
+test('互換保存: アプリが別の日へ移した反省は、Web の古い画面からの保存で元の日に写しができない', { skip }, async () => {
+  const u = h.mkUser(); const id = rid();
+  const { practiceDayId: oldDay } = await (await put(id, u.tok, refl({ visibility: 'private' }))).json();
+  const stale = h.repo.readProject(oldDay); // Web が元の日を読む
+  const { practiceDayId: newDay } = await (await put(id, u.tok, refl({ visibility: 'private', practice: { date: '2026/10/27' } }))).json();
+  assert.notEqual(newDay, oldDay);
+  webSave(oldDay, stale); // 元の日を古い一覧のまま保存
+  const rows = h.db.prepare("SELECT practice_day_id, author_user_id, visibility FROM reflections WHERE json_extract(body,'$.id') = ?").all(id);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].practice_day_id, newDay);
+  assert.equal(rows[0].author_user_id, u.user.id);
+  assert.equal(rows[0].visibility, 'private');
 });
