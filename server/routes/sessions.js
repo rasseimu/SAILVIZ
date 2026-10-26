@@ -46,6 +46,33 @@ function normalizeCrew(crew) {
   }
   return out;
 }
+// セッション 1 行の API 形(sessions は sessionsRepo)。練習日 API(practiceDays.js)も同じ形で返す。
+export const sessionJson = (sessions, s, { withOrg = false } = {}) => ({
+  id: s.id,
+  ownerUserId: s.owner_user_id ?? null,
+  kind: s.kind,
+  visibility: s.visibility,
+  boatNo: s.boat_no ?? '',
+  crew: sessions.crewOf(s.id),
+  startedMs: s.started_ms ?? null,
+  endedMs: s.ended_ms ?? null,
+  chunkCount: s.chunk_count ?? null,
+  pointCount: s.point_count ?? null,
+  status: s.status,
+  csvName: sessions.csvNameOf(s.id),
+  attachedTo: sessions.attachedTo(s),
+  ...(withOrg ? { orgId: s.org_id ?? null } : {}),
+});
+
+// セッション 1 行の認可対象(policy.js 用)。
+export const sessionTarget = (sessions, s) => ({
+  kind: s.kind === 'race' ? 'race' : 'session',
+  visibility: s.visibility,
+  ownerId: s.owner_user_id ?? null,
+  crewIds: sessions.crewOf(s.id).map((c) => c.userId).filter(Boolean),
+  orgId: s.org_id ?? null,
+});
+
 const normalizeBoatNo = (b) => (typeof b === 'string' && b.trim() && b.trim().length <= 20 ? b.trim() : null);
 
 export function createSessionsRoute({ sessions, accounts, now = () => Date.now() }) {
@@ -58,30 +85,8 @@ export function createSessionsRoute({ sessions, accounts, now = () => Date.now()
     };
   }
 
-  const toJson = (s, { withOrg = false } = {}) => ({
-    id: s.id,
-    ownerUserId: s.owner_user_id ?? null,
-    kind: s.kind,
-    visibility: s.visibility,
-    boatNo: s.boat_no ?? '',
-    crew: sessions.crewOf(s.id),
-    startedMs: s.started_ms ?? null,
-    endedMs: s.ended_ms ?? null,
-    chunkCount: s.chunk_count ?? null,
-    pointCount: s.point_count ?? null,
-    status: s.status,
-    csvName: sessions.csvNameOf(s.id),
-    attachedTo: sessions.attachedTo(s),
-    ...(withOrg ? { orgId: s.org_id ?? null } : {}),
-  });
-
-  const target = (s) => ({
-    kind: s.kind === 'race' ? 'race' : 'session',
-    visibility: s.visibility,
-    ownerId: s.owner_user_id ?? null,
-    crewIds: sessions.crewOf(s.id).map((c) => c.userId).filter(Boolean),
-    orgId: s.org_id ?? null,
-  });
+  const toJson = (s, opts) => sessionJson(sessions, s, opts);
+  const target = (s) => sessionTarget(sessions, s);
 
   // 乗員の userId は、所有者本人か、記録した組織のメンバーでなければならない(§5.3)。
   const crewAllowed = (crew, ownerUserId, orgId) => crew.every((c) => !c.userId

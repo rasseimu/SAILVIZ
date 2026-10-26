@@ -84,10 +84,28 @@ export async function apiDeleteProject(id) {
   const res = await send(projectPath(id), 'DELETE');
   if (!res.ok) throw new Error(`削除に失敗 (${res.status})`);
 }
-export async function apiGetOverlay(name) { return getJson(`/api/overlays/${name}`); }
+// 進捗を読んだサーバの時刻(X-Sailviz-Read-At)。保存のときに送り返すと、サーバはそれより前からあるコメントを
+// 「この画面で消したもの」として消し、読んだ後にアプリで足されたコメントだけを残す。保存では更新しない(読み直すまで同じ)。
+let progressReadAt = null;
+export async function apiGetOverlay(name) {
+  const path = `/api/overlays/${name}`;
+  const res = await request(path);
+  if (!res.ok) throw new Error(`GET ${path} → ${res.status}`);
+  if (name === 'progress') progressReadAt = res.headers?.get?.('x-sailviz-read-at') || null;
+  return res.json();
+}
 export async function apiPutOverlay(name, obj) {
-  const res = await send(`/api/overlays/${name}`, 'PUT', obj);
-  if (!res.ok) throw new Error(`同期に失敗 (${res.status})`);
+  const readAt = name === 'progress' ? progressReadAt : null;
+  const res = await request(`/api/overlays/${name}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', ...(readAt ? { 'X-Sailviz-Read-At': readAt } : {}) },
+    body: JSON.stringify(obj),
+  });
+  if (!res.ok) {
+    // 400 はサーバの理由(コメントの名前が無い・名簿外など)を伝える。
+    const reason = res.status === 400 ? (await res.json().catch(() => null))?.error : null;
+    throw new Error(reason ? `同期に失敗: ${reason}` : `同期に失敗 (${res.status})`);
+  }
 }
 
 export async function apiAuthStatus() { return (await getJson('/api/auth')).unlocked === true; }

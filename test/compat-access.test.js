@@ -6,6 +6,7 @@ import { legacySharedPrincipal, user, anonymous } from '../server/domain/policy.
 import {
   isCompatWriter, canSeeProject, filterProject, canPutDay, canDeleteDay, managedReflectionPredicate,
   buildReflectionIndex, filterProgressRead, mergeProgressWrite, filterRoadmapRead, mergeRoadmapWrite,
+  keepNewApiComments, commentAuthorError,
 } from '../server/domain/compatAccess.js';
 
 const ORG = 'o_main';
@@ -316,4 +317,91 @@ test('filterRoadmapRead / mergeRoadmapWrite: user は表示中の組織の行だ
   assert.equal(out.b1.goal, '3', '表示中でない組織の行は元のまま');
   assert.equal(out.N.goal, 'new');
   assert.deepEqual(mergeRoadmapWrite(FORBIDDEN, rm, { a1: { goal: 'x' }, N: { goal: 'n' } }, access), rm);
+});
+
+test('keepNewApiComments: Web の古い進捗にない新 API のコメント(via: api)を残し、Web で消した名前付きのコメントは残さない', () => {
+  const existing = {
+    issueStage: 1,
+    comments: {
+      goal: [{ text: 'web', ts: 1, author: '乗員1' }, { text: 'app', ts: 2, authorUserId: 'u_a', author: '乗員2', via: 'api' }],
+      issue: [{ text: 'app2', ts: 3, authorUserId: 'u_b', author: '乗員3', via: 'api' }],
+      discovery: [{ text: '消した', ts: 4, author: '乗員1' }],
+    },
+  };
+  // Web はアプリのコメントを読む前の進捗を送る(goal の web だけ残し、discovery の名前付きコメントを消した)
+  const incoming = { issueStage: 2, comments: { goal: [{ text: 'web', ts: 1, author: '乗員1' }, { text: 'new', ts: 5, author: '乗員1' }] } };
+  const out = keepNewApiComments(existing, incoming);
+  assert.deepEqual(out, {
+    issueStage: 2,
+    comments: {
+      goal: [{ text: 'web', ts: 1, author: '乗員1' }, { text: 'new', ts: 5, author: '乗員1' }, existing.comments.goal[1]],
+      issue: [existing.comments.issue[0]],
+    },
+  });
+  assert.equal(incoming.comments.goal.length, 2, 'incoming は書き換えない');
+  // Web が新 API のコメントを読んだ後なら(同じ ts・text がある)二重にしない
+  const seen = { comments: { goal: [existing.comments.goal[1]] } };
+  assert.deepEqual(keepNewApiComments({ comments: { goal: [existing.comments.goal[1]] } }, seen), seen);
+  // 残すものが無ければ incoming のまま(comments キーを足さない)
+  assert.deepEqual(keepNewApiComments({ comments: { goal: [{ text: 'web', ts: 1 }] } }, { goalDone: true }), { goalDone: true });
+  // mergeProgressWrite でも残る
+  const idx = buildReflectionIndex([{ id: 'r1', visibility: 'org', ownerId: null, orgId: ORG }]);
+  const merged = mergeProgressWrite(W, { r1: existing }, { r1: incoming }, idx);
+  assert.deepEqual(merged.r1, out);
+});
+
+test('keepNewApiComments: 読んだ時刻(readAt)より前からある新 API のコメントは、Web が消せば消え、後に足されたものだけ残る', () => {
+  const before = { text: '読む前', ts: 10, authorUserId: 'u_a', author: '乗員2', via: 'api' };
+  const after = { text: '読んだ後', ts: 30, authorUserId: 'u_a', author: '乗員2', via: 'api' };
+  const same = { text: '同時', ts: 20, authorUserId: 'u_a', author: '乗員2', via: 'api' };
+  const existing = { comments: { goal: [before, same, after] } };
+  assert.deepEqual(keepNewApiComments(existing, { comments: { goal: [] } }, 20), { comments: { goal: [same, after] } });
+  // readAt が無い(古い Web の画面)ときは今までどおり全部残す
+  assert.deepEqual(keepNewApiComments(existing, { comments: { goal: [] } }), { comments: { goal: [before, same, after] } });
+  // mergeProgressWrite に readAt を渡す(項目ごと無い場合も同じ)
+  const idx = buildReflectionIndex([{ id: 'r1', visibility: 'org', ownerId: null, orgId: ORG }]);
+  assert.deepEqual(mergeProgressWrite(W, { r1: existing }, { r1: { comments: {} } }, idx, { readAt: 20 }).r1, { comments: { goal: [same, after] } });
+  assert.deepEqual(mergeProgressWrite(W, { r1: { issueStage: 1, comments: { goal: [before] } } }, {}, idx, { readAt: 20 }), {});
+});
+
+test('mergeProgressWrite: incoming に反省の項目ごと無くても、新 API のコメントだけは残し、進捗の値は戻さない', () => {
+  const idx = buildReflectionIndex([{ id: 'r1', visibility: 'org', ownerId: null, orgId: ORG }, { id: 'r2', visibility: 'org', ownerId: null, orgId: ORG }]);
+  const app = { text: 'app', ts: 2, authorUserId: 'u_a', author: '乗員2', via: 'api' };
+  const existing = {
+    r1: { issueStage: 3, goalDone: true, comments: { goal: [{ text: 'web', ts: 1, author: '乗員1' }, app] } },
+    r2: { issueStage: 1, comments: { goal: [{ text: 'web', ts: 1, author: '乗員1' }] } },
+  };
+  const out = mergeProgressWrite(W, existing, {}, idx);
+  assert.deepEqual(out, { r1: { comments: { goal: [app] } } });
+  assert.deepEqual(keepNewApiComments(existing.r2, {}), {}, '新 API のコメントが無ければ何も足さない');
+});
+
+test('commentAuthorError: 新しく足したコメントは名簿の名前が要る(AI コメントと前からあるコメントは問わない)', () => {
+  const roster = [{ fullName: '乗員1' }, { fullName: '乗員2' }];
+  const existing = { r1: { comments: { goal: [{ text: '旧', ts: 1 }] } } };
+  // 前からある名前なしのコメントはそのまま送り返してよい
+  assert.equal(commentAuthorError(existing, { r1: { comments: { goal: [{ text: '旧', ts: 1 }] } } }, roster), null);
+  // 新しいコメントに名簿の名前があれば通る
+  assert.equal(commentAuthorError(existing, { r1: { comments: { goal: [{ text: '旧', ts: 1 }, { text: '新', ts: 2, author: '乗員2' }] } } }, roster), null);
+  // 名前が無い・名簿外・空白だけは断る
+  assert.match(commentAuthorError(existing, { r1: { comments: { goal: [{ text: '新', ts: 2 }] } } }, roster), /名前/);
+  assert.match(commentAuthorError(existing, { r1: { comments: { issue: [{ text: '新', ts: 2, author: '部外者' }] } } }, roster), /部外者/);
+  assert.match(commentAuthorError({}, { r2: { comments: { goal: [{ text: '新', ts: 2, author: '  ' }] } } }, roster), /名前/);
+  // AI コメントは名前が無くてよい
+  assert.equal(commentAuthorError({}, { r2: { comments: { goal: [{ text: 'AI', ts: 2, ai: true }] } } }, roster), null);
+  // 形の崩れた入力では投げない
+  assert.equal(commentAuthorError(null, { r1: 'x', r2: { comments: { goal: 'x' } } }, roster), null);
+});
+
+test('commentAuthorError: 書けない反省の項目と、読んだ時刻より前の名前なしコメント(別の画面で消されたものの送り返し)は問わない', () => {
+  const roster = [{ fullName: '乗員1' }];
+  const bad = { text: '名無し', ts: 5 };
+  // 書けない反省(canCommentOn が false)の項目は保存のときに捨てられるので、断らない
+  assert.equal(commentAuthorError({}, { rX: { comments: { goal: [bad] } } }, roster, { canCommentOn: (id) => id !== 'rX' }), null);
+  assert.match(commentAuthorError({}, { rY: { comments: { goal: [bad] } } }, roster, { canCommentOn: (id) => id !== 'rX' }), /名前/);
+  // readAt より前の ts の名前なしコメントは「前からあったもの」の送り返しとして通す。readAt 以後は新しいものとして断る
+  assert.equal(commentAuthorError({}, { r1: { comments: { goal: [bad] } } }, roster, { readAt: 10 }), null);
+  assert.match(commentAuthorError({}, { r1: { comments: { goal: [{ text: '新', ts: 10 }] } } }, roster, { readAt: 10 }), /名前/);
+  // 名簿外の名前は readAt によらず断る(名前付きは新しい入力)
+  assert.match(commentAuthorError({}, { r1: { comments: { goal: [{ text: '旧', ts: 5, author: '部外者' }] } } }, roster, { readAt: 10 }), /部外者/);
 });

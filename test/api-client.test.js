@@ -211,3 +211,34 @@ test('api: bfcache 復元・別タブの切替で、固定した組織と違え�
     if (locDesc) Object.defineProperty(globalThis, 'location', locDesc); else delete globalThis.location;
   }
 });
+
+// 進捗は読んだ時刻(X-Sailviz-Read-At)を覚え、保存のときに送り返す(それより前からあるコメントを Web から消せる)。
+const withHeaders = (body, headers = {}) => ({
+  ok: true, status: 200, json: async () => body, headers: { get: (k) => headers[k.toLowerCase()] ?? null },
+});
+test('apiGetOverlay(progress) の読んだ時刻を、apiPutOverlay(progress) が X-Sailviz-Read-At で送り返す', async () => {
+  const api = await freshApi();
+  const calls = recordFetch((url, init) => (init.method === 'PUT' ? okJson({ ok: true }) : withHeaders({}, { 'x-sailviz-read-at': '12345' })));
+  await api.apiGetOverlay('progress');
+  await api.apiPutOverlay('progress', { r1: {} });
+  assert.equal(calls[1].init.headers['X-Sailviz-Read-At'], '12345');
+  // ロードマップには付けない
+  await api.apiPutOverlay('roadmap', {});
+  assert.equal(calls[2].init.headers['X-Sailviz-Read-At'], undefined);
+});
+
+test('apiPutOverlay(progress): 読む前・読んだ時刻の無い応答なら X-Sailviz-Read-At を付けない', async () => {
+  const api = await freshApi();
+  const calls = recordFetch((url, init) => (init.method === 'PUT' ? okJson({ ok: true }) : withHeaders({})));
+  await api.apiPutOverlay('progress', {});
+  await api.apiGetOverlay('progress');
+  await api.apiPutOverlay('progress', {});
+  assert.equal(calls[0].init.headers['X-Sailviz-Read-At'], undefined);
+  assert.equal(calls[2].init.headers['X-Sailviz-Read-At'], undefined);
+});
+
+test('apiPutOverlay: 400 はサーバの理由(名簿外の名前など)を伝える', async () => {
+  const api = await freshApi();
+  recordFetch(() => ({ ok: false, status: 400, json: async () => ({ error: 'コメントに名前がありません' }) }));
+  await assert.rejects(() => api.apiPutOverlay('progress', {}), /コメントに名前がありません/);
+});

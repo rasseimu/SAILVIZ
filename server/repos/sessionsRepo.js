@@ -4,18 +4,13 @@
 // またはレース記録に紐付ける。軌跡は Web の CSV 取込(routes/compat.js の commit)と同じ形で作るので、
 // 互換 API(/api/projects)からは従来の艇として見える。
 import { randomBytes } from 'node:crypto';
-import { parseSensorCsv, buildTrack, jstMidnightMs, jstStamp } from '../sensorimport.js';
-import { emptyProject } from '../minutesimport.js';
-import { uniqueProjectName } from '../../src/projectfs.js';
+import { parseSensorCsv, buildTrack, jstStamp } from '../sensorimport.js';
+import { dayFor, jstDate } from './practiceDayFor.js';
 
-const two = (n) => String(n).padStart(2, '0');
 const genId = (prefix) => `${prefix}_${randomBytes(5).toString('hex')}`;
 
-// JST の 'YYYY-MM-DD'。
-export function jstDate(ms) {
-  const d = new Date(ms + 9 * 3600 * 1000);
-  return `${d.getUTCFullYear()}-${two(d.getUTCMonth() + 1)}-${two(d.getUTCDate())}`;
-}
+// 練習日の器の決め方は practiceDayFor.js(アプリ向け API と共用)。jstDate は既存の import のため再 export する。
+export { jstDate };
 
 // チャンク(各々ヘッダ付きの完結した CSV。§7.4)を seq 順に 1 本へ連結する。ヘッダは先頭の 1 行だけ残す。
 export function joinChunks(csvs) {
@@ -70,29 +65,6 @@ export function createSessionsRepo({ db }) {
     crew.forEach((c, i) => ins.run(sessionId, i, c.role ?? null, c.userId ?? null, c.name));
   }
 
-  // 練習日の器を探す(無ければ作る)。組織の器は「組織×日付」、組織外は「本人×日付」。
-  // 同じ日に器が複数あれば最初に作られた器(§5.2)。新しい器は Web の練習一覧に出るよう名前と practiceDate を持つ。
-  function dayFor({ orgId, ownerUserId, firstPointMs, now }) {
-    const date = jstDate(firstPointMs);
-    const found = orgId
-      ? db.prepare('SELECT * FROM practice_days WHERE org_id = ? AND date = ? ORDER BY created_at, id LIMIT 1').get(orgId, date)
-      : db.prepare('SELECT * FROM practice_days WHERE org_id IS NULL AND owner_user_id = ? AND date = ? ORDER BY created_at, id LIMIT 1').get(ownerUserId, date);
-    if (found) return found;
-    const existing = new Set(db.prepare('SELECT legacy_name FROM practice_days WHERE legacy_name IS NOT NULL').all().map((r) => r.legacy_name));
-    const ws = emptyProject(jstMidnightMs(firstPointMs), new Date(now).toISOString());
-    delete ws.tracks;
-    delete ws.reflections;
-    const row = {
-      id: genId('pd'), org_id: orgId ?? null, owner_user_id: orgId ? null : ownerUserId,
-      date, legacy_name: uniqueProjectName(firstPointMs, existing), web_state: JSON.stringify(ws),
-      saved_at: ws.savedAt, rev: 0, created_at: now, updated_at: now,
-    };
-    db.prepare(`INSERT INTO practice_days (id, org_id, owner_user_id, date, legacy_name, web_state, saved_at, rev, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(row.id, row.org_id, row.owner_user_id, row.date, row.legacy_name, row.web_state, row.saved_at, row.rev, row.created_at, row.updated_at);
-    return row;
-  }
-
   // レース記録(1 ユーザー 1 日 1 件。§5.4)。
   function raceRecordFor({ ownerUserId, firstPointMs, now }) {
     const date = jstDate(firstPointMs);
@@ -114,7 +86,7 @@ export function createSessionsRepo({ db }) {
       db.prepare('UPDATE rec_sessions SET practice_day_id = NULL, race_record_id = ?, position = NULL WHERE id = ?').run(rr, s.id);
       return;
     }
-    const pd = dayFor({ orgId: s.org_id, ownerUserId: s.owner_user_id, firstPointMs, now });
+    const pd = dayFor(db, { orgId: s.org_id, ownerUserId: s.owner_user_id, firstPointMs, now });
     const pos = db.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM rec_sessions WHERE practice_day_id = ?').get(pd.id).p;
     db.prepare('UPDATE rec_sessions SET practice_day_id = ?, race_record_id = NULL, position = ? WHERE id = ?').run(pd.id, pos, s.id);
     bumpDay(pd.id, now);

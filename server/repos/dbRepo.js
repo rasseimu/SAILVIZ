@@ -7,7 +7,12 @@
 //  ② 互換 PUT では既存トラックを消さない(クライアントが知らない=後から届いた軌跡を守る)。
 //  ③ 既存トラックの点列は書き換えず、表示設定(view: name/color/visible/windAxisOverrides)だけ反映。
 //  新規トラック(incoming にあり DB に無い)は点列込みで追加。
-//  反省は incoming で置き換える(Web の編集を尊重。_rev による追加保護は Web が _rev を送る Phase 6 で有効化)。
+//  反省は incoming で置き換える(Web の編集を尊重)。ただし incoming._rev が今の rev と一致しないとき
+//  (Web が古い画面のまま保存したとき)は、incoming に無い「アプリ/音声から送った反省」
+//  (author_user_id があり body.origin が app/voice)を消さない。Web で作った反省(作者なし)は今までどおり消せる。
+//  また、この日の行と突き合わない incoming のうち本文に authorUserId がある反省は新しい行にしない
+//  (Web の createReflection は authorUserId を付けないので、それはアプリの反省を Web が読み返しただけ。
+//  アプリが消したか別の日へ移した反省を、作者なし・組織公開で戻さない。互換経路で作者を偽らせない)。
 import { randomBytes } from 'node:crypto';
 import { decomposeProject, assembleProject, orderParts } from '../domain/projectRows.js';
 import {
@@ -43,6 +48,11 @@ function bodyId(row) {
     const id = JSON.parse(row.body)?.id;
     return id == null ? null : String(id);
   } catch { return null; }
+}
+
+// 反省行の本文に作者(authorUserId)があるか。アプリ/音声から送った反省の本文にだけ付く。
+function bodyHasAuthor(row) {
+  try { return JSON.parse(row.body)?.authorUserId != null; } catch { return false; }
 }
 
 // 点列の指紋。別艇の GPS 軌跡は点数と端点が異なるので同定に十分。
@@ -96,11 +106,20 @@ export function createDbRepo({ db, dataDir }) {
     for (const r of rows.reflections) insertRow(db, 'reflections', r);
   }
 
+  function isAppRow(r) {
+    if (r.author_user_id == null) return false;
+    let origin;
+    try { origin = JSON.parse(r.body)?.origin; } catch { return false; }
+    return origin === 'app' || origin === 'voice';
+  }
+
   // managed な反省行だけを incoming と旧 JSON の反省 id で突き合わせる(トランザクション内で呼ぶ)。
   //  - 一致した行: 位置・本文・作者名表示などを更新(公開範囲 visibility・作者 author_user_id は変えない)
-  //  - 一致しない incoming: 新しい行(公開範囲 org・作者なし)。ただし見えない既存行と同じ id は無視する
+  //  - 一致しない incoming: 新しい行(公開範囲 org・作者なし)。ただし見えない既存行と同じ id は無視する。
+  //    本文に authorUserId がある incoming も無視する(アプリが消した/別の日へ移した反省を Web が読み返しただけ)
   //  - incoming に無い managed 行: 削除。managed でない行(見えない・書けない)は触らない
-  function syncManagedReflections(pdId, incomingRows, isManaged) {
+  //    ただし keepAppRows のとき、作者がいて origin が app/voice の行は消さない(Web の古い画面からの保存対策)
+  function syncManagedReflections(pdId, incomingRows, isManaged, { keepAppRows = false } = {}) {
     const rows = db.prepare('SELECT * FROM reflections WHERE practice_day_id = ?').all(pdId);
     const managed = rows.filter((r) => isManaged({ id: bodyId(r), visibility: r.visibility, ownerId: r.author_user_id ?? null }));
     const managedSet = new Set(managed);
@@ -124,12 +143,16 @@ export function createDbRepo({ db, dataDir }) {
         ).run(r.position, r.legacy_author_name ?? null, r.session_id ?? null, r.body, r.created_at ?? null, r.updated_at, m.id);
       } else if (bid !== '' && hiddenIds.has(bid)) {
         // 見えない既存の反省と同じ id: 上書きしない
+      } else if (bodyHasAuthor(r)) {
+        // 作者付きの本文(アプリの反省)で、この日に行が無い: 消された/移されたものなので戻さない
       } else {
         insertRow(db, 'reflections', { ...r, id: `${pdId}_r_${randomBytes(4).toString('hex')}` });
       }
     }
     for (const m of managed) {
-      if (!matched.has(m.id)) db.prepare('DELETE FROM reflections WHERE id = ?').run(m.id);
+      if (matched.has(m.id)) continue;
+      if (keepAppRows && isAppRow(m)) continue;
+      db.prepare('DELETE FROM reflections WHERE id = ?').run(m.id);
     }
   }
 
@@ -229,6 +252,7 @@ export function createDbRepo({ db, dataDir }) {
         throw err;
       }
       const incoming = { ...obj };
+      const incomingRev = incoming._rev; // 消す前に控える(古い画面かの判定に使う)
       delete incoming._rev; // メタは保存しない
       const now = Date.now();
       db.exec('BEGIN');
@@ -269,7 +293,9 @@ export function createDbRepo({ db, dataDir }) {
         });
         // ② incoming に無い既存トラックは残す(何もしない)
         if (typeof opts.managedReflection === 'function') {
-          syncManagedReflections(pdId, decomp.reflections, opts.managedReflection);
+          // _rev が今の rev と一致しない(無い・古い)ときは、アプリから送った反省を残す
+          const keepAppRows = !(Number.isInteger(incomingRev) && incomingRev === existing.rev);
+          syncManagedReflections(pdId, decomp.reflections, opts.managedReflection, { keepAppRows });
         } else {
           // 反省: incoming で置き換え
           const incomingReflIds = new Set(decomp.reflections.map((r) => r.id));

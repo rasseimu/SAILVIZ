@@ -106,31 +106,99 @@ export function filterProgressRead(subject, progress, reflIndex) {
 
 const withoutComments = (e) => { const { comments, ...rest } = e; return rest; };
 
+// 新 API(/api/reflections/:id/comments)で足したコメント(via: 'api')を、Web の古い画面の全置き換えで消さない(設計書 Phase 4 §6)。
+// 既存のコメントのうち via が 'api' で、incoming の同じ field に ts と text が同じものが無いものを、incoming の field の末尾に足す。
+// readAt(Web が進捗を読んだサーバの時刻)があれば、それより前からあるコメントは Web が消したものとして足さない
+// (新 API のコメントの ts はサーバの時刻)。readAt が無い(古い Web の画面)ときは全部足す。
+// Web で書いたコメント(名前付き)は従来どおり incoming に従う。incoming は書き換えない。
+export function keepNewApiComments(existingEntry, incomingEntry, readAt) {
+  const exC = existingEntry?.comments;
+  if (!exC || typeof exC !== 'object') return incomingEntry;
+  const incC = incomingEntry?.comments && typeof incomingEntry.comments === 'object' ? incomingEntry.comments : {};
+  const knownBefore = (c) => Number.isFinite(readAt) && Number.isFinite(c.ts) && c.ts < readAt;
+  let comments = null;
+  for (const [field, list] of Object.entries(exC)) {
+    if (!Array.isArray(list)) continue;
+    const cur = Array.isArray(incC[field]) ? incC[field] : [];
+    const keep = list.filter((c) => c && c.via === 'api' && !knownBefore(c)
+      && !cur.some((d) => d && d.ts === c.ts && d.text === c.text));
+    if (!keep.length) continue;
+    comments ??= { ...incC };
+    comments[field] = [...cur, ...keep];
+  }
+  return comments ? { ...incomingEntry, comments } : incomingEntry;
+}
+
+// Web が新しく足したコメント(existing の同じ field に ts と text が同じものが無いもの)は、名簿(roster の fullName)の
+// 名前(author)が要る。議事録の取込(validateCommitRows の「名簿外の fullName」)と同じ扱い。AI コメント(ai: true)は問わない。
+// 前からあるコメント(旧データの名前なしを含む)はそのまま送り返してよい。問題が無ければ null、あれば理由の文字列。
+// opts.canCommentOn(id): 主体がコメントを書けない反省の項目は保存で捨てられる(mergeProgressWrite)ので問わない。
+// opts.readAt: Web が読んだ時刻。それより前の ts の名前なしコメントは、別の画面で消された前からのコメントの送り返しなので通す
+//   (全体を断ると、その画面からは何も保存できなくなる)。
+export function commentAuthorError(existing, incoming, roster, { canCommentOn = () => true, readAt } = {}) {
+  const names = new Set((roster || []).map((m) => m.fullName));
+  for (const [id, entry] of Object.entries(incoming || {})) {
+    if (!canCommentOn(id)) continue;
+    const comments = entry && typeof entry === 'object' ? entry.comments : null;
+    if (!comments || typeof comments !== 'object') continue;
+    for (const [field, list] of Object.entries(comments)) {
+      if (!Array.isArray(list)) continue;
+      const prev = existing?.[id]?.comments?.[field];
+      const before = Array.isArray(prev) ? prev : [];
+      for (const c of list) {
+        if (!c || typeof c !== 'object' || c.ai) continue;
+        if (before.some((d) => d && d.ts === c.ts && d.text === c.text)) continue;
+        const author = typeof c.author === 'string' ? c.author.trim() : '';
+        if (!author && Number.isFinite(readAt) && Number.isFinite(c.ts) && c.ts < readAt) continue;
+        if (!author) return 'コメントに名前がありません';
+        if (!names.has(author)) return `名簿外のコメントの名前: ${author}`;
+      }
+    }
+  }
+  return null;
+}
+
 // PUT /api/overlays/progress は全置き換えだが、主体が見えない・更新できない項目は元のまま残す。
 //  - 読めない反省の進捗: 既存のまま(incoming は無視)
 //  - 読めるが進捗を更新できない: 進捗の値は既存のまま
 //  - コメントを書けない: コメントは既存のまま
 //  - incoming に無い項目: 更新できるなら消す(従来の全置き換え)、できなければ残す
-export function mergeProgressWrite(subject, existing, incoming, reflIndex) {
+// 反省 ID(の対象 ts)について、主体が読めるか・進捗を更新できるか・コメントを書けるか。
+// 反省の無い進捗(孤児)は、組織設定済みの共有ログインで書けるときだけ。
+function progressRights(subject, ts) {
+  if (ts && ts.length) {
+    const readable = ts.every((t) => canRead(subject, t));
+    return {
+      readable,
+      canProg: readable && ts.every((t) => canUpdateProgress(subject, t)),
+      canCom: readable && ts.every((t) => canComment(subject, t)),
+    };
+  }
+  const readable = orphanOpen(subject) && subject.canWrite === true;
+  return { readable, canProg: readable, canCom: readable };
+}
+
+// 主体がコメントを書ける反省か(commentAuthorError の canCommentOn)。mergeProgressWrite と同じ判定。
+export const commentableBy = (subject, reflIndex) => (id) => progressRights(subject, reflIndex.get(id)).canCom;
+
+// opts.readAt: Web が進捗を読んだサーバの時刻(keepNewApiComments)。
+export function mergeProgressWrite(subject, existing, incoming, reflIndex, { readAt } = {}) {
   const out = {};
   const ex = existing || {};
   const inc = {}; // オブジェクトでない項目は無視する
   for (const [k, v] of Object.entries(incoming || {})) if (v && typeof v === 'object' && !Array.isArray(v)) inc[k] = v;
   for (const id of new Set([...Object.keys(ex), ...Object.keys(inc)])) {
-    const ts = reflIndex.get(id);
-    let canProg; let canCom; let readable;
-    if (ts && ts.length) {
-      readable = ts.every((t) => canRead(subject, t));
-      canProg = readable && ts.every((t) => canUpdateProgress(subject, t));
-      canCom = readable && ts.every((t) => canComment(subject, t));
-    } else {
-      readable = orphanOpen(subject) && subject.canWrite === true;
-      canProg = readable; canCom = readable;
-    }
+    const { readable, canProg, canCom } = progressRights(subject, reflIndex.get(id));
     if (!readable) { if (id in ex) out[id] = ex[id]; continue; }
     const e = ex[id]; const n = inc[id];
     if (n === undefined) { // incoming に無い
       if (!canProg && e !== undefined) out[id] = e;
+      else if (e !== undefined) {
+        // Web が進捗行の無いうちに読んだ古い一覧でも、読んだ後に新 API で足したコメントだけは残す。
+        // 進捗の値(Web が消したもの)は戻さない。
+        const kept = keepNewApiComments(e, {}, readAt);
+        if (kept.comments) out[id] = kept;
+      }
       continue;
     }
     if (e === undefined) { // 新規
@@ -143,7 +211,7 @@ export function mergeProgressWrite(subject, existing, incoming, reflIndex) {
       continue;
     }
     const base = canProg ? withoutComments(n) : withoutComments(e);
-    const comments = canCom ? n.comments : e.comments;
+    const comments = canCom ? keepNewApiComments(e, n, readAt).comments : e.comments;
     out[id] = comments === undefined ? base : { ...base, comments };
   }
   return out;
