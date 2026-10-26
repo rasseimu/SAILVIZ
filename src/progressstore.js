@@ -34,7 +34,13 @@ export function setGoalDone(obj, reflId, done) {
   return updateEntry(obj, reflId, { goalDone: done });
 }
 
-// コメントは項目(reflId)×フィールド別に {text, ts} の配列で持つ。真実源は書き換えない。
+// コメントの名前の初期値。前に選んだ名前(saved)が今の名簿(roster の fullName)にあればそれ、無ければ ''(選ばせる)。
+export function commentName(roster, saved) {
+  return saved && (roster || []).some((m) => m.fullName === saved) ? saved : '';
+}
+
+// コメントは項目(reflId)×フィールド別に {text, ts, author} の配列で持つ。真実源は書き換えない。
+// author は名簿の名前(議事録の取込と同じ fullName。サーバが名簿外を断る)。AI コメントは meta に ai を持ち、author は無い。
 // field ∈ {goal,issue,discovery}。ts は投稿時刻(ms)。
 export function addComment(obj, reflId, field, text, ts, meta = {}) {
   const t = String(text).trim();

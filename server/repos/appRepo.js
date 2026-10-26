@@ -133,13 +133,15 @@ export function createAppRepo({ db }) {
   // id は互換 API と同じ <反省ID>#<field>#<n>(n はその field の既存件数。互換の保存は 0 から振り直す)。
   // extra に authorUserId を入れて、互換の readOverlay / writeOverlay(decomposeProgress)と往復させる。
   // 互換の進捗は進捗行のある反省のコメントしか返さないので、進捗行が無ければ空の行も作る。
-  function addComment({ reflId, field, text, authorUserId, ts }) {
+  // extra の authorUserId・author(名前)・via は、互換の進捗(assembleProgress)でコメントのキーに戻る。
+  // via: 'api' は「新 API で足した」目印(compatAccess.keepNewApiComments)。
+  function addComment({ reflId, field, text, authorUserId, author = null, ts }) {
     return tx(() => {
       let n = db.prepare('SELECT COUNT(*) AS c FROM reflection_comments WHERE reflection_id = ? AND field = ?').get(reflId, field).c;
       const taken = db.prepare('SELECT 1 FROM reflection_comments WHERE id = ?');
       while (taken.get(`${reflId}#${field}#${n}`)) n += 1; // 番号が飛んだ旧データでも id を重ねない
       const id = `${reflId}#${field}#${n}`;
-      const extra = authorUserId != null ? JSON.stringify({ authorUserId }) : null;
+      const extra = JSON.stringify({ ...(authorUserId != null ? { authorUserId } : {}), ...(author ? { author } : {}), via: 'api' });
       db.prepare('INSERT INTO reflection_comments (id, reflection_id, field, text, ts, author_user_id, extra) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run(id, reflId, field, text, ts, authorUserId ?? null, extra);
       db.prepare('INSERT OR IGNORE INTO reflection_progress (reflection_id, issue_stage, goal_done, text, extra, updated_at) VALUES (?, NULL, NULL, NULL, NULL, ?)')

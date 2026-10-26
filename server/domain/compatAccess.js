@@ -106,18 +106,21 @@ export function filterProgressRead(subject, progress, reflIndex) {
 
 const withoutComments = (e) => { const { comments, ...rest } = e; return rest; };
 
-// 新 API(/api/reflections/:id/comments)で足したコメントを、Web の古い画面の全置き換えで消さない(設計書 Phase 4 §6)。
-// 既存のコメントのうち authorUserId があり、incoming の同じ field に ts と text が同じものが無いものを、
-// incoming の field の末尾に足す。作者なし(Web で書いた)のコメントは従来どおり incoming に従う。incoming は書き換えない。
-export function keepNewApiComments(existingEntry, incomingEntry) {
+// 新 API(/api/reflections/:id/comments)で足したコメント(via: 'api')を、Web の古い画面の全置き換えで消さない(設計書 Phase 4 §6)。
+// 既存のコメントのうち via が 'api' で、incoming の同じ field に ts と text が同じものが無いものを、incoming の field の末尾に足す。
+// readAt(Web が進捗を読んだサーバの時刻)があれば、それより前からあるコメントは Web が消したものとして足さない
+// (新 API のコメントの ts はサーバの時刻)。readAt が無い(古い Web の画面)ときは全部足す。
+// Web で書いたコメント(名前付き)は従来どおり incoming に従う。incoming は書き換えない。
+export function keepNewApiComments(existingEntry, incomingEntry, readAt) {
   const exC = existingEntry?.comments;
   if (!exC || typeof exC !== 'object') return incomingEntry;
   const incC = incomingEntry?.comments && typeof incomingEntry.comments === 'object' ? incomingEntry.comments : {};
+  const knownBefore = (c) => Number.isFinite(readAt) && Number.isFinite(c.ts) && c.ts < readAt;
   let comments = null;
   for (const [field, list] of Object.entries(exC)) {
     if (!Array.isArray(list)) continue;
     const cur = Array.isArray(incC[field]) ? incC[field] : [];
-    const keep = list.filter((c) => c && c.authorUserId != null
+    const keep = list.filter((c) => c && c.via === 'api' && !knownBefore(c)
       && !cur.some((d) => d && d.ts === c.ts && d.text === c.text));
     if (!keep.length) continue;
     comments ??= { ...incC };
@@ -126,12 +129,37 @@ export function keepNewApiComments(existingEntry, incomingEntry) {
   return comments ? { ...incomingEntry, comments } : incomingEntry;
 }
 
+// Web が新しく足したコメント(existing の同じ field に ts と text が同じものが無いもの)は、名簿(roster の fullName)の
+// 名前(author)が要る。議事録の取込(validateCommitRows の「名簿外の fullName」)と同じ扱い。AI コメント(ai: true)は問わない。
+// 前からあるコメント(旧データの名前なしを含む)はそのまま送り返してよい。問題が無ければ null、あれば理由の文字列。
+export function commentAuthorError(existing, incoming, roster) {
+  const names = new Set((roster || []).map((m) => m.fullName));
+  for (const [id, entry] of Object.entries(incoming || {})) {
+    const comments = entry && typeof entry === 'object' ? entry.comments : null;
+    if (!comments || typeof comments !== 'object') continue;
+    for (const [field, list] of Object.entries(comments)) {
+      if (!Array.isArray(list)) continue;
+      const prev = existing?.[id]?.comments?.[field];
+      const before = Array.isArray(prev) ? prev : [];
+      for (const c of list) {
+        if (!c || typeof c !== 'object' || c.ai) continue;
+        if (before.some((d) => d && d.ts === c.ts && d.text === c.text)) continue;
+        const author = typeof c.author === 'string' ? c.author.trim() : '';
+        if (!author) return 'コメントに名前がありません';
+        if (!names.has(author)) return `名簿外のコメントの名前: ${author}`;
+      }
+    }
+  }
+  return null;
+}
+
 // PUT /api/overlays/progress は全置き換えだが、主体が見えない・更新できない項目は元のまま残す。
 //  - 読めない反省の進捗: 既存のまま(incoming は無視)
 //  - 読めるが進捗を更新できない: 進捗の値は既存のまま
 //  - コメントを書けない: コメントは既存のまま
 //  - incoming に無い項目: 更新できるなら消す(従来の全置き換え)、できなければ残す
-export function mergeProgressWrite(subject, existing, incoming, reflIndex) {
+// opts.readAt: Web が進捗を読んだサーバの時刻(keepNewApiComments)。
+export function mergeProgressWrite(subject, existing, incoming, reflIndex, { readAt } = {}) {
   const out = {};
   const ex = existing || {};
   const inc = {}; // オブジェクトでない項目は無視する
@@ -152,9 +180,9 @@ export function mergeProgressWrite(subject, existing, incoming, reflIndex) {
     if (n === undefined) { // incoming に無い
       if (!canProg && e !== undefined) out[id] = e;
       else if (e !== undefined) {
-        // Web が進捗行の無いうちに読んだ古い一覧でも、新 API で足したコメント(作者付き)だけは残す。
+        // Web が進捗行の無いうちに読んだ古い一覧でも、読んだ後に新 API で足したコメントだけは残す。
         // 進捗の値(Web が消したもの)は戻さない。
-        const kept = keepNewApiComments(e, {});
+        const kept = keepNewApiComments(e, {}, readAt);
         if (kept.comments) out[id] = kept;
       }
       continue;
@@ -169,7 +197,7 @@ export function mergeProgressWrite(subject, existing, incoming, reflIndex) {
       continue;
     }
     const base = canProg ? withoutComments(n) : withoutComments(e);
-    const comments = canCom ? keepNewApiComments(e, n).comments : e.comments;
+    const comments = canCom ? keepNewApiComments(e, n, readAt).comments : e.comments;
     out[id] = comments === undefined ? base : { ...base, comments };
   }
   return out;

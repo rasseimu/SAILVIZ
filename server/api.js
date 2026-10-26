@@ -86,6 +86,7 @@ export function createApi({
     const ctx = {
       store, token, geminiKey, viewEnabled, viewSecret, viewUser, viewPassword,
       secureCookie, path, method, requireViewer, requireWrite, getSubject, accounts,
+      now: authOptions.now || Date.now,
     };
 
     try {

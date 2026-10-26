@@ -939,6 +939,10 @@ body.no-org #progress-bar, body.no-org #progress-nav, body.no-org #progress-cont
 .comment-save, .comment-cancel { font-size: 12px; padding: 2px 8px; cursor: pointer;
   border: 1px solid #ccc; border-radius: 4px; background: #fff; flex: 0 0 auto; }
 .comment-save { background: #1558d6; color: #fff; border-color: #1558d6; }
+.comment-name { flex: 0 0 auto; font: inherit; font-size: 12px; padding: 2px 4px; max-width: 9em;
+  border: 1px solid #ccc; border-radius: 4px; background: #fff; }
+.comment-name-missing { border-color: #c00; outline: 1px solid #c00; }
+.comment-author { font-size: 11px; font-weight: 600; color: #555; }
 .comment-ai-badge { flex: 0 0 auto; font-size: 12px; line-height: 1.4; }
 .comment-ai .comment-text { color: #1558d6; }
 .comment-ref-link { font-size: 12px; color: #1558d6; text-decoration: underline; margin-left: 4px; }

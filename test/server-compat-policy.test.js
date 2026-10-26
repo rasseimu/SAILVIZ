@@ -2,6 +2,7 @@
 // 互換 API の認可を policy に切り替えた結合テスト(S2.5-P2)。DB 版 repo + アカウント。node:sqlite が要る(Node >=22.5 / 24)。
 // 合成データのみ。実名・実位置・資格情報は使わない。
 import { test, before, after } from 'node:test';
+import { legacyMemberList } from '../src/members.js';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -246,6 +247,8 @@ test('(3) DELETE: 見えない中身がある器は 403、全部見える器は�
 });
 
 // ---- (4) オーバーレイ ----
+// 共有ログインの名簿(従来の名簿)の先頭の人。新しいコメントには名簿の名前が要る。
+const MEMBER = legacyMemberList()[0].fullName;
 test('(4)(c)(d) progress: 見える反省の進捗だけ読める。private の進捗は PUT しても書き換わらない', { skip }, async () => {
   db.exec('DELETE FROM reflection_comments; DELETE FROM reflection_progress;');
   repo.writeOverlay('progress', {
@@ -260,8 +263,8 @@ test('(4)(c)(d) progress: 見える反省の進捗だけ読める。private の�
   const put = await call(baseA, 'PUT', '/api/overlays/progress', {
     ck: cookie,
     body: {
-      rOrg: { issueStage: 9, goalDone: true, comments: { goal: [{ text: '自組織へのコメント', ts: 6 }] } },
-      rOtherPub: { issueStage: 99, comments: { goal: [{ text: '他組織へ', ts: 7 }] } },
+      rOrg: { issueStage: 9, goalDone: true, comments: { goal: [{ text: '自組織へのコメント', ts: 6, author: MEMBER }] } },
+      rOtherPub: { issueStage: 99, comments: { goal: [{ text: '他組織へ', ts: 7, author: MEMBER }] } },
       rPriv: { issueStage: 77 },
     },
   });

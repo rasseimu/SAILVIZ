@@ -4,6 +4,7 @@ import {
   STORAGE_KEY, loadProgress, saveProgress,
   setIssueStage, setGoalDone, setTextOverride, summarize,
   addComment, hasAiComment, setCardDeleted,
+  commentName,
 } from '../src/progressstore.js';
 import { WIND_BANDS } from '../src/windband.js';
 
@@ -208,4 +209,17 @@ test('summarize.firstDateMs は scope ごとの最初の反省日(課題有無�
   assert.equal(s.firstDateMs.all, 1500);        // 全体では風間の1500が最古
   assert.equal(s.firstDateMs['本間 由真'], 2000); // 本間は2000が最古
   assert.equal(s.firstDateMs['風間 大煕'], 1500);
+});
+
+test('commentName: 覚えた名前が名簿にあればそれ、無ければ空(選ばせる)', () => {
+  const roster = [{ fullName: '乗員1' }, { fullName: '乗員2' }];
+  assert.equal(commentName(roster, '乗員2'), '乗員2');
+  assert.equal(commentName(roster, '辞めた人'), '');
+  assert.equal(commentName(roster, null), '');
+  assert.equal(commentName([], '乗員1'), '');
+});
+
+test('addComment: 名前(author)を付けて保存する', () => {
+  const out = addComment({}, 'r1', 'goal', ' よい ', 5, { author: '乗員1' });
+  assert.deepEqual(out.r1.comments.goal, [{ text: 'よい', ts: 5, author: '乗員1' }]);
 });

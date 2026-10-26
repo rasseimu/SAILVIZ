@@ -111,7 +111,9 @@
 - PUT progress：`canUpdateProgress`（読めるが書けないなら 403 `forbidden`）。渡されたキーだけを更新し、`extra` は保つ。
 - GET comments：`canReadReflectionExtras`。`[{id, field, text, ts, authorUserId, authorName}]`（`ts` の古い順）。
 - POST comments：`canComment`。`field` は空でない文字列、`text` は 1〜2000 字。行の id は互換 API と同じ `<reflId>#<field>#<n>`（n はその field の次の番号）にし、Web の進捗画面にも出るようにする。応答は作ったコメント。
-- **Web の古い画面の保存で消さない**：互換の進捗保存（`writeOverlay('progress')`）は全消しして入れ直すので、Web が読んだ後に新 API で足したコメントは消えてしまう。互換の進捗保存は、`author_user_id` が入っていて Web の送ったものに無いコメントを残す。
+- **Web の古い画面の保存で消さない**：互換の進捗保存（`writeOverlay('progress')`）は全消しして入れ直すので、Web が読んだ後に新 API で足したコメントは消えてしまう。互換の進捗保存は、新 API で足したコメント（目印 `via: 'api'`）のうち Web の送ったものに無いものを残す。
+  - **改訂（2026-10-26 利用者決定）**：コメントは名前付きでも Web から消せる。互換の `GET /api/overlays/progress` は読んだサーバの時刻を `X-Sailviz-Read-At` で返し、Web は保存のときに送り返す。保存に無い新 API のコメントは、読んだ時刻より前からあれば消し、後に足されたものだけ残す。時刻を送らない（古い画面の）保存では今までどおり残す。
+- **Web のコメントには名前が要る（2026-10-26 利用者決定）**：Web のコメント欄で名前を名簿（議事録の取込と同じ `rosterForSubject`）から選ばせ、`author`（`fullName`）として保存する。互換の進捗保存は、新しく足したコメントの `author` が名簿に無ければ 400（議事録の「名簿外の fullName」と同じ）。前からある名前なしのコメントと AI コメント（`ai: true`）は問わない。新 API のコメントにも同じ形の名前（その組織での旧氏名、無ければ表示名）を付ける。
 
 ## 7. 練習日（`/api/practice-days`）
 

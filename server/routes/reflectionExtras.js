@@ -9,6 +9,7 @@
 import { send } from './http.js';
 import { err, readJson } from './jsonApi.js';
 import { displayNameFor } from '../domain/displayName.js';
+import { orgMemberEntries } from '../orgMembers.js';
 import { canReadReflectionExtras, canComment, canUpdateProgress } from '../domain/policy.js';
 
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
@@ -66,7 +67,13 @@ export function createReflectionExtrasRoute({ app, accounts, now = () => Date.no
       err(res, 422, 'invalid_input', 'field は 1〜50 字、text は 1〜2000 字です'); return true;
     }
     const authorUserId = subject.kind === 'user' ? subject.userId : null;
-    const c = app.addComment({ reflId, field: b.field, text: b.text, authorUserId, ts: now() });
+    // Web と同じ名前(反省の組織での旧氏名、無ければ表示名)を付ける。Web の名前付きコメント・議事録の fullName と揃える。
+    const orgId = found.target.orgId;
+    const author = authorUserId
+      ? ((orgId && orgMemberEntries(accounts, orgId).find((e) => e.userId === authorUserId)?.legacyName)
+        || displayNameFor(accounts.getUser(authorUserId)))
+      : null;
+    const c = app.addComment({ reflId, field: b.field, text: b.text, authorUserId, author, ts: now() });
     send(res, 201, { ...c, authorName: authorUserId ? displayNameFor(accounts.getUser(authorUserId)) : null });
     return true;
   };

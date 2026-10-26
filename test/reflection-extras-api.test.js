@@ -1,7 +1,7 @@
 // test/reflection-extras-api.test.js — 反省の進捗とコメントの API(/api/reflections/:id/...。設計書 Phase 4 §6)。合成データのみ。
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startApi, skip } from './helpers/apiHarness.js';
+import { startApi, skip, clock } from './helpers/apiHarness.js';
 
 let h;
 before(async () => { if (!skip) h = await startApi(); });
@@ -116,8 +116,9 @@ test('comments: POST したコメントが互換 readOverlay(\'progress\') に f
   await coms(id, u.tok, 'POST', { field: 'issue', text: 'b' });
   const ov = await h.repo.readOverlay('progress');
   assert.deepEqual(ov[id].comments.issue, [
-    { text: 'a', ts: 1_000_000, authorUserId: u.user.id },
-    { text: 'b', ts: 1_000_000, authorUserId: u.user.id },
+    // 名前は Web の名簿と同じ(反省の people[0] '乗員1' がこの組織での旧氏名になる)
+    { text: 'a', ts: 1_000_000, authorUserId: u.user.id, author: '乗員1', via: 'api' },
+    { text: 'b', ts: 1_000_000, authorUserId: u.user.id, author: '乗員1', via: 'api' },
   ]);
   // 互換の全置き換えで往復しても変わらない
   await h.repo.writeOverlay('progress', ov);
@@ -173,4 +174,80 @@ test('互換の進捗保存: 進捗行の無いうちに Web が読み、その�
   assert.equal(r.status, 200);
   assert.deepEqual((await (await coms(id, u.tok)).json()).map((c) => c.text), ['最初']);
   assert.deepEqual(await (await prog(id, u.tok)).json(), { issueStage: null, goalDone: false, text: null });
+});
+
+// ---------- Web のコメントの名前と、読んだ時刻による削除 ----------
+// 時計を進められるサーバ(t を書き換える)。
+let t = clock;
+let k;
+before(async () => { if (!skip) k = await startApi({ authOptions: { now: () => t } }); });
+after(async () => { if (k) await k.close(); });
+const kRefl = async (u, o) => {
+  const id = rid();
+  assert.equal((await k.call('PUT', `/api/me/reflections/${id}`, u.tok, refl({ visibility: 'org' }), org(o))).status, 200);
+  return id;
+};
+const kGet = async (u) => {
+  const r = await k.call('GET', '/api/overlays/progress', u.tok);
+  assert.equal(r.status, 200);
+  return { readAt: r.headers.get('x-sailviz-read-at'), body: await r.json() };
+};
+const kPut = (u, body, readAt) => k.call('PUT', '/api/overlays/progress', u.tok, body, readAt ? { 'x-sailviz-read-at': readAt } : {});
+const kComs = async (id, u) => (await (await k.call('GET', `/api/reflections/${id}/comments`, u.tok)).json());
+
+test('互換の進捗: GET は読んだ時刻を X-Sailviz-Read-At で返す', { skip }, async () => {
+  const u = k.mkUser(); k.mkOrg(u);
+  t = clock + 5000;
+  assert.equal((await kGet(u)).readAt, String(clock + 5000));
+});
+
+test('互換の進捗: 読んだ後にアプリで足したコメントは、読んだ時刻付きの古い PUT でも残る', { skip }, async () => {
+  const u = k.mkUser(); const o = k.mkOrg(u);
+  const id = await kRefl(u, o);
+  t = clock + 10_000;
+  const old = await kGet(u);
+  t = clock + 20_000;
+  await k.call('POST', `/api/reflections/${id}/comments`, u.tok, { field: 'goal', text: 'アプリから' });
+  assert.equal((await kPut(u, old.body, old.readAt)).status, 200);
+  assert.deepEqual((await kComs(id, u)).map((c) => c.text), ['アプリから']);
+});
+
+test('互換の進捗: 読んだ時刻より前からあるアプリのコメントは、Web から消せる', { skip }, async () => {
+  const u = k.mkUser(); const o = k.mkOrg(u);
+  const id = await kRefl(u, o);
+  t = clock + 30_000;
+  await k.call('POST', `/api/reflections/${id}/comments`, u.tok, { field: 'goal', text: '消す' });
+  t = clock + 40_000;
+  const cur = await kGet(u);
+  assert.equal(cur.body[id].comments.goal.length, 1);
+  const r = await kPut(u, { ...cur.body, [id]: { ...cur.body[id], comments: {} } }, cur.readAt);
+  assert.equal(r.status, 200);
+  assert.deepEqual(await kComs(id, u), []);
+});
+
+test('互換の進捗: Web は名簿の名前付きでコメントを足せて、消せる', { skip }, async () => {
+  const u = k.mkUser(); const o = k.mkOrg(u);
+  const id = await kRefl(u, o);
+  t = clock + 50_000;
+  const cur = await kGet(u);
+  // 名簿の名前は旧氏名(反省の people[0] '乗員1')
+  const c = { text: 'Web から', ts: clock + 50_001, author: '乗員1' };
+  assert.equal((await kPut(u, { ...cur.body, [id]: { comments: { issue: [c] } } }, cur.readAt)).status, 200);
+  assert.deepEqual((await k.repo.readOverlay('progress'))[id].comments.issue, [c]);
+  t = clock + 60_000;
+  const cur2 = await kGet(u);
+  assert.equal((await kPut(u, { ...cur2.body, [id]: { comments: {} } }, cur2.readAt)).status, 200);
+  assert.equal((await k.repo.readOverlay('progress'))[id]?.comments, undefined);
+});
+
+test('互換の進捗: Web の新しいコメントに名前が無い・名簿外なら 400 で、何も保存しない', { skip }, async () => {
+  const u = k.mkUser(); const o = k.mkOrg(u);
+  const id = await kRefl(u, o);
+  const cur = await kGet(u);
+  for (const c of [{ text: '名無し', ts: 1 }, { text: '部外', ts: 2, author: '部外者' }]) {
+    const r = await kPut(u, { ...cur.body, [id]: { issueStage: 2, comments: { goal: [c] } } }, cur.readAt);
+    assert.equal(r.status, 400);
+    assert.match((await r.json()).error, /名前/);
+  }
+  assert.equal((await k.repo.readOverlay('progress'))[id], undefined);
 });

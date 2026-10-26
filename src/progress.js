@@ -4,7 +4,7 @@
 import { memberList, memberLabel } from './members.js';
 import {
   loadProgress, saveProgress, setIssueStage, setGoalDone, setTextOverride,
-  addComment, removeComment, hasAiComment, summarize, setCardDeleted,
+  addComment, removeComment, hasAiComment, summarize, setCardDeleted, commentName,
 } from './progressstore.js';
 import { renderChart } from './chartview.js';
 import { icon } from './icons.js';
@@ -46,6 +46,7 @@ function fmtDateTime(ms) {
   }).format(new Date(ms));
 }
 const HIDE_COMMENTS_KEY = 'sailviz.progress.hideComments';
+const COMMENT_NAME_KEY = 'sailviz.progress.commentName'; // 前に選んだコメントの名前(このブラウザだけ)
 
 // loadProgressData/saveProgressData を注入すると保存フォルダのファイルへ永続化できる。
 // 未指定時は従来どおり localStorage のみ(単体でも動く)。
@@ -66,6 +67,7 @@ export function createProgress({
   let goalView = 'changes'; // 目標の変化枠の表示 'changes'(目標の変化) | 'roadmap'(現在地ステッパー・一時状態)
   let entriesLoading = false; // 練習(反省)読込中=true。軽量なロードマップ枠を先に描画するための一時状態。
   const selectedCards = new Set(); // AIコメント対象に選んだカード `${reflId}:${field}`(一時的・保存しない)
+  const savedCommentName = () => { try { return globalThis.localStorage?.getItem(COMMENT_NAME_KEY) ?? null; } catch { return null; } };
   let hideComments = (() => { try { return globalThis.localStorage?.getItem(HIDE_COMMENTS_KEY) === '1'; } catch { return false; } })();
 
   // 進捗の保存はUIを止めないよう非同期・投げっぱなし(失敗はログのみ。
@@ -190,11 +192,16 @@ export function createProgress({
           : `<span class="comment-ref-src">${esc(r.title || '参考')}</span>`));
         link = ` <span class="comment-refs">（出典: ${parts.join('、')}）</span>`;
       }
+      const who = c.author ? `<span class="comment-author">${esc(memberLabel(c.author))}</span>` : '';
       return `<div class="comment-row${c.ai ? ' comment-ai' : ''}"><span class="comment-when">${fmtDateTime(c.ts)}<button class="comment-del writes-json" data-cfield="${field}" data-crefl="${esc(reflId)}" data-cidx="${i}" title="削除">×</button></span>`
-        + `${badge}<span class="comment-text">${esc(c.text)}${link}</span></div>`;
+        + `${badge}${who}<span class="comment-text">${esc(c.text)}${link}</span></div>`;
     }).join('');
+    const roster = memberList();
+    const name = commentName(roster, savedCommentName());
+    const nameSelect = `<select class="comment-name" aria-label="名前"><option value="">名前</option>${
+      roster.map((m) => `<option value="${esc(m.fullName)}"${m.fullName === name ? ' selected' : ''}>${esc(m.displayName ?? m.fullName)}</option>`).join('')}</select>`;
     const input = commenting === `${reflId}:${field}`
-      ? `<div class="comment-input-row"><textarea class="comment-input" rows="1" data-cfield="${field}" data-crefl="${esc(reflId)}" placeholder="コメントを入力"></textarea>`
+      ? `<div class="comment-input-row">${nameSelect}<textarea class="comment-input" rows="1" data-cfield="${field}" data-crefl="${esc(reflId)}" placeholder="コメントを入力"></textarea>`
         + `<button class="comment-save writes-json" data-cfield="${field}" data-crefl="${esc(reflId)}">追加</button>`
         + '<button class="comment-cancel">取消</button></div>'
       : '';
@@ -346,9 +353,14 @@ export function createProgress({
         const input = content.querySelector('.comment-input');
         if (input) { input.focus(); autogrow(input); }
       }));
+    // 名前(名簿から選ぶ)が無ければ追加しない。選んだ名前は次の入力の初期値に覚える。
     const addC = (input) => {
+      const sel = content.querySelector('.comment-name');
+      const author = sel?.value || '';
+      if (!author) { sel?.classList.add('comment-name-missing'); sel?.focus(); return; }
+      try { globalThis.localStorage?.setItem(COMMENT_NAME_KEY, author); } catch { /* noop */ }
       const ms = Date.now();
-      progress = addComment(progress, input.dataset.crefl, input.dataset.cfield, input.value, ms);
+      progress = addComment(progress, input.dataset.crefl, input.dataset.cfield, input.value, ms, { author });
       persist();
       commenting = null;
       renderBody();
