@@ -161,3 +161,55 @@ test('DB でないとき（app 無し）は 503', { skip }, async () => {
     assert.equal((await r.json()).error.code, 'unavailable');
   } finally { await x.close(); }
 });
+
+// ---- 互換保存(Web の writeProject)でアプリの反省を守る(設計書 Phase 4 §4) ----
+const webSave = (pdId, proj) => h.repo.writeProject(pdId, proj, { managedReflection: () => true });
+const ids = (pdId) => h.repo.readProject(pdId).reflections.map((r) => r.id);
+
+test('互換保存: Web が読んだ後にアプリが反省を足し、古い一覧で保存しても残る', { skip }, async () => {
+  const u = h.mkUser(); const first = rid(); const second = rid();
+  const { practiceDayId } = await (await put(first, u.tok, refl())).json();
+  const stale = h.repo.readProject(practiceDayId); // Web が読む
+  await put(second, u.tok, refl({ notes: { goal: 'あとから' } })); // アプリが足す
+  webSave(practiceDayId, stale); // 古い一覧のまま保存
+  assert.deepEqual(ids(practiceDayId).sort(), [first, second].sort());
+  assert.equal(count(second), 1);
+});
+
+test('互換保存: Web がアプリの反省の本文を直して保存すると、本文が直り二重にならない', { skip }, async () => {
+  const u = h.mkUser(); const id = rid();
+  const { practiceDayId } = await (await put(id, u.tok, refl())).json();
+  for (const dropRev of [false, true]) {
+    const proj = h.repo.readProject(practiceDayId);
+    if (dropRev) delete proj._rev; // 古い画面扱い(守りが働く経路)
+    const target = proj.reflections.find((r) => r.id === id);
+    target.notes = { ...target.notes, goal: dropRev ? 'Web直し2' : 'Web直し1' };
+    webSave(practiceDayId, proj);
+    assert.equal(count(id), 1);
+    assert.equal(h.repo.readProject(practiceDayId).reflections.find((r) => r.id === id).notes.goal, dropRev ? 'Web直し2' : 'Web直し1');
+  }
+});
+
+test('互換保存: _rev が今の rev と一致すれば、Web はアプリの反省を消せる', { skip }, async () => {
+  const u = h.mkUser(); const id = rid();
+  const { practiceDayId } = await (await put(id, u.tok, refl())).json();
+  const proj = h.repo.readProject(practiceDayId); // _rev は今の rev
+  proj.reflections = proj.reflections.filter((r) => r.id !== id);
+  webSave(practiceDayId, proj);
+  assert.equal(count(id), 0);
+});
+
+test('互換保存: Web で作った反省（作者なし）は今までどおり消せる', { skip }, async () => {
+  const u = h.mkUser(); const appId = rid(); const webId = rid();
+  const { practiceDayId } = await (await put(appId, u.tok, refl())).json();
+  const withWeb = h.repo.readProject(practiceDayId);
+  withWeb.reflections.push({ id: webId, origin: 'web', createdAt: 1791015001000, notes: { goal: 'web' } });
+  webSave(practiceDayId, withWeb);
+  assert.equal(count(webId), 1);
+  const stale = h.repo.readProject(practiceDayId); // 古い _rev にして保存の守りを働かせる
+  stale._rev = 0;
+  stale.reflections = stale.reflections.filter((r) => r.id !== webId);
+  webSave(practiceDayId, stale);
+  assert.equal(count(webId), 0); // 作者なしは消える
+  assert.equal(count(appId), 1); // アプリの行は残る
+});
