@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SailViz プライバシーポリシー</title>
+  <link rel="icon" type="image/png" href="/src/favicon.png" />
+  <link rel="stylesheet" href="/src/account/account.css" />
+  <style>
+    .pp h1 { font-size: 22px; margin: 0 0 4px; }
+    .pp h2 { font-size: 17px; margin: 0 0 10px; }
+    .pp p, .pp li { line-height: 1.7; font-size: 15px; }
+    .pp ul { padding-left: 1.3em; margin: 0; }
+    .pp table { border-collapse: collapse; width: 100%; font-size: 14px; }
+    .pp th, .pp td { border: 1px solid var(--ac-border); padding: 6px 8px; text-align: left; vertical-align: top; }
+  </style>
+</head>
+<body class="ac-body">
+  <header class="ac-top">
+    <a class="ac-brand" href="/"><img src="/src/logo.png" alt="" /> SailViz</a>
+  </header>
+  <main class="ac-main pp">
+    <div class="ac-card">
+      <h1>プライバシーポリシー</h1>
+      <p class="ac-note">対象：SailViz の Web サイトとスマホアプリ「sailviz-field」／制定日：2026年10月26日</p>
+      <p>SailViz（以下「本サービス」）は、セーリング練習の GPS 記録と振り返りのためのサービスです。本サービスが集める情報、その使い道、保存のしかたを次のとおり定めます。</p>
+    </div>
+
+    <div class="ac-card">
+      <h2>1. 集める情報と使い道</h2>
+      <table>
+        <tr><th>情報</th><th>いつ集めるか</th><th>使い道</th></tr>
+        <tr><td>氏名・メールアドレス・所属・パスワード</td><td>アカウント登録時</td><td>本人の確認、ログイン、確認メールとパスワード再設定メールの送信、組織のメンバー表示。パスワードはハッシュ（scrypt）にして保存し、元の文字列は保存しません</td></tr>
+        <tr><td>位置情報（GPS の緯度・経度・速度・方位・精度・時刻）</td><td>アプリで「記録開始」を押してから「終了」を押すまでの間だけ</td><td>練習・レースの軌跡の表示と解析。記録していない間は位置情報を使いません</td></tr>
+        <tr><td>艇番・乗員の氏名</td><td>記録の開始前に入力したとき</td><td>どの艇で誰が乗ったかを軌跡に結び付けるため</td></tr>
+        <tr><td>音声（声の反省）</td><td>アプリで「声で反省」の録音をしている間だけ</td><td>文字起こしと、反省の項目への整理。録音した音声は処理後 30 日で削除し、文字起こしは残します</td></tr>
+        <tr><td>反省・進捗・ロードマップ・コメント</td><td>入力したとき</td><td>振り返り、議事録の作成、指導者からのコメント</td></tr>
+        <tr><td>OS の種類とバージョン・アプリのバージョン</td><td>記録や録音を送るとき</td><td>不具合の調査。端末名や端末 ID は送りません</td></tr>
+      </table>
+      <p>広告の表示、行動の追跡、第三者へのデータの販売はしません。</p>
+    </div>
+
+    <div class="ac-card">
+      <h2>2. 公開範囲</h2>
+      <ul>
+        <li>練習の軌跡と反省は、作成者が「自分のみ／所属内／全体公開」から選びます。</li>
+        <li>レースの記録は全体公開です。乗員の氏名もレースの記録に載ります（レースを選んだときにアプリでお知らせします）。</li>
+        <li>乗員として選ばれたユーザーは、そのセッションを閲覧できます。</li>
+        <li>声の反省の音声と文字起こしは本人だけが見られます。練習日の議事録には「所属内」以上で公開された反省だけを使い、「自分のみ」の反省は使いません。</li>
+      </ul>
+    </div>
+
+    <div class="ac-card">
+      <h2>3. 外部のサービスへの送信</h2>
+      <ul>
+        <li><strong>Fly.io</strong>（日本・東京リージョン）：本サービスのサーバとデータの保存先です。</li>
+        <li><strong>Google Gemini API</strong>：声の反省の文字起こしと整理、議事録の作成、AI コメントの作成のために、音声・文字起こし・反省の内容を送ります。</li>
+        <li><strong>Brevo</strong>：確認メールとパスワード再設定メールの送信のために、メールアドレスと氏名を送ります。</li>
+        <li><strong>気象庁（アメダス）</strong>：反省に風のデータを入れるため、気象庁の公開データを取得します。個人の情報は送りません。</li>
+      </ul>
+      <p>法令に基づく場合を除き、上記以外の第三者にデータを渡しません。</p>
+    </div>
+
+    <div class="ac-card">
+      <h2>4. 保存と削除</h2>
+      <ul>
+        <li>アカウントを削除すると、本人のデータ（アカウント情報・軌跡・反省・声の反省など）を削除します。他の人のセッションの乗員欄にある本人の名前は「（退会済み）」に置き換えます。</li>
+        <li>アカウントの削除は、アプリの「設定 › アカウント削除」または Web の <a href="/account">アカウント画面</a> からできます。</li>
+        <li>記録・録音・入力した内容は、送信が終わるまで端末にも保存します。</li>
+      </ul>
+    </div>
+
+    <div class="ac-card">
+      <h2>5. 端末の権限</h2>
+      <ul>
+        <li>位置情報：記録中だけ使います。「アプリの使用中のみ許可」で動き、「常に許可」は求めません。</li>
+        <li>マイク：声の反省の録音中だけ使います。</li>
+        <li>通知：記録中・録音中の常駐通知と、自動停止のお知らせに使います。</li>
+      </ul>
+    </div>
+
+    <div class="ac-card">
+      <h2>6. 未成年の利用者</h2>
+      <p>本サービスは高校生を含む部活動・クラブでの利用を想定しています。未成年の方は、保護者の同意を得たうえで利用してください。</p>
+    </div>
+
+    <div class="ac-card">
+      <h2>7. 変更とお問い合わせ</h2>
+      <p>このポリシーを変えるときは、このページで知らせます。</p>
+      <p>お問い合わせ：<a href="mailto:muraserei37@gmail.com">muraserei37@gmail.com</a></p>
+    </div>
+  </main>
+</body>
+</html>
