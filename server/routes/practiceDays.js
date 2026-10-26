@@ -2,6 +2,9 @@
 // アプリ向け API のうち練習日の器(Phase 4。設計書 §7)。
 //   GET   /api/practice-days?scope=mine|org|public   [{id, date, name, orgId, sessionCount, reflectionCount}](date の新しい順)
 //   GET   /api/practice-days/:id                     {practiceDay: {id, date, name, orgId, webState}, sessions, reflections}
+//   GET   /api/race-records?scope=mine|public        [{id, ownerUserId, raceDate, title, venue, sessionCount}](raceDate の新しい順)
+//   GET   /api/race-records/:id                      {raceRecord: {id, ownerUserId, raceDate, title, venue}, sessions}
+//   (レースは常に公開。mine は要ログイン、public(既定)と 1 件は未ログインでも読める。設計書 §8)
 //   PATCH /api/practice-days/:id                     {webState} → {practiceDay}(注釈・表示設定。送ったキーだけ上書き)
 // 器の中身(セッション・反省)は policy の visibleDayItems で絞る。見える中身が無い器は「無い」扱い(一覧に出さない・404)。
 // ただし器の組織のメンバーと、組織なしの器の持ち主本人には、中身が空でも器を見せる。
@@ -21,11 +24,35 @@ const dayJson = (day) => ({ id: day.id, date: day.date, name: day.legacy_name ??
 export function createPracticeDaysRoute({ app, sessions, now = () => Date.now() }) {
   return async function practiceDaysRoute(req, res, ctx) {
     const { path, method } = ctx;
-    if (path !== '/api/practice-days' && !path.startsWith('/api/practice-days/')) return false;
+    const isRace = path === '/api/race-records' || path.startsWith('/api/race-records/');
+    if (!isRace && path !== '/api/practice-days' && !path.startsWith('/api/practice-days/')) return false;
     if (!app || !sessions) { err(res, 503, 'unavailable', 'このサーバでは使えません'); return true; }
     const subject = ctx.getSubject();
     if (subject?.orgForbidden) { err(res, 403, 'org_forbidden', '所属していない組織です'); return true; }
     const me = subject?.kind === 'user' ? subject : null;
+
+    if (isRace) {
+      if (method !== 'GET') return false;
+      if (path === '/api/race-records') {
+        const scope = new URL(req.url, 'http://localhost').searchParams.get('scope') || 'public';
+        if (scope !== 'mine' && scope !== 'public') { err(res, 422, 'invalid_input', 'scope は mine・public のどれかです'); return true; }
+        if (scope === 'mine' && !me) { err(res, 401, 'unauthorized', 'ログインが必要です'); return true; }
+        send(res, 200, app.listRaceRecords(scope === 'mine' ? { ownerUserId: me.userId } : {}));
+        return true;
+      }
+      const rm = /^\/api\/race-records\/([^/]+)$/.exec(path);
+      if (!rm) return false;
+      let rid;
+      try { rid = decodeURIComponent(rm[1]); } catch { err(res, 404, 'not_found', 'レース記録が見つかりません'); return true; }
+      const got = app.raceRecordWithSessions(rid);
+      if (!got) { err(res, 404, 'not_found', 'レース記録が見つかりません'); return true; }
+      const r = got.raceRecord;
+      send(res, 200, {
+        raceRecord: { id: r.id, ownerUserId: r.owner_user_id ?? null, raceDate: r.race_date, title: r.title ?? null, venue: r.venue ?? null },
+        sessions: got.sessions.map((s) => sessionJson(sessions, s)),
+      });
+      return true;
+    }
 
     // 器の中身のうち主体に見えるものと、器そのものを見せてよいか。見せられなければ null。
     const visibleDay = (parts) => {

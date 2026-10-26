@@ -227,6 +227,22 @@ export function createAppRepo({ db }) {
     });
   }
 
-  return { listDays, dayParts, patchDayWebState, getMyRoadmap, putMyRoadmap, findReflectionRows, upsertMyReflection, listMyReflections, deleteMyReflection, reflectionTarget, reflectionJson,
+  // レース記録の一覧(race_date の新しい順)。ownerUserId を渡せばその人のだけ。sessionCount はひも付くセッション数。
+  function listRaceRecords({ ownerUserId } = {}) {
+    const rows = db.prepare(`SELECT r.id, r.owner_user_id, r.race_date, r.title, r.venue,
+        (SELECT COUNT(*) FROM rec_sessions s WHERE s.race_record_id = r.id) AS n
+      FROM race_records r ${ownerUserId ? 'WHERE r.owner_user_id = ?' : ''}
+      ORDER BY r.race_date DESC, r.id`).all(...(ownerUserId ? [ownerUserId] : []));
+    return rows.map((r) => ({ id: r.id, ownerUserId: r.owner_user_id ?? null, raceDate: r.race_date, title: r.title ?? null, venue: r.venue ?? null, sessionCount: r.n }));
+  }
+
+  // レース記録 1 件とそのセッション行(開始の古い順)。無ければ null。
+  function raceRecordWithSessions(id) {
+    const rr = db.prepare('SELECT * FROM race_records WHERE id = ?').get(id);
+    if (!rr) return null;
+    return { raceRecord: rr, sessions: db.prepare('SELECT * FROM rec_sessions WHERE race_record_id = ? ORDER BY started_ms, id').all(id) };
+  }
+
+  return { listRaceRecords, raceRecordWithSessions, listDays, dayParts, patchDayWebState, getMyRoadmap, putMyRoadmap, findReflectionRows, upsertMyReflection, listMyReflections, deleteMyReflection, reflectionTarget, reflectionJson,
     readableReflection, getProgress, putProgress, listComments, addComment };
 }
