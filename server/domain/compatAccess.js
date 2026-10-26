@@ -106,6 +106,26 @@ export function filterProgressRead(subject, progress, reflIndex) {
 
 const withoutComments = (e) => { const { comments, ...rest } = e; return rest; };
 
+// 新 API(/api/reflections/:id/comments)で足したコメントを、Web の古い画面の全置き換えで消さない(設計書 Phase 4 §6)。
+// 既存のコメントのうち authorUserId があり、incoming の同じ field に ts と text が同じものが無いものを、
+// incoming の field の末尾に足す。作者なし(Web で書いた)のコメントは従来どおり incoming に従う。incoming は書き換えない。
+export function keepNewApiComments(existingEntry, incomingEntry) {
+  const exC = existingEntry?.comments;
+  if (!exC || typeof exC !== 'object') return incomingEntry;
+  const incC = incomingEntry?.comments && typeof incomingEntry.comments === 'object' ? incomingEntry.comments : {};
+  let comments = null;
+  for (const [field, list] of Object.entries(exC)) {
+    if (!Array.isArray(list)) continue;
+    const cur = Array.isArray(incC[field]) ? incC[field] : [];
+    const keep = list.filter((c) => c && c.authorUserId != null
+      && !cur.some((d) => d && d.ts === c.ts && d.text === c.text));
+    if (!keep.length) continue;
+    comments ??= { ...incC };
+    comments[field] = [...cur, ...keep];
+  }
+  return comments ? { ...incomingEntry, comments } : incomingEntry;
+}
+
 // PUT /api/overlays/progress は全置き換えだが、主体が見えない・更新できない項目は元のまま残す。
 //  - 読めない反省の進捗: 既存のまま(incoming は無視)
 //  - 読めるが進捗を更新できない: 進捗の値は既存のまま
@@ -143,7 +163,7 @@ export function mergeProgressWrite(subject, existing, incoming, reflIndex) {
       continue;
     }
     const base = canProg ? withoutComments(n) : withoutComments(e);
-    const comments = canCom ? n.comments : e.comments;
+    const comments = canCom ? keepNewApiComments(e, n).comments : e.comments;
     out[id] = comments === undefined ? base : { ...base, comments };
   }
   return out;

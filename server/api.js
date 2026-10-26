@@ -12,6 +12,7 @@ import { createAuthRoute, unavailableRoute } from './routes/auth.js';
 import { createOrgsRoute } from './routes/orgs.js';
 import { createSessionsRoute } from './routes/sessions.js';
 import { createMeRoute } from './routes/me.js';
+import { createReflectionExtrasRoute } from './routes/reflectionExtras.js';
 import { createMailer } from './mail.js';
 import { resolveSubject } from './compatPrincipal.js';
 import { randomBytes } from 'node:crypto';
@@ -40,6 +41,8 @@ export function createApi({
   const sessionsRoute = createSessionsRoute({ sessions: accounts ? sessions : null, accounts, now: authOptions.now });
   // アプリ向け API の「自分のもの」(Phase 4。§4)。app(appRepo)は STORAGE=db のときだけ。無ければ 503。
   const meRoute = createMeRoute({ app: accounts ? app : null, accounts, now: authOptions.now });
+  // 反省の進捗とコメント(Phase 4。§6)。app が無ければ /api/reflections/* は 503。
+  const reflectionExtrasRoute = createReflectionExtrasRoute({ app: accounts ? app : null, accounts, now: authOptions.now });
   // 閲覧ゲート: user/password が両方設定されている時のみ有効。
   // 有効時はランダム秘密を発行し、ログイン成功で Cookie に載せる(パスワードは載せない)。
   const viewEnabled = Boolean(viewUser && viewPassword);
@@ -91,6 +94,7 @@ export function createApi({
       if (await orgsRoute(req, res, ctx)) return true;
       if (await sessionsRoute(req, res, ctx)) return true;
       if (await meRoute(req, res, ctx)) return true;
+      if (await reflectionExtrasRoute(req, res, ctx)) return true;
       if (await compatRoute(req, res, ctx)) return true;
       send(res, 404, { error: 'no route' });
       return true;

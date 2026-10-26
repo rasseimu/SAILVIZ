@@ -6,6 +6,7 @@ import { legacySharedPrincipal, user, anonymous } from '../server/domain/policy.
 import {
   isCompatWriter, canSeeProject, filterProject, canPutDay, canDeleteDay, managedReflectionPredicate,
   buildReflectionIndex, filterProgressRead, mergeProgressWrite, filterRoadmapRead, mergeRoadmapWrite,
+  keepNewApiComments,
 } from '../server/domain/compatAccess.js';
 
 const ORG = 'o_main';
@@ -316,4 +317,35 @@ test('filterRoadmapRead / mergeRoadmapWrite: user は表示中の組織の行だ
   assert.equal(out.b1.goal, '3', '表示中でない組織の行は元のまま');
   assert.equal(out.N.goal, 'new');
   assert.deepEqual(mergeRoadmapWrite(FORBIDDEN, rm, { a1: { goal: 'x' }, N: { goal: 'n' } }, access), rm);
+});
+
+test('keepNewApiComments: Web の古い進捗にないアプリのコメントを残し、Web で消した作者なしのコメントは残さない', () => {
+  const existing = {
+    issueStage: 1,
+    comments: {
+      goal: [{ text: 'web', ts: 1 }, { text: 'app', ts: 2, authorUserId: 'u_a' }],
+      issue: [{ text: 'app2', ts: 3, authorUserId: 'u_b' }],
+      discovery: [{ text: '消した', ts: 4 }],
+    },
+  };
+  // Web はアプリのコメントを読む前の進捗を送る(goal の web だけ残し、discovery を消した)
+  const incoming = { issueStage: 2, comments: { goal: [{ text: 'web', ts: 1 }, { text: 'new', ts: 5 }] } };
+  const out = keepNewApiComments(existing, incoming);
+  assert.deepEqual(out, {
+    issueStage: 2,
+    comments: {
+      goal: [{ text: 'web', ts: 1 }, { text: 'new', ts: 5 }, { text: 'app', ts: 2, authorUserId: 'u_a' }],
+      issue: [{ text: 'app2', ts: 3, authorUserId: 'u_b' }],
+    },
+  });
+  assert.equal(incoming.comments.goal.length, 2, 'incoming は書き換えない');
+  // Web がアプリのコメントを読んだ後なら(同じ ts・text がある)二重にしない
+  const seen = { comments: { goal: [{ text: 'app', ts: 2, authorUserId: 'u_a' }] } };
+  assert.deepEqual(keepNewApiComments({ comments: { goal: [{ text: 'app', ts: 2, authorUserId: 'u_a' }] } }, seen), seen);
+  // 残すものが無ければ incoming のまま(comments キーを足さない)
+  assert.deepEqual(keepNewApiComments({ comments: { goal: [{ text: 'web', ts: 1 }] } }, { goalDone: true }), { goalDone: true });
+  // mergeProgressWrite でも残る
+  const idx = buildReflectionIndex([{ id: 'r1', visibility: 'org', ownerId: null, orgId: ORG }]);
+  const merged = mergeProgressWrite(W, { r1: existing }, { r1: incoming }, idx);
+  assert.deepEqual(merged.r1, out);
 });

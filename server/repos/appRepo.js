@@ -1,9 +1,10 @@
 // server/repos/appRepo.js
-// アプリ向け API(Phase 4。設計書 §4)の DB 窓口。まずは反省(reflections)。
+// アプリ向け API(Phase 4。設計書 §4・§6)の DB 窓口。反省(reflections)と、その進捗・コメント。
 // 1 行 = 反省 1 件。行の id は合成 ID、利用者が知る反省 ID(refl…)は body(JSON)の id にある。
 // body には反省オブジェクトをそのまま入れる(互換 API が body を Web へ返すので、Web とアプリで同じ内容に見える)。
 import { randomBytes } from 'node:crypto';
 import { dayFor } from './practiceDayFor.js';
+import { canRead } from '../domain/policy.js';
 
 export function createAppRepo({ db }) {
   const tx = (fn) => {
@@ -88,6 +89,65 @@ export function createAppRepo({ db }) {
     });
   }
 
+  // ---- 進捗とコメント(設計書 §6)。reflection_progress / reflection_comments の reflection_id は反省 ID(body.id)。----
+  // 同じ反省 ID の行のうち、主体が読める最初の行とその認可対象。読めなければ null。
+  function readableReflection(subject, reflId) {
+    for (const row of findReflectionRows(reflId)) {
+      const target = reflectionTarget(row);
+      if (canRead(subject, target)) return { row, target };
+    }
+    return null;
+  }
+
+  const progressJson = (row) => {
+    let text = null;
+    if (row?.text != null) { try { text = JSON.parse(row.text); } catch { /* 壊れた JSON は null */ } }
+    return { issueStage: row?.issue_stage ?? null, goalDone: !!row?.goal_done, text };
+  };
+  const getProgress = (reflId) => progressJson(db.prepare('SELECT * FROM reflection_progress WHERE reflection_id = ?').get(reflId));
+
+  // 渡したキーだけ更新する(extra=互換の未マップキーは保つ)。行が無ければ作る。
+  function putProgress(reflId, patch, now) {
+    return tx(() => {
+      const row = db.prepare('SELECT * FROM reflection_progress WHERE reflection_id = ?').get(reflId);
+      const next = {
+        issue_stage: 'issueStage' in patch ? patch.issueStage : (row?.issue_stage ?? null),
+        goal_done: 'goalDone' in patch ? (patch.goalDone ? 1 : 0) : (row?.goal_done ?? null),
+        text: 'text' in patch ? JSON.stringify(patch.text) : (row?.text ?? null),
+      };
+      if (row) {
+        db.prepare('UPDATE reflection_progress SET issue_stage = ?, goal_done = ?, text = ?, updated_at = ? WHERE reflection_id = ?')
+          .run(next.issue_stage, next.goal_done, next.text, now, reflId);
+      } else {
+        db.prepare('INSERT INTO reflection_progress (reflection_id, issue_stage, goal_done, text, extra, updated_at) VALUES (?, ?, ?, ?, NULL, ?)')
+          .run(reflId, next.issue_stage, next.goal_done, next.text, now);
+      }
+      return getProgress(reflId);
+    });
+  }
+
+  const commentJson = (r) => ({ id: r.id, field: r.field, text: r.text, ts: r.ts, authorUserId: r.author_user_id ?? null });
+  const listComments = (reflId) => db.prepare('SELECT * FROM reflection_comments WHERE reflection_id = ? ORDER BY ts, id')
+    .all(reflId).map(commentJson);
+
+  // id は互換 API と同じ <反省ID>#<field>#<n>(n はその field の既存件数。互換の保存は 0 から振り直す)。
+  // extra に authorUserId を入れて、互換の readOverlay / writeOverlay(decomposeProgress)と往復させる。
+  // 互換の進捗は進捗行のある反省のコメントしか返さないので、進捗行が無ければ空の行も作る。
+  function addComment({ reflId, field, text, authorUserId, ts }) {
+    return tx(() => {
+      let n = db.prepare('SELECT COUNT(*) AS c FROM reflection_comments WHERE reflection_id = ? AND field = ?').get(reflId, field).c;
+      const taken = db.prepare('SELECT 1 FROM reflection_comments WHERE id = ?');
+      while (taken.get(`${reflId}#${field}#${n}`)) n += 1; // 番号が飛んだ旧データでも id を重ねない
+      const id = `${reflId}#${field}#${n}`;
+      const extra = authorUserId != null ? JSON.stringify({ authorUserId }) : null;
+      db.prepare('INSERT INTO reflection_comments (id, reflection_id, field, text, ts, author_user_id, extra) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(id, reflId, field, text, ts, authorUserId ?? null, extra);
+      db.prepare('INSERT OR IGNORE INTO reflection_progress (reflection_id, issue_stage, goal_done, text, extra, updated_at) VALUES (?, NULL, NULL, NULL, NULL, ?)')
+        .run(reflId, ts);
+      return { id, field, text, ts, authorUserId: authorUserId ?? null };
+    });
+  }
+
   // 自分のロードマップ(roadmaps は user_id UNIQUE。無ければ空)。
   function getMyRoadmap(userId) {
     const row = db.prepare('SELECT goal, milestones FROM roadmaps WHERE user_id = ?').get(userId);
@@ -112,5 +172,6 @@ export function createAppRepo({ db }) {
     });
   }
 
-  return { getMyRoadmap, putMyRoadmap, findReflectionRows, upsertMyReflection, listMyReflections, deleteMyReflection, reflectionTarget, reflectionJson };
+  return { getMyRoadmap, putMyRoadmap, findReflectionRows, upsertMyReflection, listMyReflections, deleteMyReflection, reflectionTarget, reflectionJson,
+    readableReflection, getProgress, putProgress, listComments, addComment };
 }
