@@ -152,26 +152,40 @@ test('1件: 組織のメンバーには空の器も見え、見えない反省�
   assert.deepEqual(l.map((x) => [x.id, x.sessionCount, x.reflectionCount]), [[only.pdId, 0, 0]]);
 });
 
-test('PATCH: 組織のメンバーは webState を変えられ rev が上がり、tracks を送っても軌跡は変わらない', { skip }, async () => {
+test('PATCH: 組織のメンバーは webState を変えられ(送ったキーだけ)rev が上がり、tracks を送っても軌跡は変わらない', { skip }, async () => {
   const a = h.mkUser(); const b = h.mkUser();
   const org = h.mkOrg(a, b);
   const { s, fin } = await h.recordFull(a, { visibility: 'private' }, orgH(org), Date.UTC(2026, 5, 1, 0, 0, 0));
   const pdId = fin.attachedTo.id;
   const rev0 = h.db.prepare('SELECT rev FROM practice_days WHERE id = ?').get(pdId).rev;
+  const ws0 = JSON.parse(h.db.prepare('SELECT web_state FROM practice_days WHERE id = ?').get(pdId).web_state);
+  assert.ok(Number.isFinite(ws0.practiceDate));
   const track0 = h.db.prepare('SELECT * FROM tracks WHERE session_id = ?').get(s.id);
   const reflCount = () => h.db.prepare('SELECT COUNT(*) c FROM reflections WHERE practice_day_id = ?').get(pdId).c;
 
+  // 送ったキーだけ変わり、送らないキー(practiceDate・version・savedAt など)は残る(上の階層の浅いマージ)。
   const ws = { mode: 'race', marks: [{ id: 'm1', lat: 35.3, lng: 139.48 }], tracks: [{ id: 'bogus', points: [] }], reflections: [{ id: 'x' }] };
   const r = await patchDay(b.tok, pdId, { webState: ws }, orgH(org));
   assert.equal(r.status, 200);
   const body = await r.json();
-  assert.deepEqual(body.practiceDay.webState, { mode: 'race', marks: ws.marks });
+  const merged = { ...ws0, mode: 'race', marks: ws.marks };
+  delete merged.tracks; delete merged.reflections;
+  assert.deepEqual(body.practiceDay.webState, merged);
+  assert.equal(body.practiceDay.webState.practiceDate, ws0.practiceDate);
+  assert.equal(body.practiceDay.webState.version, ws0.version);
 
   assert.equal(h.db.prepare('SELECT rev FROM practice_days WHERE id = ?').get(pdId).rev, rev0 + 1);
   assert.deepEqual(h.db.prepare('SELECT * FROM tracks WHERE session_id = ?').get(s.id), track0);
   assert.equal(reflCount(), 0);
   const g = await (await getDay(b.tok, pdId, orgH(org))).json();
-  assert.deepEqual(g.practiceDay.webState, { mode: 'race', marks: ws.marks });
+  assert.deepEqual(g.practiceDay.webState, merged);
+  // 互換の練習日検索(practiceDate)でも見つかり続ける。
+  assert.ok(h.repo.findProjectsByPracticeDate(ws0.practiceDate).some((x) => x.id === pdId));
+
+  // savedAt を送れば saved_at 列も揃う。
+  const savedAt = '2026-06-01T12:00:00.000Z';
+  assert.equal((await patchDay(b.tok, pdId, { webState: { savedAt } }, orgH(org))).status, 200);
+  assert.equal(h.db.prepare('SELECT saved_at FROM practice_days WHERE id = ?').get(pdId).saved_at, savedAt);
 
   // 組織なしの器は持ち主本人が変えられる。webState がオブジェクトでなければ 422、未ログインは 401。
   const solo = h.mkUser();

@@ -2,7 +2,7 @@
 // アプリ向け API のうち練習日の器(Phase 4。設計書 §7)。
 //   GET   /api/practice-days?scope=mine|org|public   [{id, date, name, orgId, sessionCount, reflectionCount}](date の新しい順)
 //   GET   /api/practice-days/:id                     {practiceDay: {id, date, name, orgId, webState}, sessions, reflections}
-//   PATCH /api/practice-days/:id                     {webState} → {practiceDay}(注釈・表示設定の置き換え)
+//   PATCH /api/practice-days/:id                     {webState} → {practiceDay}(注釈・表示設定。送ったキーだけ上書き)
 // 器の中身(セッション・反省)は policy の visibleDayItems で絞る。見える中身が無い器は「無い」扱い(一覧に出さない・404)。
 // ただし器の組織のメンバーと、組織なしの器の持ち主本人には、中身が空でも器を見せる。
 // mine・org は要ログイン(401)、public と 1 件は未ログインでも読める。エラーは { error: { code, message } }。
@@ -93,7 +93,9 @@ export function createPracticeDaysRoute({ app, sessions, now = () => Date.now() 
       err(res, 422, 'invalid_input', 'JSON を読めません'); return true;
     }
     if (!isObj(b) || !isObj(b.webState)) { err(res, 422, 'invalid_input', 'webState はオブジェクトです'); return true; }
-    send(res, 200, { practiceDay: dayJson(app.patchDayWebState(day.id, b.webState, now())) });
+    const updated = app.patchDayWebState(day.id, b.webState, now());
+    if (!updated) { notFound(); return true; } // 読んだ後に器が消えた
+    send(res, 200, { practiceDay: dayJson(updated) });
     return true;
   };
 }

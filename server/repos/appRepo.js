@@ -208,14 +208,23 @@ export function createAppRepo({ db }) {
     };
   }
 
-  // web_state を置き換えて rev を上げる。tracks・reflections は別の表が正本なので web_state に入れない
-  // (decomposeProject と同じ。送られても無視し、軌跡・反省は変わらない)。
+  // web_state に送られたキーだけを上書きし(上の階層の浅いマージ)、rev を上げる。送らないキー
+  // (version・savedAt・practiceDate など。互換 API の練習日検索や assembleProject が使う)は残す。
+  // tracks・reflections は別の表が正本なので web_state に入れない(decomposeProject と同じ。送られても無視)。
+  // saved_at 列は dbRepo.writeProject と同じく web_state.savedAt に揃える。器が無ければ null。
   function patchDayWebState(pdId, webState, now) {
-    const ws = { ...webState };
-    delete ws.tracks;
-    delete ws.reflections;
-    db.prepare('UPDATE practice_days SET web_state = ?, rev = rev + 1, updated_at = ? WHERE id = ?').run(JSON.stringify(ws), now, pdId);
-    return db.prepare('SELECT * FROM practice_days WHERE id = ?').get(pdId);
+    return tx(() => {
+      const row = db.prepare('SELECT web_state FROM practice_days WHERE id = ?').get(pdId);
+      if (!row) return null;
+      let cur = {};
+      try { const v = JSON.parse(row.web_state); if (v && typeof v === 'object' && !Array.isArray(v)) cur = v; } catch { /* 壊れた JSON は空から */ }
+      const ws = { ...cur, ...webState };
+      delete ws.tracks;
+      delete ws.reflections;
+      db.prepare('UPDATE practice_days SET web_state = ?, saved_at = ?, rev = rev + 1, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(ws), ws.savedAt ?? null, now, pdId);
+      return db.prepare('SELECT * FROM practice_days WHERE id = ?').get(pdId);
+    });
   }
 
   return { listDays, dayParts, patchDayWebState, getMyRoadmap, putMyRoadmap, findReflectionRows, upsertMyReflection, listMyReflections, deleteMyReflection, reflectionTarget, reflectionJson,
