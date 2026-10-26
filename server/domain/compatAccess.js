@@ -151,6 +151,12 @@ export function mergeProgressWrite(subject, existing, incoming, reflIndex) {
     const e = ex[id]; const n = inc[id];
     if (n === undefined) { // incoming に無い
       if (!canProg && e !== undefined) out[id] = e;
+      else if (e !== undefined) {
+        // Web が進捗行の無いうちに読んだ古い一覧でも、新 API で足したコメント(作者付き)だけは残す。
+        // 進捗の値(Web が消したもの)は戻さない。
+        const kept = keepNewApiComments(e, {});
+        if (kept.comments) out[id] = kept;
+      }
       continue;
     }
     if (e === undefined) { // 新規

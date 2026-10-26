@@ -162,3 +162,15 @@ test('DB でないとき（app 無し）は /api/reflections/* が 503', { skip 
     assert.equal((await r.json()).error.code, 'unavailable');
   } finally { await x.close(); }
 });
+
+test('互換の進捗保存: 進捗行の無いうちに Web が読み、その後アプリで最初のコメントを足しても、古い進捗の PUT で消えない', { skip }, async () => {
+  const u = h.mkUser(); const o = h.mkOrg(u);
+  const id = await mkRefl(u, o, 'org');
+  const old = await (await h.call('GET', '/api/overlays/progress', u.tok)).json();
+  assert.equal(id in old, false);
+  await coms(id, u.tok, 'POST', { field: 'issue', text: '最初' });
+  const r = await h.call('PUT', '/api/overlays/progress', u.tok, old);
+  assert.equal(r.status, 200);
+  assert.deepEqual((await (await coms(id, u.tok)).json()).map((c) => c.text), ['最初']);
+  assert.deepEqual(await (await prog(id, u.tok)).json(), { issueStage: null, goalDone: false, text: null });
+});

@@ -349,3 +349,14 @@ test('keepNewApiComments: Web の古い進捗にないアプリのコメント�
   const merged = mergeProgressWrite(W, { r1: existing }, { r1: incoming }, idx);
   assert.deepEqual(merged.r1, out);
 });
+
+test('mergeProgressWrite: incoming に反省の項目ごと無くても、作者付きのコメントだけは残し、進捗の値は戻さない', () => {
+  const idx = buildReflectionIndex([{ id: 'r1', visibility: 'org', ownerId: null, orgId: ORG }, { id: 'r2', visibility: 'org', ownerId: null, orgId: ORG }]);
+  const existing = {
+    r1: { issueStage: 3, goalDone: true, comments: { goal: [{ text: 'web', ts: 1 }, { text: 'app', ts: 2, authorUserId: 'u_a' }] } },
+    r2: { issueStage: 1, comments: { goal: [{ text: 'web', ts: 1 }] } },
+  };
+  const out = mergeProgressWrite(W, existing, {}, idx);
+  assert.deepEqual(out, { r1: { comments: { goal: [{ text: 'app', ts: 2, authorUserId: 'u_a' }] } } });
+  assert.deepEqual(keepNewApiComments(existing.r2, {}), {}, '作者付きが無ければ何も足さない');
+});
