@@ -6,6 +6,7 @@ export function createStore(api) {
   return {
     listProjects: () => api.apiListProjects(),
     listSummaries: () => api.apiListSummaries(),
+    listReflections: () => api.apiListReflections(),
     // 練習は ID で読み書きする。新規だけ名前(採番済みのファイル名)を渡して作り、{ id, name } を受け取る。
     createProject: (name, obj) => api.apiCreateProject(name, obj),
     readProject: (id) => api.apiGetProject(id),

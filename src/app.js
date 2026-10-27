@@ -2059,11 +2059,13 @@ const dashboard = createDashboard({
   loadEntries: loadProjectEntries,
 });
 
-// 進捗画面: 保存済み全練習に加え、現在の未保存練習(取込直後の反省を含む)も渡す。
+// 進捗画面: 保存済み全練習の反省に加え、現在の未保存練習(取込直後の反省を含む)も渡す。
 // 反省 id で重複排除するため、保存済みと現在練習が同一でも二重計上しない(progress.js 側)。
+// 集計に使うのは反省だけなので、軌跡(点列)を含む練習全体ではなく反省だけの一覧を読む(軽い)。
 const progress = createProgress({
   loadEntries: async () => {
-    const entries = await loadProjectEntries();
+    const entries = (await store.listReflections())
+      .map(({ id, name, reflections }) => ({ id, name, project: { reflections: Array.isArray(reflections) ? reflections : [] } }));
     if (state.reflections.length) {
       entries.push({ name: '(現在の練習・未保存)', project: { reflections: state.reflections } });
     }

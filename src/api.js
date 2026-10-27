@@ -67,6 +67,8 @@ const projectPath = (id) => `/api/projects/${encodeURIComponent(id)}`;
 
 export async function apiListProjects() { return getJson('/api/projects'); }
 export async function apiListSummaries() { return getJson('/api/summaries'); }
+// 練習ごとの反省だけ [{ id, name, reflections }](軌跡を含まない。進捗画面の集計用)。
+export async function apiListReflections() { return getJson('/api/reflections'); }
 export async function apiGetProject(id) { return getJson(projectPath(id)); }
 
 // 新しい練習を作る。name は採番済みのファイル名。戻り値 { id, name }。

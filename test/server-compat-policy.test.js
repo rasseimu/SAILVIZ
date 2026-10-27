@@ -145,6 +145,21 @@ test('(2) summaries も見える中身だけで数える・見えない器は出
   assert.deepEqual(rowsOut.map((r) => r.name).sort(), [D1, D3, D4].sort());
 });
 
+test('(2) 反省だけの一覧(GET /api/reflections)も見える反省だけ・見えない器は出ない。軌跡は返さない', { skip }, async () => {
+  const byName = async (opt) => Object.fromEntries((await call(baseA, 'GET', '/api/reflections', opt)).json
+    .map((e) => [e.name, e]));
+  const shared = await byName({ ck: cookie });
+  assert.deepEqual(Object.keys(shared).sort(), [D1, D3, D4].sort());
+  assert.deepEqual(shared[D1].reflections.map((r) => r.id), ['rOrg']);
+  assert.deepEqual(shared[D3].reflections.map((r) => r.id), ['rOtherPub'], '他組織は public だけ');
+  assert.equal(shared[D1].id, pid(D1));
+  assert.equal(shared[D1].tracks, undefined, '軌跡は返さない');
+  const owner = await byName({ auth: ownerTok });
+  assert.deepEqual(owner[D1].reflections.map((r) => r.id), ['rOrg', 'rPriv'], '作成者は自分の private も');
+  assert.deepEqual(owner[D2].reflections.map((r) => r.id), ['rP2']);
+  assert.equal((await call(baseA, 'GET', '/api/reflections')).status, 401);
+});
+
 test('(1)(2) ログインユーザー(Bearer): 組織メンバーは org まで、作成者は自分の private も、他組織は public だけ', { skip }, async () => {
   const ids = async (tok, name) => (await call(baseA, 'GET', `/api/projects/${pid(name)}`, { auth: tok })).json?.reflections?.map((r) => r.id);
   assert.deepEqual(await ids(memberTok, D1), ['rOrg']);
