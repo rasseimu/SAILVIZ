@@ -303,3 +303,26 @@ test('roadmap: 2 組織の __team__ は別々に保存され、片方の PUT で
   assert.equal(repo.listRoadmapAccess().length, 3);
   await rm(dataDir, { recursive: true, force: true });
 });
+
+test('getProjectAccess は軌跡の点列を読まずに、全体を読んだときと同じ access を返す', { skip: skipMsg }, async () => {
+  const { db, dataDir } = await freshRepo();
+  // prepare に渡る SQL を記録する(点列 = tracks.points を読む SQL が出ないことを確かめる)
+  const sqls = [];
+  const spy = new Proxy(db, { get: (t, k) => (k === 'prepare' ? (sql) => { sqls.push(sql); return t.prepare(sql); } : (typeof t[k] === 'function' ? t[k].bind(t) : t[k])) });
+  const repo = createDbRepo({ db: spy, dataDir });
+  try {
+    const { id } = await repo.createProject(baseProj({ tracks: [track('b'), track('a')], reflections: [{ id: 'r1' }, { id: 'r2' }] }), { name: 'sailviz-20260101-0900.sailviz.json', orgId: 'org_a' });
+    db.prepare("UPDATE reflections SET visibility = 'private', author_user_id = 'u_1' WHERE body LIKE '%\"r2\"%'").run();
+    const full = repo.readProjectWithAccess(id).access;
+    sqls.length = 0;
+    const access = repo.getProjectAccess(id);
+    assert.deepEqual(access, full);
+    assert.equal(access.tracks.length, 2);
+    assert.deepEqual(access.reflections.map((r) => r.visibility), ['org', 'private']);
+    const trackSql = sqls.filter((s) => /FROM tracks/.test(s));
+    assert.ok(trackSql.length > 0);
+    assert.ok(trackSql.every((s) => !/SELECT \*/.test(s) && !/points/.test(s)), trackSql.join('\n'));
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});

@@ -181,10 +181,11 @@ export function createDbRepo({ db, dataDir }) {
 
     // 互換 PUT が認可(policy)に使う情報。練習日の器の組織と、旧 JSON の tracks / reflections と
     // 同じ順の項目ごとの公開範囲・所有者。器が無ければ null。(S2.5-P2)
+    // access に要るのは軌跡の session_id だけなので、点列(points)は読まない(一覧・保存・削除の認可で毎回呼ぶ)。
     getProjectAccess(id) {
       const pd = getPd.get(id);
       if (!pd) return null;
-      return accessOf(pd, loadParts(pd));
+      return accessOf(pd, loadParts(pd, { points: false }));
     },
 
     // 旧 JSON と access を「1回の読込み」で返す(同じ行から両方を作るので、tracks / reflections の
