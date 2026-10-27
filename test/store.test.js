@@ -105,3 +105,14 @@ test('listReflections は練習ごとの反省だけを返す', async () => {
   const { id } = await store.createProject('a.sailviz.json', { version: 1, tracks: [{ id: 't' }], reflections: [{ id: 'r1' }] });
   assert.deepEqual(await store.listReflections(), [{ id, name: id, reflections: [{ id: 'r1' }] }]);
 });
+
+test('readProjectVideos / appendProjectVideos は api の動画だけの読み・追記に渡す', async () => {
+  const calls = [];
+  const store = createStore({
+    apiGetProjectVideos: async (id) => { calls.push(['get', id]); return []; },
+    apiAppendProjectVideos: async (id, v) => { calls.push(['post', id, v]); return { videos: v, added: v.length }; },
+  });
+  assert.deepEqual(await store.readProjectVideos('pd_1'), []);
+  assert.deepEqual(await store.appendProjectVideos('pd_1', [{ t: 1, name: 'a.mp4' }]), { videos: [{ t: 1, name: 'a.mp4' }], added: 1 });
+  assert.deepEqual(calls.map((c) => c[0]), ['get', 'post']);
+});

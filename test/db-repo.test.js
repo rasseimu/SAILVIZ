@@ -326,3 +326,46 @@ test('getProjectAccess は軌跡の点列を読まずに、全体を読んだと
     await rm(dataDir, { recursive: true, force: true });
   }
 });
+
+test('appendVideos は name + t が未登録の動画だけ足し、足したときだけ rev・updated_at を上げる(saved_at・反省・軌跡は不変)', { skip: skipMsg }, async () => {
+  const { repo, db, dataDir } = await freshRepo();
+  try {
+    const { id } = repo.createProject(baseProj({
+      tracks: [track('a')], reflections: [{ id: 'r1', notes: { goal: 'x' } }], savedAt: '2026-01-01T00:00:00.000Z',
+      videos: [{ id: 'vid0', t: 100, name: 'a.mp4', durationMs: null }],
+    }), { name: 'sailviz-20260101-0900.sailviz.json' });
+    const pd0 = db.prepare('SELECT rev, saved_at, updated_at FROM practice_days WHERE id = ?').get(id);
+    const before = repo.readProject(id);
+    const res = repo.appendVideos(id, [
+      { id: 'vid0', t: 100.4, name: 'a.mp4', durationMs: null }, // 同じ動画(t の丸めで一致)
+      { id: 'vid0', t: 200, name: 'a.mp4', durationMs: 1000 },   // 同名・別時刻
+    ]);
+    assert.equal(res.added, 1);
+    assert.deepEqual(res.videos.map((v) => [v.id, v.t]), [['vid0', 100], ['vid1', 200]]);
+    assert.deepEqual(repo.readVideos(id), res.videos);
+    const pd1 = db.prepare('SELECT rev, saved_at, updated_at FROM practice_days WHERE id = ?').get(id);
+    assert.equal(pd1.rev, pd0.rev + 1);
+    assert.equal(pd1.saved_at, pd0.saved_at);
+    assert.ok(pd1.updated_at >= pd0.updated_at);
+    const after = repo.readProject(id);
+    assert.deepEqual(after.tracks, before.tracks);
+    assert.deepEqual(after.reflections, before.reflections);
+    assert.deepEqual(after.videos, res.videos);
+
+    const none = repo.appendVideos(id, [{ t: 200, name: 'a.mp4' }]);
+    assert.equal(none.added, 0);
+    assert.equal(db.prepare('SELECT rev FROM practice_days WHERE id = ?').get(id).rev, pd1.rev);
+  } finally { db.close(); await rm(dataDir, { recursive: true, force: true }); }
+});
+
+test('appendVideos / readVideos は無い ID で not_found を投げ、トランザクションを残さない', { skip: skipMsg }, async () => {
+  const { repo, db, dataDir } = await freshRepo();
+  try {
+    assert.throws(() => repo.appendVideos('pd_0000000000', [{ t: 1, name: 'a.mp4' }]), (e) => e.code === 'not_found');
+    assert.throws(() => repo.readVideos('pd_0000000000'), (e) => e.code === 'not_found');
+    // 次のトランザクションが始められる(ROLLBACK 済み)
+    const { id } = repo.createProject(baseProj(), { name: 'sailviz-20260102-0900.sailviz.json' });
+    assert.deepEqual(repo.readVideos(id), []);
+    assert.equal(repo.appendVideos(id, [{ t: 1, name: 'a.mp4' }]).added, 1);
+  } finally { db.close(); await rm(dataDir, { recursive: true, force: true }); }
+});

@@ -110,14 +110,14 @@ test('serveStatic: 画面のアドレス(/home・/practices・/practice など)�
   const root = await mkdtemp(join(tmpdir(), 'sailviz-pages-'));
   try {
     await writeFile(join(root, 'index.html'), '<h1>idx</h1>');
-    for (const url of ['/home', '/practices', '/practice', '/practice?id=pd_0123456789', '/dashboard', '/progress', '/roadmap']) {
+    for (const url of ['/home', '/practices', '/practice', '/practice?id=pd_0123456789', '/dashboard', '/progress', '/roadmap', '/study']) {
       const res = fakeRes();
       await serveStatic({ url }, res, root);
       assert.equal(res.status, 200, url);
       assert.equal(res.body.toString(), '<h1>idx</h1>', url);
       assert.equal(res.headers['referrer-policy'], undefined, url);
     }
-    for (const url of ['/home/', '/practice/x', '/nope']) {
+    for (const url of ['/home/', '/practice/x', '/study/x', '/study/', '/nope']) {
       const res = fakeRes();
       await serveStatic({ url }, res, root);
       assert.equal(res.status, 404, url);

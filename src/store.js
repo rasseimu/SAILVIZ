@@ -12,6 +12,9 @@ export function createStore(api) {
     readProject: (id) => api.apiGetProject(id),
     writeProject: (id, obj) => api.apiPutProject(id, obj),
     deleteProject: (id) => api.apiDeleteProject(id),
+    // 動画一覧だけの読み・追記(練習全体の PUT を使わない)。
+    readProjectVideos: (id) => api.apiGetProjectVideos(id),
+    appendProjectVideos: (id, videos) => api.apiAppendProjectVideos(id, videos),
     readProgress: () => api.apiGetOverlay('progress'),
     writeProgress: (obj) => api.apiPutOverlay('progress', obj),
     readRoadmap: () => api.apiGetOverlay('roadmap'),

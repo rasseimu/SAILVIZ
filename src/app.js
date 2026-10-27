@@ -7,7 +7,12 @@ import { pan, zoomAt, screenToWorld, worldToScreen } from './viewport.js';
 import { globalRange, remapEventsToAxis } from './timeaxis.js';
 import { positionOnTracksAt } from './interpolate.js';
 import { parseMp4TimesFromFile, embeddedStartMs } from './videometa.js';
-import { scanFolderVideos, collectVideoFiles } from './folderimport.js';
+import { scanFolderVideos, findPracticeDayFolders, planFolderImport, fileSignature } from './folderimport.js';
+import { videoKey, normalizeVideoEntry, mergeUnknownRemote, nextVideoSeq } from './videolink.js';
+import {
+  videoRootSupported, loadVideoRoot, chooseVideoRoot, queryVideoRootPermission, requestVideoRootPermission,
+  videoRootButtonState,
+} from './videoroot.js';
 import { drawScene } from './renderer.js';
 import { planBasemap, stitchBasemap } from './basemap.js';
 import { createPlayback } from './playback.js';
@@ -21,7 +26,7 @@ import { nextRotation, rotatedFitBox } from './videoview.js';
 import { memberList, filterMembers } from './members.js';
 import { loadMemberRoster } from './memberroster.js';
 import { parseMinutes, matchMember, parseMinutesDate } from './minutes.js';
-import { jstWallToMs, msToJstWall } from './time.js';
+import { jstWallToMs, msToJstWall, jstYmd } from './time.js';
 import { DIR_NAMES, fetchWind } from './wind.js';
 import { fetchWindFromCsv } from './windCsv.js';
 import {
@@ -35,7 +40,13 @@ import { resolveActiveOrg, getActiveOrgId } from './activeorg.js';
 import { orgAvatar } from './orgavatar.js';
 import { icon, SPRITE_URL, iconHref, setInlineSprite, inlineSpriteMarkup } from './icons.js';
 import { pathFor, routeFromLocation } from './routes.js';
-import { lockActiveOrg } from './api.js';
+import {
+  lockActiveOrg, apiListVideoComments, apiCreateVideoComment, apiUpdateVideoComment, apiDeleteVideoComment,
+  apiVideoCommentsAvailable,
+} from './api.js';
+import { createVideoComments } from './videocomments.js';
+import { createStudyView } from './studyview.js';
+import { practiceVideoMatch } from './videocommentsmodel.js';
 import { earliestContentMs } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
 import { createDashboard } from './dashboard.js';
@@ -761,10 +772,26 @@ async function loadFiles(fileList) {
   const ds = applyDaySummary(
     daySummaryAfterGpsLoad(currentDaySummary(), state.tracks, tracksBefore, daySummaryOpts()));
   if (ds.autoOpen) openDaySummary(ds.summary);
+  // GPS が増えたら、動画フォルダからその日の動画を自動で取り込む(待たない)。
+  if (state.tracks.length > tracksBefore) autoLinkPracticeVideos();
 }
 
 // ドロップされた動画を、その瞬間の再生位置(絶対時刻)に紐付けて登録。
 let videoSeq = 0;
+// この画面が知っている動画のキー(name + t)。練習を開いた時点の動画・自分で足した動画・自分で消した動画。
+// 全体保存の直前に、これに無いサーバーの動画(開いた後に他のメンバーが追記したもの)だけを取り込む。
+const knownVideoKeys = new Set();
+// 自動取込の世代。練習を切り替えたら進め、走査中に切り替わった古い結果は捨てる。
+let autoLinkGen = 0;
+// サーバーの動画一覧のうち、この画面が知らないものを未リンク動画として足す。足した本数を返す。
+function mergeRemoteVideos(remote) {
+  const { videos, added } = mergeUnknownRemote(state.videos, remote, knownVideoKeys);
+  if (!added.length) return 0;
+  state.videos = videos;
+  for (const v of added) knownVideoKeys.add(videoKey(v));
+  videoSeq = Math.max(videoSeq, nextVideoSeq(state.videos));
+  return added.length;
+}
 function firstVisibleTrack() { return state.tracks.find((t) => t.visible) || null; }
 function nowAbsolute() {
   const r = firstVisibleTrack();
@@ -773,8 +800,9 @@ function nowAbsolute() {
 // 時刻 t(絶対ms) に動画を配置。src を渡すと status に配置理由を表示。
 function placeVideo(file, t, durationMs, src) {
   const url = URL.createObjectURL(file);
-  const v = { id: `vid${videoSeq++}`, t, url, name: file.name, durationMs };
+  const v = { id: `vid${videoSeq++}`, t, url, name: file.name, durationMs, fileSig: fileSignature(file) };
   state.videos.push(v);
+  knownVideoKeys.add(videoKey(v));
   if (src) statusEl.textContent = `動画「${file.name}」を${src}に配置しました`;
   if (v.durationMs == null) loadVideoDuration(v); // mvhdで取れなければ要素から補完
   return v;
@@ -827,6 +855,14 @@ async function saveProject() {
   // 保存の直前に GPS と照合する。削除・差し替え後なら作り直し、艇名・色は同期する。
   // 作り直しに失敗したら null になり、GPS と食い違う古いサマリは保存しない。
   const ds = applyDaySummary(refreshDaySummary(currentDaySummary(), state.tracks, daySummaryOpts()));
+  // 開いた後に他のメンバーが追記した動画を足してから保存する(全体の上書きで消さない)。取れなければそのまま保存。
+  const savingId = state.currentProjectId;
+  if (savingId) {
+    try {
+      const remote = await store.readProjectVideos(savingId);
+      if (state.currentProjectId === savingId && mergeRemoteVideos(remote)) { draw(); renderSidebar(); }
+    } catch { /* 取得失敗は無視して保存を続ける */ }
+  }
   const obj = serializeProject(state, { savedAt: new Date().toISOString() });
   // 既存の練習を開いている/一度保存済みなら同じ ID に上書き(後付けGPSで練習を増やさない)。
   // 新規は練習日時(ユーザー指定→データ時刻→now)から名前を採番し(衝突は分単位でずらす)、作って ID を受け取る。
@@ -840,6 +876,7 @@ async function saveProject() {
       const created = await store.createProject(uniqueProjectName(baseMs, existing), obj);
       state.currentProjectId = created.id;
       state.currentProjectName = name = created.name;
+      if (currentVideo) showVideoComments(currentVideo); // 「保存するとコメントできます」から切り替える
       if (currentView === 'track') syncUrl({ replace: true }); // 新しい練習のアドレスに ID を付ける
     }
   } catch (e) {
@@ -873,6 +910,10 @@ async function loadPractice(id, name = id) {
   state.pins = data.pins;
   for (const v of state.videos) if (v.url) URL.revokeObjectURL(v.url); // blob URL リーク防止
   state.videos = data.videos; // url なし=未リンク
+  autoLinkGen++;
+  knownVideoKeys.clear();
+  for (const v of state.videos) knownVideoKeys.add(videoKey(v));
+  videoSeq = Math.max(videoSeq, nextVideoSeq(state.videos)); // 読み込んだ vidN と新しい動画の id を重ねない
   state.reflections = data.reflections;
   state.practiceDate = data.practiceDate ?? null;
   // 保存済み練習を開いても自動表示しない。サマリが無い(機能追加前)・GPSと食い違うときは
@@ -896,6 +937,10 @@ async function loadPractice(id, name = id) {
   statusEl.textContent = n
     ? `読込: ${name}。動画${n}本は未リンク（動画フォルダ取込で再リンク）`
     : `読込: ${name}`;
+  autoLinkPracticeVideos(); // 動画フォルダからその日の動画を自動で取り込む(待たない)
+  // 動画の瞬間コメントを先に読んでおく(待たない)。前の練習の分は捨てる。
+  videoComments.clear();
+  videoComments.preload(practiceCommentSource(id));
   return true;
 }
 
@@ -1041,14 +1086,18 @@ $('top-screen').addEventListener('click', (e) => {
 // ================= 練習データ(カード型ランチャー) =================
 
 // 画面(view)は body の view-* クラスで排他切替。遷移時は必ず全 view を外してから付与する。
-const ALL_VIEWS = ['view-landing', 'view-top', 'view-home', 'view-dashboard', 'view-progress', 'view-roadmap'];
-function clearViews() { for (const c of ALL_VIEWS) document.body.classList.remove(c); }
+const ALL_VIEWS = ['view-landing', 'view-top', 'view-home', 'view-dashboard', 'view-progress', 'view-roadmap', 'view-study'];
+function clearViews() {
+  // プロ動画の画面を離れるときは再生を止めて blob URL を解放する。
+  if (document.body.classList.contains('view-study')) studyView?.leave();
+  for (const c of ALL_VIEWS) document.body.classList.remove(c);
+}
 
 // ===== 画面のアドレス(src/routes.js)=====
 // 画面を切り替えたら、アドレスをその画面のもの(/home・/practices・/practice?id=… など)にする(履歴に積む)。
 // 戻る・進む・再読み込み・アドレスの直接指定では、アドレスから画面を開く(routeToLocation)。
 // このときアドレスは既に画面と一致しているので、syncUrl は履歴を積まない。
-let currentView = null; // 'top' | 'home' | 'track' | 'dashboard' | 'progress' | 'roadmap'(ランディング中は null)
+let currentView = null; // 'top' | 'home' | 'track' | 'dashboard' | 'progress' | 'roadmap' | 'study'(ランディング中は null)
 let urlReplace = false; // アドレスから開いている間は、別の画面に変わっても履歴を積まずに置き換える(戻るで抜けられなくしない)
 function syncUrl({ replace = urlReplace } = {}) {
   const path = pathFor(currentView, { id: currentView === 'track' ? state.currentProjectId : null });
@@ -1073,7 +1122,9 @@ async function routeToLocation() {
     else viaUrl(showHome);
     return;
   }
-  const show = { top: showTop, home: showHome, dashboard: showDashboard, progress: showProgress, roadmap: showRoadmap }[r.view];
+  const show = {
+    top: showTop, home: showHome, dashboard: showDashboard, progress: showProgress, roadmap: showRoadmap, study: showStudy,
+  }[r.view];
   viaUrl(() => show());
 }
 window.addEventListener('popstate', () => { if (currentView) routeToLocation(); }); // ランディング中(未ログイン)は何もしない
@@ -1109,6 +1160,24 @@ async function showRoadmap(member) {
   setActiveNav('progress');
   await roadmap.render(typeof member === 'string' ? member : undefined);
 }
+// プロ動画の勉強ページ(③。src/studyview.js)。初めて開いたときに作る。
+// 動画ルートは練習画面と共用(この画面で選び直した・許可したら練習画面のボタンも合わせる)。
+let studyView = null;
+async function showStudy() {
+  clearViews();
+  setView('study');
+  document.body.classList.add('view-study');
+  setActiveNav('study');
+  studyView ||= createStudyView({
+    getRoot: () => videoRoot,
+    onRootChanged: (dir, permission) => {
+      videoRoot = dir;
+      videoRootPermission = permission;
+      setVideoRootBtn('idle');
+    },
+  });
+  await studyView.render();
+}
 function showTrack() {
   clearViews();
   setView('track');
@@ -1123,6 +1192,8 @@ function resetState() {
   for (const v of state.videos) if (v.url) URL.revokeObjectURL(v.url);
   state.tracks = []; state.events = []; state.marks = []; state.pins = [];
   state.videos = []; state.reflections = [];
+  autoLinkGen++;
+  knownVideoKeys.clear();
   state.crop = { start: 0, end: 0 };
   state.practiceDate = null;
   state.daySummary = null;
@@ -1130,6 +1201,7 @@ function resetState() {
   state.basemap = null; // 新規練習では背景地図もクリア(次の初回取込で再取得)
   state.currentProjectId = null;
   state.currentProjectName = null;
+  videoComments.clear();
   saveReflections(state.reflections);
   recomputeView(); renderSidebar(); draw();
 }
@@ -1210,7 +1282,11 @@ async function renderHome() {
       try {
         await store.deleteProject(it.id);
         // 開いている練習を消したら、次の保存は新規として作り直す(消えた ID に上書きしない)。
-        if (state.currentProjectId === it.id) { state.currentProjectId = null; state.currentProjectName = null; }
+        if (state.currentProjectId === it.id) {
+          state.currentProjectId = null; state.currentProjectName = null;
+          videoComments.clear(); // 消した練習のコメントを出さない(開いている動画には「保存すると…」を出す)
+          if (currentVideo) showVideoComments(currentVideo);
+        }
         invalidateProjectEntriesCache();
         renderHome();
       } catch (err) {
@@ -1255,6 +1331,36 @@ function setFolderBtn(stateName, [iconName, text]) {
   }
 }
 
+// フォルダ走査の結果(planFolderImport)を画面へ反映する。返り値 { relinked: 再リンク本数, added: 足した動画 }。
+function applyFolderImport({ relink, add }) {
+  for (const { video, file } of relink) {
+    video.url = URL.createObjectURL(file);
+    video.fileSig = fileSignature(file);
+    if (video.durationMs == null) loadVideoDuration(video);
+  }
+  const added = add.map((m) => placeVideo(m.file, m.t, m.durationMs, null));
+  if (relink.length || added.length) { draw(); renderSidebar(); }
+  return { relinked: relink.length, added };
+}
+
+// 新しく足した動画を練習データへ追記保存する(練習全体の PUT は使わない)。応答の一覧で画面をそろえる。
+// 練習がまだサーバーに無ければ呼ばない(「保存」の全体保存で一緒に保存される)。
+// 返り値: ステータスに添える文言(問題なければ '')。gen が変わっていれば(練習を切り替えた)応答を捨てる。
+async function appendVideosToPractice(added, gen = autoLinkGen) {
+  const id = state.currentProjectId;
+  if (!added.length || !id) return '';
+  try {
+    const res = await store.appendProjectVideos(id, added.map(normalizeVideoEntry));
+    if (gen !== autoLinkGen || state.currentProjectId !== id) return '';
+    if (mergeRemoteVideos(res.videos)) { draw(); renderSidebar(); }
+    return '';
+  } catch (e) {
+    if (gen !== autoLinkGen) return '';
+    if (e?.status === 401 || e?.status === 403) return '（閲覧のみのため練習データには保存していません）';
+    return `（練習データへの保存に失敗: ${e.message}）`;
+  }
+}
+
 // 同期フォルダ(Drive for Desktop 等)から GPS 範囲内の動画を自動取込。
 async function importFromVideoFolder() {
   if (!firstVisibleTrack()) {
@@ -1268,6 +1374,7 @@ async function importFromVideoFolder() {
   let dir;
   // startIn で反省データフォルダから開く(前回選んだ保存フォルダを優先)
   try { dir = await window.showDirectoryPicker({ startIn: projectDir || 'documents' }); } catch { return; } // キャンセルは何もしない
+  const gen = autoLinkGen;
   setFolderBtn('loading', ['loader', '走査中…']);
   statusEl.textContent = '動画フォルダを走査中…';
   const range = globalRange(state.tracks, 'absolute');
@@ -1276,24 +1383,9 @@ async function importFromVideoFolder() {
     setFolderBtn('error', ['alert-triangle', '失敗']);
     statusEl.textContent = `フォルダ走査に失敗: ${e.message}`; return;
   }
-  // 読込済みで未リンクの動画を、フォルダ内の同名ファイルで再リンク
-  const unlinked = new Set(state.videos.filter((v) => !v.url).map((v) => v.name));
-  let relinked = 0;
-  if (unlinked.size) {
-    const files = await collectVideoFiles(dir, unlinked);
-    for (const v of state.videos) {
-      if (!v.url && files.has(v.name)) {
-        v.url = URL.createObjectURL(files.get(v.name));
-        if (v.durationMs == null) loadVideoDuration(v);
-        relinked++;
-      }
-    }
-  }
-  const present = new Set(state.videos.map((v) => v.name));
-  for (const m of res.matched) {
-    if (!present.has(m.file.name)) placeVideo(m.file, m.t, m.durationMs, null);
-  }
-  draw(); renderSidebar();
+  if (gen !== autoLinkGen) { setFolderBtn('idle', FOLDER_BTN_IDLE); return; } // 走査中に練習を切り替えた
+  // 読込済みで未リンクの動画を、フォルダ内の同名ファイルで再リンクし、新しい動画を足す
+  const { relinked, added } = applyFolderImport(planFolderImport({ stateVideos: state.videos, entries: res.entries, matched: res.matched }));
   setFolderBtn('success', ['check-circle', `${res.matched.length}本取込`]);
   statusEl.textContent = `${res.scanned}本中${res.matched.length}本を取込`
     + `（スキップ${res.skipped}本: 時刻不明${res.noTime ?? 0} / 範囲外${res.outOfRange ?? 0}）`
@@ -1304,6 +1396,131 @@ async function importFromVideoFolder() {
     console.log('[SailViz] GPS範囲(絶対ms):', range,
       new Date(range.start).toLocaleString('ja-JP'), '〜', new Date(range.end).toLocaleString('ja-JP'));
   }
+  const note = await appendVideosToPractice(added, gen);
+  if (note) statusEl.textContent += note;
+}
+
+// ===== 動画フォルダ(練習動画ルート)からの自動取込 =====
+// ルートを1回選べば、練習を開いたとき・GPS を読み込んだときに <ルート>/<年>練習/<月日> の動画を取り込む。
+// 自動では queryPermission だけ(ダイアログを出さない)。許可・選択はボタンのクリックからだけ。
+let videoRoot = null;             // 記憶した動画ルートのハンドル(起動時に IndexedDB から読む)
+let videoRootPermission = 'prompt';
+let videoRootBtnTimer = null;
+let videoRootBtnGen = 0;          // ボタンの表示を最後に変えたときの自動取込の世代
+
+function videoRootIdle() {
+  return videoRootButtonState({
+    supported: videoRootSupported(), hasHandle: !!videoRoot, permission: videoRootPermission, name: videoRoot?.name,
+  });
+}
+
+// 動画フォルダボタンの表示。stateName: idle|loading|success|error。成功/失敗は4秒後に待機表示へ戻す。
+function setVideoRootBtn(stateName, label) {
+  const btn = $('video-root');
+  if (!btn) return;
+  videoRootBtnGen = autoLinkGen;
+  const [iconName, text] = stateName === 'idle' ? ['folder', videoRootIdle().label] : label;
+  btn.innerHTML = `${icon(iconName)} ${escapeHtml(text)}`;
+  btn.className = stateName === 'idle' ? 'btn' : `btn btn-${stateName}`;
+  btn.disabled = stateName === 'loading';
+  if (videoRootBtnTimer) { clearTimeout(videoRootBtnTimer); videoRootBtnTimer = null; }
+  if (stateName === 'success' || stateName === 'error') {
+    videoRootBtnTimer = setTimeout(() => setVideoRootBtn('idle'), 4000);
+  }
+}
+
+// 世代が古くなった走査の完了時。ボタンの表示には触れない(新しい練習の表示を上書きしない)。
+// ただし、その後だれもボタンを変えておらず古い「走査中…」のまま残っているときだけ待機表示に戻す(押せないままにしない)。
+function releaseStaleVideoRootBtn(gen) {
+  if (videoRootBtnGen === gen) setVideoRootBtn('idle');
+}
+
+// 練習日の動画フォルダを走査して取り込む。userInitiated はボタンのクリックから(結果をすべて表示する)。
+// 自動のときは、未設定・要許可はボタンの表示だけ変え、ステータス行(練習の読込結果)は上書きしない。
+// 自動の経路ではファイル名をコンソールに出さない。
+async function autoLinkPracticeVideos({ userInitiated = false } = {}) {
+  const gen = autoLinkGen;
+  const fail = (text) => {
+    setVideoRootBtn('error', ['alert-triangle', text]);
+    statusEl.textContent = text;
+  };
+  if (!firstVisibleTrack()) { if (userInitiated) fail('先にGPSを読込'); return; }
+  if (!videoRootSupported()) { if (userInitiated) fail('このブラウザは非対応です（Chrome/Edge で開いてください）'); return; }
+  if (!videoRoot) { setVideoRootBtn('idle'); if (userInitiated) fail('動画フォルダ未設定'); return; }
+  videoRootPermission = await queryVideoRootPermission(videoRoot);
+  if (videoRootPermission !== 'granted') {
+    setVideoRootBtn('idle');
+    if (userInitiated) fail(videoRootPermission === 'denied' ? '動画フォルダを選び直してください' : '動画フォルダを許可');
+    return;
+  }
+  if (gen !== autoLinkGen) return;
+
+  const range = globalRange(state.tracks, 'absolute');
+  // 軌跡の時刻が不明で練習日時も無ければ、どの日のフォルダか決められない(自動では何も出さない)。
+  if (!(range.end > range.start) && state.practiceDate == null) {
+    if (userInitiated) fail('GPS の時刻が不明です');
+    return;
+  }
+  const ymd = jstYmd(state.practiceDate ?? range.start);
+  if (!ymd) return;
+  setVideoRootBtn('loading', ['loader', '走査中…']);
+  let found;
+  const matched = [];
+  const entries = [];
+  try {
+    found = await findPracticeDayFolders(videoRoot, ymd);
+    for (const dir of found.dayDirs) {
+      const res = await scanFolderVideos(dir, range);
+      matched.push(...res.matched);
+      entries.push(...res.entries);
+    }
+  } catch (e) {
+    if (gen !== autoLinkGen) { releaseStaleVideoRootBtn(gen); return; }
+    fail(`動画フォルダの走査に失敗: ${e.message}`); return;
+  }
+  if (gen !== autoLinkGen) { releaseStaleVideoRootBtn(gen); return; } // 走査中に練習を切り替えた(古い結果は捨てる)
+  if (found.status === 'noYear') { fail(`${ymd.year}練習 フォルダが見つかりません`); return; }
+  if (found.status === 'noDay') { fail(`${ymd.month}/${ymd.day} のフォルダが見つかりません`); return; }
+
+  const { relinked, added } = applyFolderImport(planFolderImport({ stateVideos: state.videos, entries, matched }));
+  const text = `${added.length}本取込` + (relinked ? `（再リンク${relinked}本）` : '');
+  setVideoRootBtn('success', ['check-circle', text]);
+  statusEl.textContent = `動画フォルダ ${ymd.month}/${ymd.day}: ${text}`;
+  const note = await appendVideosToPractice(added, gen);
+  if (note) statusEl.textContent += note;
+}
+
+// ボタンのクリック: 未設定ならフォルダを選ぶ、要許可なら許可を求める、許可済みならフォルダを選び直す。どれも続けて走査する。
+// requestPermission はユーザー操作の直後に呼ぶ必要があるので、クリックの最初に呼ぶ(記憶したハンドルは起動時に読み込み済み)。
+async function onVideoRootClick() {
+  const { action } = videoRootIdle();
+  if (action === 'unsupported') {
+    setVideoRootBtn('error', ['alert-triangle', '非対応ブラウザ']);
+    statusEl.textContent = 'このブラウザは非対応です（Chrome/Edge で開いてください）'; return;
+  }
+  if (action === 'grant') {
+    videoRootPermission = await requestVideoRootPermission(videoRoot);
+    if (videoRootPermission !== 'granted') {
+      setVideoRootBtn('error', ['alert-triangle', '許可されませんでした']);
+      statusEl.textContent = '動画フォルダの読み取りが許可されませんでした'; return;
+    }
+  } else {
+    const dir = await chooseVideoRoot(videoRoot);
+    if (!dir) return; // キャンセル
+    videoRoot = dir;
+    videoRootPermission = 'granted'; // 選んだフォルダは読み取りが許可されている
+  }
+  setVideoRootBtn('idle');
+  await autoLinkPracticeVideos({ userInitiated: true });
+}
+
+// 起動時に記憶した動画ルートを読み、権限を確認してボタンの表示を決める(ダイアログは出さない)。
+async function restoreVideoRoot() {
+  if (videoRootSupported()) {
+    videoRoot = await loadVideoRoot();
+    videoRootPermission = videoRoot ? await queryVideoRootPermission(videoRoot) : 'prompt';
+  }
+  setVideoRootBtn('idle');
 }
 
 // 動画の再生時間を <video> のメタから読み、範囲バー用に埋める(mp4以外/パース失敗の保険)。
@@ -1392,7 +1609,7 @@ function renderSidebar() {
     const row = document.createElement('div');
     row.className = v === currentVideo ? 'track-row active' : 'track-row'; // 再生中はオレンジ
     row.innerHTML =
-      `${icon('play')}<span class="vid-name" data-play="${i}">${v.name}</span>` +
+      `${icon('play')}<span class="vid-name" data-play="${i}">${escapeHtml(v.name)}</span>` +
       `<button data-delvid="${i}">×</button>`;
     vl.appendChild(row);
   });
@@ -1435,6 +1652,7 @@ function deleteVideo(index) {
   if (!v) return;
   if (v === currentVideo) closeVideoPanel();
   state.videos.splice(index, 1);
+  knownVideoKeys.add(videoKey(v)); // 消した動画は既知のまま(保存の直前にサーバーから戻さない)
   URL.revokeObjectURL(v.url);
   statusEl.textContent = `動画「${v.name}」を削除しました`;
   draw(); renderSidebar();
@@ -1443,6 +1661,7 @@ function deleteVideo(index) {
 // --- 入力配線 ---
 $('file-input').addEventListener('change', (e) => loadFiles(e.target.files));
 $('folder-import').addEventListener('click', importFromVideoFolder);
+$('video-root').addEventListener('click', onVideoRootClick);
 $('project-save').addEventListener('click', saveProject);
 
 // ================= 編集モード(共有パスワード)ゲート =================
@@ -1520,6 +1739,7 @@ function enterApp() { routeToLocation(); }
     const h = await loadDirHandle();
     if (h && await ensurePermission(h)) { projectDir = h; }
   } catch { /* 復元失敗は無視 */ }
+  try { await restoreVideoRoot(); } catch { /* 復元失敗は無視(ボタンは未設定の表示) */ }
   let sess = { loggedIn: false };
   try { sess = await store.session(); } catch { /* 未ログイン扱い */ }
   noOrgAccount = sess.noOrg === true;
@@ -1580,8 +1800,9 @@ const NAV_ACTIONS = {
   home: showHome,
   dashboard: showDashboard,
   progress: showProgress,
+  study: showStudy,
 };
-// 現在地をサイドバーでハイライト。top/home/dashboard/progress のみ対象。
+// 現在地をサイドバーでハイライト。top/home/dashboard/progress/study のみ対象。
 const sbItems = [...document.querySelectorAll('.sb-item')];
 function setActiveNav(view) {
   for (const el of sbItems) el.classList.toggle('active', el.dataset.nav === view);
@@ -1883,6 +2104,36 @@ function seekVideoToAxisTime(t) {
   const max = Number.isFinite(vid.duration) ? vid.duration : Infinity;
   vid.currentTime = Math.max(0, Math.min((t + base - currentVideo.t) / 1000, max));
 }
+// 動画の瞬間コメント欄(②)。動画パネルの動画の下。一覧から選ぶと動画をシークし、GPS は seeked → syncFromVideo で追従する。
+const videoComments = createVideoComments({
+  root: $('video-comments'), overlayEl: $('video-comment-overlay'), videoEl: $('video-el'),
+});
+// 練習のコメントの読み書き。読むのは練習の全動画ぶん(key が同じ間は読んだ結果を使い回す)、書くのは video に付ける。
+function practiceCommentSource(projectId, video = null) {
+  return {
+    key: `practice:${projectId}`,
+    load: () => apiListVideoComments(projectId),
+    create: ({ positionMs, text }) => apiCreateVideoComment(projectId, {
+      videoName: video.name, videoT: Math.round(video.t), positionMs, text,
+    }),
+    update: (id, text) => apiUpdateVideoComment(id, text),
+    remove: (id) => apiDeleteVideoComment(id),
+  };
+}
+// 開いている動画のコメントを出す(パネルを開くたびに読み直す)。未保存の練習は案内だけ。
+function showVideoComments(v) {
+  const projectId = state.currentProjectId;
+  if (!projectId) {
+    videoComments.setTarget({
+      source: null, match: () => false, emptyMessage: '練習を保存するとコメントできます', probe: apiVideoCommentsAvailable,
+    });
+    return;
+  }
+  videoComments.setTarget({ source: practiceCommentSource(projectId, v), match: practiceVideoMatch(v), linked: !!v.url });
+  videoComments.refresh();
+}
+// コメント欄の表示・伸び縮みなどでステージの大きさが変わったら、動画の寸法を合わせ直す(操作バーを切らない)。
+new ResizeObserver(() => { if (!$('video-panel').classList.contains('hidden')) applyVideoRotation(); }).observe($('video-stage'));
 function openVideoPanel(v) {
   const vid = $('video-el');
   $('video-name').textContent = v.name;
@@ -1895,6 +2146,7 @@ function openVideoPanel(v) {
   // パネルで幅が変わってもユーザーの pan/zoom は保持(cx,cy,scale はそのまま、w/h だけ更新)。
   resizeCanvas(); draw(); renderSidebar();
   applyVideoRotation(); // パネル表示後にステージ寸法へ合わせる
+  showVideoComments(v);
   vid.play().catch(() => { /* autoplayブロックは手動再生に委ねる */ });
 }
 function closeVideoPanel() {
@@ -1903,6 +2155,7 @@ function closeVideoPanel() {
   const vid = $('video-el');
   vid.pause(); vid.removeAttribute('src'); vid.load();
   currentVideo = null;
+  videoComments.setTarget(null);
   panel.classList.add('hidden');
   // 閉じても pan/zoom を保持(開く時と対称)。全体には戻さない。
   resizeCanvas(); draw(); renderSidebar();

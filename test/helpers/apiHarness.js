@@ -26,6 +26,7 @@ export async function startApi(extra = {}) {
   const { createDbRepo } = await import('../../server/repos/dbRepo.js');
   const { createSessionsRepo } = await import('../../server/repos/sessionsRepo.js');
   const { createAppRepo } = await import('../../server/repos/appRepo.js');
+  const { createVideoCommentsRepo } = await import('../../server/repos/videoCommentsRepo.js');
   const { issueAuthToken } = await import('../../server/accountAuth.js');
   const db = openDb(':memory:');
   migrate(db, loadMigrations(MIG_DIR));
@@ -33,7 +34,8 @@ export async function startApi(extra = {}) {
   const repo = createDbRepo({ db, dataDir: '/nonexistent' });
   const sessions = createSessionsRepo({ db });
   const app = createAppRepo({ db });
-  const api = createApi({ repo, token: 'shared-secret', accounts, sessions, app, authOptions: { now: () => clock }, ...extra });
+  const videoComments = createVideoCommentsRepo({ db });
+  const api = createApi({ repo, token: 'shared-secret', accounts, sessions, app, videoComments, authOptions: { now: () => clock }, ...extra });
   const server = createServer(async (req, res) => { if (await api(req, res)) return; res.writeHead(404).end(); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -79,5 +81,5 @@ export async function startApi(extra = {}) {
     await new Promise((r) => server.close(r));
     db.close();
   };
-  return { base, db, accounts, repo, sessions, app, mkUser, mkOrg, call, recordFull, close };
+  return { base, db, accounts, repo, sessions, app, videoComments, mkUser, mkOrg, call, recordFull, close };
 }

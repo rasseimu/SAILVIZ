@@ -21,6 +21,7 @@ import {
 import { syncRoadmaps } from '../db/roadmapSync.js';
 import { projectLabel } from '../../src/projectfs.js';
 import { jstMidnightMs } from '../sensorimport.js';
+import { appendVideos } from '../../src/videolink.js';
 import {
   saveUpload, readUpload, renameUpload,
 } from '../storage.js';
@@ -336,6 +337,36 @@ export function createDbRepo({ db, dataDir }) {
           }
         }
         db.exec('COMMIT');
+      } catch (e) {
+        db.exec('ROLLBACK');
+        throw e;
+      }
+    },
+
+    // 練習の動画一覧だけ(web_state.videos)。器が無ければ code: 'not_found'。
+    readVideos(id) {
+      const row = db.prepare('SELECT web_state FROM practice_days WHERE id = ?').get(id);
+      if (!row) throw Object.assign(new Error('not found'), { code: 'not_found' });
+      const videos = JSON.parse(row.web_state || '{}').videos;
+      return Array.isArray(videos) ? videos : [];
+    },
+
+    // 動画だけを追記する。1トランザクションで web_state を読み、name + t が未登録のものだけ足す。
+    // 足したときだけ web_state・rev・updated_at を更新する(saved_at は「保存」の時刻なので変えない)。
+    // 器が無ければ code: 'not_found'。返り値 { videos, added }。
+    appendVideos(id, entries) {
+      db.exec('BEGIN');
+      try {
+        const row = db.prepare('SELECT web_state FROM practice_days WHERE id = ?').get(id);
+        if (!row) throw Object.assign(new Error('not found'), { code: 'not_found' });
+        const ws = JSON.parse(row.web_state || '{}');
+        const res = appendVideos(ws.videos, entries);
+        if (res.added > 0) {
+          db.prepare('UPDATE practice_days SET web_state = ?, rev = rev + 1, updated_at = ? WHERE id = ?')
+            .run(JSON.stringify({ ...ws, videos: res.videos }), Date.now(), id);
+        }
+        db.exec('COMMIT');
+        return res;
       } catch (e) {
         db.exec('ROLLBACK');
         throw e;

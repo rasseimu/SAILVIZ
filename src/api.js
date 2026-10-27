@@ -39,7 +39,8 @@ async function request(path, init = {}, { noOrg = false } = {}) {
   if (res.status === 403) {
     // 呼び出し側も本文を読むことがあるので、読めるなら複製を読む。
     const body = await (res.clone ? res.clone() : res).json().catch(() => null);
-    if (body?.error === 'org_forbidden') {
+    // 旧 API は { error: 'org_forbidden' }、アプリ向け API(動画コメントなど)は { error: { code: 'org_forbidden' } }。
+    if (body?.error === 'org_forbidden' || body?.error?.code === 'org_forbidden') {
       setActiveOrgId(null);
       blocked = true;
       throw new Error(RELOAD_MESSAGE);
@@ -85,6 +86,72 @@ export async function apiPutProject(id, obj) {
 export async function apiDeleteProject(id) {
   const res = await send(projectPath(id), 'DELETE');
   if (!res.ok) throw Object.assign(new Error(`削除に失敗 (${res.status})`), { status: res.status });
+}
+// 練習の動画一覧だけを読む(全体保存の直前に、他のメンバーが追記した動画を取り込むため)。戻り値 videos の配列。
+export async function apiGetProjectVideos(id) {
+  const res = await request(`${projectPath(id)}/videos`);
+  if (!res.ok) throw Object.assign(new Error(`動画一覧の取得に失敗 (${res.status})`), { status: res.status });
+  return (await res.json()).videos;
+}
+// 練習に動画だけを追記する(name + t が未登録のものだけ足される)。戻り値 { videos: 保存後の一覧, added: 足した本数 }。
+export async function apiAppendProjectVideos(id, videos) {
+  const res = await send(`${projectPath(id)}/videos`, 'POST', { videos });
+  if (!res.ok) throw Object.assign(new Error(`動画の保存に失敗 (${res.status})`), { status: res.status });
+  return res.json();
+}
+// 動画の瞬間コメント(②)。練習の全動画ぶんを読む。戻り値 { comments, canWrite }。
+// このサーバでは使えない(ファイル版・503)ときは { comments: [], canWrite: false, unavailable: true }。
+export async function apiListVideoComments(projectId) {
+  const res = await request(`${projectPath(projectId)}/video-comments`);
+  if (res.status === 503) return { comments: [], canWrite: false, unavailable: true };
+  if (!res.ok) throw Object.assign(new Error(`コメントの取得に失敗 (${res.status})`), { status: res.status });
+  const body = await res.json();
+  return { comments: Array.isArray(body?.comments) ? body.comments : [], canWrite: body?.canWrite === true };
+}
+// このサーバで動画コメントを使えるか(ファイル版は false)。未保存の練習の案内を出すかに使う(ページで1回だけ)。
+// 練習 ID の形でない '-' を指すので、DB 版はどの練習も読まずに 404、ファイル版はパスが一致した時点で 503 を返す。
+export async function apiVideoCommentsAvailable() {
+  const res = await request(`${projectPath('-')}/video-comments`);
+  return res.status !== 503;
+}
+// 失敗はサーバの理由(message)があれば添えて投げる。
+async function videoCommentError(res, what) {
+  const reason = (await res.json().catch(() => null))?.error?.message;
+  return Object.assign(new Error(`${what} (${res.status})${reason ? `: ${reason}` : ''}`), { status: res.status });
+}
+// 本文 { videoName, videoT, positionMs, text } → 作ったコメント。
+export async function apiCreateVideoComment(projectId, comment) {
+  const res = await send(`${projectPath(projectId)}/video-comments`, 'POST', comment);
+  if (!res.ok) throw await videoCommentError(res, 'コメントの保存に失敗');
+  return res.json();
+}
+// 勉強動画(プロ動画。③)のコメント。表示中の組織の全件。戻り値 { comments, canWrite }。
+// このサーバでは使えない(ファイル版・503)ときは unavailable: true、組織に入っていない(403 no_org)ときは noOrg: true。
+export async function apiListStudyComments() {
+  const res = await request('/api/study-comments');
+  if (res.status === 503) return { comments: [], canWrite: false, unavailable: true };
+  if (res.status === 403) {
+    const code = (await res.json().catch(() => null))?.error?.code;
+    if (code === 'no_org') return { comments: [], canWrite: false, noOrg: true };
+  }
+  if (!res.ok) throw Object.assign(new Error(`コメントの取得に失敗 (${res.status})`), { status: res.status });
+  const body = await res.json();
+  return { comments: Array.isArray(body?.comments) ? body.comments : [], canWrite: body?.canWrite === true };
+}
+// 本文 { videoName, videoSize, positionMs, text } → 作ったコメント。編集・削除は apiUpdateVideoComment / apiDeleteVideoComment。
+export async function apiCreateStudyComment(comment) {
+  const res = await send('/api/study-comments', 'POST', comment);
+  if (!res.ok) throw await videoCommentError(res, 'コメントの保存に失敗');
+  return res.json();
+}
+export async function apiUpdateVideoComment(commentId, text) {
+  const res = await send(`/api/video-comments/${encodeURIComponent(commentId)}`, 'PATCH', { text });
+  if (!res.ok) throw await videoCommentError(res, 'コメントの更新に失敗');
+  return res.json();
+}
+export async function apiDeleteVideoComment(commentId) {
+  const res = await send(`/api/video-comments/${encodeURIComponent(commentId)}`, 'DELETE');
+  if (!res.ok) throw await videoCommentError(res, 'コメントの削除に失敗');
 }
 // 進捗を読んだサーバの時刻(X-Sailviz-Read-At)。保存のときに送り返すと、サーバはそれより前からあるコメントを
 // 「この画面で消したもの」として消し、読んだ後にアプリで足されたコメントだけを残す。保存では更新しない(読み直すまで同じ)。

@@ -188,3 +188,79 @@ test('DELETE はファイルを消す前に deleted_data_folder へ保存 JSON �
   assert.equal(saved.id, name);
   assert.deepEqual(saved.data.project.reflections, project.reflections);
 });
+
+// ===== 動画だけの読み・追記(POST/GET /api/projects/:id/videos)=====
+test('file: 動画の追記は書込認証が要り(401)、name + t が未登録のものだけ足し、他の項目は変えない', async () => {
+  const name = 'sailviz-20260301-0900.sailviz.json';
+  const bearer = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+  const proj = {
+    version: 1, tracks: [], reflections: [{ id: 'r1', text: 'メモ' }],
+    videos: [{ id: 'vid0', t: 1000, name: 'IMG_0001.MOV', durationMs: 5000 }],
+  };
+  assert.equal((await fetch(`${base}/api/projects`, {
+    method: 'POST', headers: bearer, body: JSON.stringify({ name, project: proj }),
+  })).status, 201);
+  const url = `${base}/api/projects/${name}/videos`;
+  const unauth = await fetch(url, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ videos: [{ t: 2000, name: 'b.mp4', durationMs: null }] }),
+  });
+  assert.equal(unauth.status, 401);
+
+  const r = await fetch(url, {
+    method: 'POST', headers: bearer,
+    body: JSON.stringify({ videos: [
+      { id: 'vid0', t: 1000, name: 'IMG_0001.MOV', durationMs: 5000 }, // 登録済み
+      { id: 'vid0', t: 9000, name: 'IMG_0001.MOV', durationMs: null }, // 同名・別時刻(別人の動画)
+    ] }),
+  });
+  assert.equal(r.status, 200);
+  const body = await r.json();
+  assert.equal(body.added, 1);
+  assert.deepEqual(body.videos.map((v) => [v.name, v.t]), [['IMG_0001.MOV', 1000], ['IMG_0001.MOV', 9000]]);
+  assert.notEqual(body.videos[1].id, 'vid0'); // 重なった id は振り直す
+  const saved = JSON.parse(await readFileP(join(dataDir, 'projects', name), 'utf8'));
+  assert.deepEqual(saved.reflections, proj.reflections);
+  assert.deepEqual(saved.videos, body.videos);
+
+  // もう一度送っても増えない
+  const again = await (await fetch(url, {
+    method: 'POST', headers: bearer, body: JSON.stringify({ videos: [{ t: 9000, name: 'IMG_0001.MOV' }] }),
+  })).json();
+  assert.equal(again.added, 0);
+  assert.equal(again.videos.length, 2);
+
+  const got = await fetch(url);
+  assert.equal(got.status, 200);
+  assert.deepEqual((await got.json()).videos, body.videos);
+});
+
+test('file: 動画の追記は本文が不正なら 400、器が無ければ 404', async () => {
+  const bearer = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+  const name = 'sailviz-20260301-0900.sailviz.json';
+  const post = (id, body) => fetch(`${base}/api/projects/${id}/videos`, { method: 'POST', headers: bearer, body: JSON.stringify(body) });
+  assert.equal((await post(name, {})).status, 400);
+  assert.equal((await post(name, { videos: [{ name: '', t: 1 }] })).status, 400);
+  assert.equal((await post(name, { videos: [{ name: 'a.mp4', t: 'x' }] })).status, 400);
+  assert.equal((await post(name, { videos: [{ name: 'a.mp4', t: 1, durationMs: -1 }] })).status, 400);
+  assert.equal((await post(name, { videos: Array.from({ length: 101 }, (_, i) => ({ name: 'a.mp4', t: i })) })).status, 400);
+  assert.equal((await post('sailviz-20260302-0900.sailviz.json', { videos: [] })).status, 404);
+  assert.equal((await post('pd_0123456789', { videos: [] })).status, 404);
+  assert.equal((await fetch(`${base}/api/projects/sailviz-20260302-0900.sailviz.json/videos`)).status, 404);
+});
+
+test('file: 同時に動画を追記しても重複せず、どちらの動画も残る', async () => {
+  const name = 'sailviz-20260303-0900.sailviz.json';
+  const bearer = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+  await fetch(`${base}/api/projects`, { method: 'POST', headers: bearer, body: JSON.stringify({ name, project: { version: 1, videos: [] } }) });
+  const post = (videos) => fetch(`${base}/api/projects/${name}/videos`, { method: 'POST', headers: bearer, body: JSON.stringify({ videos }) });
+  const rs = await Promise.all([
+    post([{ t: 1000, name: 'a.mp4' }, { t: 2000, name: 'b.mp4' }]),
+    post([{ t: 2000, name: 'b.mp4' }, { t: 3000, name: 'c.mp4' }]),
+    post([{ t: 1000, name: 'a.mp4' }]),
+  ]);
+  assert.deepEqual(rs.map((r) => r.status), [200, 200, 200]);
+  const saved = JSON.parse(await readFileP(join(dataDir, 'projects', name), 'utf8'));
+  assert.deepEqual(saved.videos.map((v) => v.name).sort(), ['a.mp4', 'b.mp4', 'c.mp4']);
+  assert.equal(new Set(saved.videos.map((v) => v.id)).size, 3);
+});

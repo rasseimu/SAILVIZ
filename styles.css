@@ -46,6 +46,7 @@ body.view-landing #top-screen,
 body.view-landing #dashboard-screen,
 body.view-landing #progress-screen,
 body.view-landing #roadmap-screen,
+body.view-landing #study-screen,
 body.view-landing #nav-menu-btn,
 body.view-landing #nav-menu,
 body.view-landing #account-btn,
@@ -240,23 +241,23 @@ body:not(.view-landing) #dashboard-screen { margin-left: var(--sidebar-w); trans
 body:not(.view-landing) #notice-banner { left: var(--sidebar-w); }
 
 /* ===== 統一アプリヘッダー(全ログイン画面) ===== */
-#home-bar, #dashboard-bar, #progress-bar, #roadmap-bar, #topbar {
+#home-bar, #dashboard-bar, #progress-bar, #roadmap-bar, #study-bar, #topbar {
   display: flex; align-items: center; gap: 12px;
   height: var(--header-h); min-height: var(--header-h); flex: 0 0 auto;
   padding: 0 20px; background: var(--gd-surface);
   border-bottom: 1px solid var(--gd-border); }
-#home-bar strong, #dashboard-title, #progress-title, #roadmap-title, #app-title {
+#home-bar strong, #dashboard-title, #progress-title, #roadmap-title, #study-title, #app-title {
   font-size: 17px; font-weight: 600; color: var(--gd-text); letter-spacing: .2px; }
 #app-title { cursor: pointer; }
 #app-title:hover { color: var(--gd-blue); }
 /* ヘッダー内の汎用ボタン・入力を共通トーンに */
-#home-bar .btn, #dashboard-bar .btn, #progress-bar .btn, #roadmap-bar .btn, #topbar .btn,
+#home-bar .btn, #dashboard-bar .btn, #progress-bar .btn, #roadmap-bar .btn, #study-bar .btn, #topbar .btn,
 #progress-ai-generate, #roadmap-home-link {
   font: inherit; font-size: 13px; padding: 7px 14px; border-radius: var(--radius-sm);
   border: 1px solid var(--gd-border); background: #fff; color: var(--gd-blue);
   cursor: pointer; white-space: nowrap; transition: background .12s, border-color .12s; }
 #home-bar .btn:hover, #dashboard-bar .btn:hover, #progress-bar .btn:hover,
-#roadmap-bar .btn:hover, #topbar .btn:hover,
+#roadmap-bar .btn:hover, #study-bar .btn:hover, #topbar .btn:hover,
 #progress-ai-generate:hover, #roadmap-home-link:hover { background: var(--gd-blue-soft); }
 #topbar select, #topbar input[type=datetime-local] { font: inherit; font-size: 13px;
   padding: 6px 8px; border: 1px solid var(--gd-border); border-radius: var(--radius-sm); }
@@ -538,6 +539,44 @@ main { flex: 1; display: flex; min-height: 0; }
 #video-el { position: absolute; top: 50%; left: 50%; background: #000; object-fit: contain; }
 .vid-name { cursor: pointer; text-decoration: underline dotted; }
 
+/* --- 動画の瞬間コメント(②。src/videocomments.js) --- */
+#video-comment-overlay, #study-comment-overlay { position: absolute; left: 8px; right: 8px; top: 8px; z-index: 1; pointer-events: none;
+  display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+#video-comment-overlay.hidden, #study-comment-overlay.hidden { display: none; }
+.vc-ov-item { max-width: 100%; padding: 4px 8px; border-radius: 4px; background: rgba(0,0,0,0.65); color: #fff;
+  font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.vc-ov-author { margin-right: 6px; color: #9fd0ff; font-weight: 600; }
+#video-comments { flex: 0 1 auto; max-height: 40%; overflow-y: auto; padding: 6px 10px 8px;
+  border-top: 1px solid #24313d; color: #dfe8ef; font-size: 13px; overflow-wrap: anywhere; }
+#video-comments.hidden, #study-comments.hidden { display: none; }
+#video-comments [hidden], #study-comments [hidden] { display: none !important; }
+#video-comments button, #study-comments button { border: none; border-radius: 4px; background: #24313d; color: #fff; font-size: 12px;
+  padding: 3px 8px; cursor: pointer; }
+#video-comments button:hover:not(:disabled), #study-comments button:hover:not(:disabled) { background: #33475a; }
+#video-comments button:disabled, #study-comments button:disabled { opacity: 0.5; cursor: default; }
+.vc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.vc-title { font-weight: 600; }
+.vc-count { color: #9db2c4; font-size: 12px; }
+#video-comments .vc-add, #study-comments .vc-add { margin-left: auto; background: #1c72b8; }
+#video-comments .vc-add:hover:not(:disabled), #study-comments .vc-add:hover:not(:disabled) { background: #2583cf; }
+.vc-form { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 6px; }
+.vc-input { width: 100%; box-sizing: border-box; resize: vertical; min-height: 40px; padding: 4px 6px;
+  border: 1px solid #33475a; border-radius: 4px; background: #0f1d2a; color: #fff; font: inherit; }
+.vc-form-btns { display: flex; align-items: center; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.vc-msg { margin-right: auto; color: #f5b971; font-size: 12px; }
+.vc-status { display: flex; align-items: center; gap: 8px; color: #9db2c4; font-size: 12px; padding: 2px 0; }
+.vc-list { list-style: none; margin: 0; padding: 0; }
+.vc-item { padding: 4px 0; border-bottom: 1px solid #1c2a37; }
+.vc-item:last-child { border-bottom: none; }
+#video-comments .vc-jump, #study-comments .vc-jump { display: block; width: 100%; text-align: left; background: none; padding: 2px 0;
+  color: inherit; font-size: 13px; line-height: 1.4; }
+#video-comments .vc-jump:hover, #study-comments .vc-jump:hover { background: #16263a; }
+.vc-time { display: inline-block; min-width: 3.2em; margin-right: 6px; color: #7fb8e6; font-variant-numeric: tabular-nums; }
+.vc-author { margin-right: 6px; font-weight: 600; }
+.vc-text { white-space: pre-wrap; }
+.vc-meta { display: flex; align-items: center; gap: 6px; justify-content: flex-end; color: #7d91a3; font-size: 11px; }
+.vc-date { margin-right: auto; }
+
 /* --- 反省ノート --- */
 .side-add { width: 100%; padding: 5px; margin-bottom: 6px; border: 1px dashed #9db2c4;
   background: #e7eef4; color: #0d3b5e; border-radius: 5px; cursor: pointer; font-size: 13px; }
@@ -737,6 +776,66 @@ body.view-progress #dashboard-screen,
 body.view-progress #topbar,
 body.view-progress main,
 body.view-progress #transport { display: none; }
+/* ===== プロ動画の勉強ページ(③。src/studyview.js) ===== */
+#study-screen { display: none; }
+body.view-study #study-screen { display: flex; flex-direction: column; position: fixed; inset: 0 0 0 var(--sidebar-w);
+  z-index: 50; background: var(--gd-page); font-family: var(--gd-font); color: var(--gd-text); }
+body.view-study #home-screen,
+body.view-study #dashboard-screen,
+body.view-study #progress-screen,
+body.view-study #roadmap-screen,
+body.view-study #top-screen,
+body.view-study #topbar,
+body.view-study main,
+body.view-study #reflection-editor,
+body.view-study #transport,
+body.view-study #color-menu { display: none !important; }
+#study-screen [hidden] { display: none !important; }
+#study-root { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.study-msg { margin: 0; padding: 8px 20px; font-size: 13px; color: var(--gd-text2); background: var(--gd-surface);
+  border-bottom: 1px solid var(--gd-border); overflow-wrap: anywhere; }
+#study-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(220px, 320px) minmax(0, 1fr); }
+#study-list { min-width: 0; overflow-y: auto; padding: 10px 8px; background: var(--gd-surface); border-right: 1px solid var(--gd-border); }
+.study-empty { margin: 8px; font-size: 13px; color: var(--gd-text2); }
+/* パンくず(nav > ol。動画ルート名 › プロ動画 › A › B)。長い名前は折り返す(横スクロールしない)。 */
+.study-crumbs-nav { min-width: 0; }
+.study-crumbs { list-style: none; margin: 0 0 6px; padding: 2px 4px 6px; display: flex; flex-wrap: wrap; align-items: center;
+  gap: 2px 0; font-size: 12px; color: var(--gd-text2); border-bottom: 1px solid var(--gd-border); }
+.study-crumbs li { display: flex; align-items: center; min-width: 0; max-width: 100%; }
+.study-crumbs li + li::before { content: '›'; content: '›' / ''; padding: 0 4px; color: var(--gd-text2); }
+.study-crumb { min-width: 0; padding: 2px 4px; overflow-wrap: anywhere; border-radius: var(--radius-sm); }
+button.study-crumb { font: inherit; color: var(--gd-blue); background: none; border: 0; cursor: pointer; text-align: left; }
+button.study-crumb:hover { background: var(--gd-hover); text-decoration: underline; }
+.study-crumb-current { font-weight: 600; color: var(--gd-text); }
+.study-videos { list-style: none; margin: 0; padding: 0; }
+.study-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px; font: inherit; font-size: 13px;
+  text-align: left; color: var(--gd-text); background: none; border: 0; border-radius: var(--radius-sm); cursor: pointer; }
+.study-item:hover { background: var(--gd-hover); }
+.study-item.active { background: var(--gd-blue-soft); color: var(--gd-blue); font-weight: 600; }
+.study-item-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.study-count { flex: 0 0 auto; min-width: 1.6em; padding: 1px 6px; border-radius: 10px; background: var(--gd-blue); color: #fff;
+  font-size: 11px; text-align: center; font-variant-numeric: tabular-nums; }
+/* フォルダの行(アイコン + 名前 + 配下の本数 + コメントの合計)と、上のフォルダへの行。 */
+.study-item .ic { flex: 0 0 auto; width: 16px; height: 16px; color: var(--gd-text2); }
+.study-folder .study-item-name { font-weight: 600; }
+.study-folder-n { flex: 0 0 auto; font-size: 11px; color: var(--gd-text2); font-variant-numeric: tabular-nums; }
+.study-up { color: var(--gd-text2); }
+#study-player { min-width: 0; display: flex; flex-direction: column; overflow-y: auto; background: #0d1b26; color: #dfe8ef; }
+#study-video-name { padding: 8px 12px; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+#study-stage { position: relative; background: #000; }
+#study-video { display: block; width: 100%; max-width: 100%; max-height: 65vh; background: #000; }
+#study-player-empty { margin: 24px 16px; font-size: 13px; color: #9db2c4; }
+#study-comments { flex: 0 0 auto; padding: 6px 10px 8px; border-top: 1px solid #24313d; color: #dfe8ef; font-size: 13px;
+  overflow-wrap: anywhere; }
+@media (max-width: 768px) {
+  /* 一覧が上(高さを抑えて中でスクロール)、プレーヤーとコメントが下。画面全体を縦にスクロールする。 */
+  #study-bar { padding: 0 12px; }
+  .study-msg { padding: 8px 12px; }
+  #study-body { display: flex; flex-direction: column; overflow-y: auto; }
+  #study-list { flex: 0 0 auto; max-height: 32vh; border-right: 0; border-bottom: 1px solid var(--gd-border); }
+  #study-player { flex: 0 0 auto; overflow: visible; }
+  #study-video { max-height: 45vh; }
+}
 /* ===== 目標ロードマップ画面(項目#28) ===== */
 #roadmap-screen { display: none; }
 body.view-roadmap #roadmap-screen { display: flex; flex-direction: column; position: fixed; inset: 0 0 0 var(--sidebar-w); background: #fff; z-index: 50; }

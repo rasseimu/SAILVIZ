@@ -1,5 +1,5 @@
 // 画面(view)とアドレスの対応。画面側(app.js)とサーバーの配信(server/static.js)で共用する純関数。
-// view: top=ホーム, home=練習データ(カード一覧), track=練習を開いた画面, dashboard, progress, roadmap。
+// view: top=ホーム, home=練習データ(カード一覧), track=練習を開いた画面, dashboard, progress, roadmap, study=プロ動画。
 // 練習は ?id= で開く(下の階層にすると index.html の相対パスの読込が崩れるため、アドレスは1階層にそろえる)。
 const VIEW_PATHS = {
   top: '/home',
@@ -8,6 +8,7 @@ const VIEW_PATHS = {
   dashboard: '/dashboard',
   progress: '/progress',
   roadmap: '/roadmap',
+  study: '/study',
 };
 const PATH_VIEWS = new Map(Object.entries(VIEW_PATHS).map(([view, path]) => [path, view]));
 

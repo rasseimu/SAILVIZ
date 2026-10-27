@@ -20,6 +20,7 @@ import {
 } from '../domain/compatAccess.js';
 import { activeOrgOf } from '../domain/policy.js';
 import { rosterForSubject } from '../orgMembers.js';
+import { validateVideoAppend } from '../../src/videolink.js';
 import { randomBytes } from 'node:crypto';
 
 export async function compatRoute(req, res, ctx) {
@@ -415,6 +416,41 @@ export async function compatRoute(req, res, ctx) {
       try { await store.deleteProject(id); } catch { /* 既に無ければ黙認 */ }
       send(res, 200, { ok: true }); return true;
     }
+  }
+
+  // 練習の動画一覧だけの読み・追記(動画フォルダの自動取込。練習全体の PUT で他の編集を上書きしないため)。
+  // GET → { videos }。POST 本文 { videos: [{ id, t, name, durationMs }] } → 200 { videos: 保存後の一覧, added: 足した本数 }。
+  // 追記は name + t が未登録のものだけ。権限は練習の GET / PUT と同じ。
+  const videosMatch = path.match(/^\/api\/projects\/([^/]+)\/videos$/);
+  if (videosMatch && (method === 'GET' || method === 'POST')) {
+    const id = decodeURIComponent(videosMatch[1]);
+    if (!isValidProjectId(id)) { send(res, 400, { error: 'bad id' }); return true; }
+    if (method === 'GET') {
+      const subject = gateRead(); if (!subject) return true;
+      // 見えない器は存在も伏せて 404。
+      if (policyOn && !canSeeProject(subject, store.getProjectAccess(id))) { send(res, 404, { error: 'not found' }); return true; }
+      try {
+        send(res, 200, { videos: await store.readVideos(id) });
+      } catch { send(res, 404, { error: 'not found' }); }
+      return true;
+    }
+    const writer = gateWrite(); if (!writer) return true;
+    if (!policyOn && !isValidProjectName(id)) { send(res, 404, { error: 'not found' }); return true; }
+    if (policyOn) {
+      const access = store.getProjectAccess(id);
+      if (!access) { send(res, 404, { error: 'not found' }); return true; }
+      if (!canPutDay(writer, access)) { send(res, 403, { error: 'forbidden' }); return true; }
+    }
+    const body = await readBody(req);
+    const bad = validateVideoAppend(body?.videos);
+    if (bad) { send(res, 400, { error: bad }); return true; }
+    try {
+      send(res, 200, await store.appendVideos(id, body.videos));
+    } catch (e) {
+      if (e?.code !== 'not_found') throw e;
+      send(res, 404, { error: 'not found' });
+    }
+    return true;
   }
 
   const ovMatch = path.match(/^\/api\/overlays\/([^/]+)$/);

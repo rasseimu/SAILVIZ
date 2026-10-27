@@ -164,3 +164,23 @@ test('404 for missing project', { skip: skipMsg }, async () => {
   const r = await fetch(`${base}/api/projects/sailviz-29991231-0000.sailviz.json`);
   assert.equal(r.status, 404);
 });
+
+test('動画の追記(DB 版): 同時に送っても重複せず、GET で同じ一覧が返る。認証なしは 401、無い器は 404', { skip: skipMsg }, async () => {
+  const id = await create('sailviz-20260120-0900.sailviz.json', proj({ reflections: [{ id: 'r1', notes: { goal: 'x' } }] }));
+  const url = `${base}/api/projects/${id}/videos`;
+  const post = (videos, headers = bearer) => fetch(url, { method: 'POST', headers, body: JSON.stringify({ videos }) });
+  assert.equal((await post([{ t: 1, name: 'a.mp4' }], { 'content-type': 'application/json' })).status, 401);
+  const rs = await Promise.all([
+    post([{ t: 1000, name: 'a.mp4' }, { t: 2000, name: 'b.mp4' }]),
+    post([{ t: 2000, name: 'b.mp4' }, { t: 3000, name: 'c.mp4' }]),
+  ]);
+  assert.deepEqual(rs.map((r) => r.status), [200, 200]);
+  const got = await (await fetch(url)).json();
+  assert.deepEqual(got.videos.map((v) => v.name).sort(), ['a.mp4', 'b.mp4', 'c.mp4']);
+  assert.equal(new Set(got.videos.map((v) => v.id)).size, 3);
+  const full = await (await fetch(`${base}/api/projects/${id}`)).json();
+  assert.deepEqual(full.videos, got.videos);
+  assert.deepEqual(full.reflections.map((r) => r.id), ['r1']);
+  assert.equal((await fetch(`${base}/api/projects/pd_0000000000/videos`, { method: 'POST', headers: bearer, body: '{"videos":[]}' })).status, 404);
+  assert.equal((await fetch(`${base}/api/projects/pd_0000000000/videos`)).status, 404);
+});
