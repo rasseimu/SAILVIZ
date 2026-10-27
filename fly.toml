@@ -20,6 +20,11 @@ primary_region = "nrt"
   auto_start_machines = true
   min_machines_running = 0
 
+# 256MB では大きい練習(1件 約11MB の JSON)を開いたときにメモリ不足で落ちたため 512MB(2026-10-27)。
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
 # 練習JSON/オーバーレイを保存する永続ボリューム。1台構成(単一書き込み・last-write-wins)。
 [mounts]
   source = "sailviz_data"
