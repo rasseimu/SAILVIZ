@@ -105,3 +105,24 @@ test('serveStatic: /verify-email?token=… は HTML を返し no-store・Referre
     assert.equal(res.headers['referrer-policy'], 'no-referrer');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('serveStatic: 画面のアドレス(/home・/practices・/practice など)は index.html を返す。末尾スラッシュ・下の階層は返さない', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sailviz-pages-'));
+  try {
+    await writeFile(join(root, 'index.html'), '<h1>idx</h1>');
+    for (const url of ['/home', '/practices', '/practice', '/practice?id=pd_0123456789', '/dashboard', '/progress', '/roadmap']) {
+      const res = fakeRes();
+      await serveStatic({ url }, res, root);
+      assert.equal(res.status, 200, url);
+      assert.equal(res.body.toString(), '<h1>idx</h1>', url);
+      assert.equal(res.headers['referrer-policy'], undefined, url);
+    }
+    for (const url of ['/home/', '/practice/x', '/nope']) {
+      const res = fakeRes();
+      await serveStatic({ url }, res, root);
+      assert.equal(res.status, 404, url);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

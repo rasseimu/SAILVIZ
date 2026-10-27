@@ -69,11 +69,13 @@ export function createDbRepo({ db, dataDir }) {
   const getPd = db.prepare('SELECT * FROM practice_days WHERE id = ?');
   const item = (r) => ({ id: r.id, name: r.name, label: projectLabel(r.name) });
 
-  function loadParts(pd) {
+  // points: false なら軌跡の点列(tracks.points。練習の大半の容量)を読まない(一覧の要約用)。
+  function loadParts(pd, { points = true } = {}) {
     const sessions = db.prepare('SELECT * FROM rec_sessions WHERE practice_day_id = ?').all(pd.id);
     const ids = sessions.map((s) => s.id);
+    const cols = points ? '*' : 'session_id, bounds, t_range, point_count, csv_name, view';
     const tracks = ids.length
-      ? db.prepare(`SELECT * FROM tracks WHERE session_id IN (${ids.map(() => '?').join(',')})`).all(...ids)
+      ? db.prepare(`SELECT ${cols} FROM tracks WHERE session_id IN (${ids.map(() => '?').join(',')})`).all(...ids)
       : [];
     const reflections = db.prepare('SELECT * FROM reflections WHERE practice_day_id = ?').all(pd.id);
     return { practiceDay: pd, sessions, tracks, reflections };
@@ -192,6 +194,14 @@ export function createDbRepo({ db, dataDir }) {
       if (!pd) throw new Error('not found');
       const parts = loadParts(pd);
       return { project: { ...assembleProject(parts), _rev: pd.rev }, access: accessOf(pd, parts) };
+    },
+
+    // readProjectWithAccess と同じ形で、軌跡の点列(points)だけ省いたもの(ホームのカードの要約用)。器が無ければ投げる。
+    readSummaryWithAccess(id) {
+      const pd = getPd.get(id);
+      if (!pd) throw new Error('not found');
+      const parts = loadParts(pd, { points: false });
+      return { project: assembleProject(parts), access: accessOf(pd, parts) };
     },
 
     // 反省だけと access(進捗画面の集計用)。軌跡は並びと認可に要る session_id だけ読み、点列(points)は読まない。

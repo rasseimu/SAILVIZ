@@ -34,6 +34,7 @@ import { store } from './store.js';
 import { resolveActiveOrg, getActiveOrgId } from './activeorg.js';
 import { orgAvatar } from './orgavatar.js';
 import { icon } from './icons.js';
+import { pathFor, routeFromLocation } from './routes.js';
 import { lockActiveOrg } from './api.js';
 import { earliestContentMs } from './summary.js';
 import { saveDirHandle, loadDirHandle, ensurePermission } from './dirhandle.js';
@@ -839,6 +840,7 @@ async function saveProject() {
       const created = await store.createProject(uniqueProjectName(baseMs, existing), obj);
       state.currentProjectId = created.id;
       state.currentProjectName = name = created.name;
+      if (currentView === 'track') syncUrl({ replace: true }); // 新しい練習のアドレスに ID を付ける
     }
   } catch (e) {
     statusEl.textContent = `保存に失敗: ${e.message}`; return;
@@ -1041,11 +1043,47 @@ $('top-screen').addEventListener('click', (e) => {
 // 画面(view)は body の view-* クラスで排他切替。遷移時は必ず全 view を外してから付与する。
 const ALL_VIEWS = ['view-landing', 'view-top', 'view-home', 'view-dashboard', 'view-progress', 'view-roadmap'];
 function clearViews() { for (const c of ALL_VIEWS) document.body.classList.remove(c); }
-function showLanding() { clearViews(); document.body.classList.add('view-landing'); setActiveNav(null); }
-function showTop() { clearViews(); document.body.classList.add('view-top'); setActiveNav('top'); renderTop(); }
-function showHome() { clearViews(); document.body.classList.add('view-home'); setActiveNav('home'); renderHome(); }
+
+// ===== 画面のアドレス(src/routes.js)=====
+// 画面を切り替えたら、アドレスをその画面のもの(/home・/practices・/practice?id=… など)にする(履歴に積む)。
+// 戻る・進む・再読み込み・アドレスの直接指定では、アドレスから画面を開く(routeToLocation)。
+// このときアドレスは既に画面と一致しているので、syncUrl は履歴を積まない。
+let currentView = null; // 'top' | 'home' | 'track' | 'dashboard' | 'progress' | 'roadmap'(ランディング中は null)
+let urlReplace = false; // アドレスから開いている間は、別の画面に変わっても履歴を積まずに置き換える(戻るで抜けられなくしない)
+function syncUrl({ replace = urlReplace } = {}) {
+  const path = pathFor(currentView, { id: currentView === 'track' ? state.currentProjectId : null });
+  if (!path || location.pathname + location.search === path) return;
+  if (replace) history.replaceState(null, '', path); else history.pushState(null, '', path);
+}
+function setView(view) { currentView = view; syncUrl(); }
+// fn の同期部分(画面の切り替え・setView)の間だけ置き換えにする。
+function viaUrl(fn) { urlReplace = true; try { return fn(); } finally { urlReplace = false; } }
+
+// アドレスから画面を開く。/ と知らないアドレスはホーム(アドレスも /home に置き換える)。
+// 練習を開けなかった(無い・読めない・破棄の確認で取りやめた)ときは今の画面のアドレスへ戻す。
+async function routeToLocation() {
+  const r = routeFromLocation(location.pathname, location.search);
+  if (!r) { viaUrl(showTop); return; }
+  if (r.view === 'track') {
+    if (!r.id || r.id === state.currentProjectId) { viaUrl(showTrack); return; }
+    let name = r.id; // 保存したときの表示用の名前。一覧(軽い)から引く
+    try { name = (await store.listProjects()).find((p) => p.id === r.id)?.name ?? r.id; } catch { /* id のまま */ }
+    if (await loadPractice(r.id, name)) viaUrl(showTrack);
+    else if (currentView) syncUrl({ replace: true });
+    else viaUrl(showHome);
+    return;
+  }
+  const show = { top: showTop, home: showHome, dashboard: showDashboard, progress: showProgress, roadmap: showRoadmap }[r.view];
+  viaUrl(() => show());
+}
+window.addEventListener('popstate', () => { if (currentView) routeToLocation(); }); // ランディング中(未ログイン)は何もしない
+
+function showLanding() { clearViews(); currentView = null; document.body.classList.add('view-landing'); setActiveNav(null); }
+function showTop() { clearViews(); setView('top'); document.body.classList.add('view-top'); setActiveNav('top'); renderTop(); }
+function showHome() { clearViews(); setView('home'); document.body.classList.add('view-home'); setActiveNav('home'); renderHome(); }
 async function showDashboard() {
   clearViews();
+  setView('dashboard');
   document.body.classList.add('view-dashboard');
   setActiveNav('dashboard');
   await dashboard.render();
@@ -1054,6 +1092,7 @@ async function showDashboard() {
 let noOrgAccount = false;
 async function showProgress() {
   clearViews();
+  setView('progress');
   document.body.classList.add('view-progress');
   setActiveNav('progress');
   document.body.classList.toggle('no-org', noOrgAccount);
@@ -1065,12 +1104,14 @@ async function showRoadmap(member) {
   if (noOrgAccount) return showProgress();
   // ロードマップは自己完結データ(目標/段階)。永続化は API(store)。
   clearViews();
+  setView('roadmap');
   document.body.classList.add('view-roadmap');
   setActiveNav('progress');
   await roadmap.render(typeof member === 'string' ? member : undefined);
 }
 function showTrack() {
   clearViews();
+  setView('track');
   setActiveNav('home');
   // ホーム中は stage が display:none だった → canvas バッファを再計算しないと潰れる
   resizeCanvas(); refitTransform(); draw();
@@ -1449,8 +1490,8 @@ const NOTICE_KEY = 'sailviz.noticeDismissed.v1';
   });
 })();
 
-// ログイン後はホームから入る。
-function enterApp() { showTop(); }
+// ログイン後はアドレスの画面から入る(/ ならホーム)。未ログインで開いたアドレスもログイン後にここで開く。
+function enterApp() { routeToLocation(); }
 
 // 起動時: 編集認証・動画フォルダ復元のあと、閲覧セッションを確認して
 // ログイン済ならアプリ、未ログインならランディング(公開LP)を表示。
@@ -1514,6 +1555,7 @@ function resetAccountOrg() {
 async function doLogout() {
   try { await store.logout(); } catch { /* 失敗しても画面は戻す */ }
   showLanding();
+  history.replaceState(null, '', '/'); // 次にログインした人を前の人の画面へ連れて行かない
 }
 const NAV_ACTIONS = {
   top: showTop,
