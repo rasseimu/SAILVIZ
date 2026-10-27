@@ -33,7 +33,7 @@ import { uniqueProjectName } from './projectfs.js';
 import { store } from './store.js';
 import { resolveActiveOrg, getActiveOrgId } from './activeorg.js';
 import { orgAvatar } from './orgavatar.js';
-import { icon } from './icons.js';
+import { icon, SPRITE_URL, iconHref, setInlineSprite, inlineSpriteMarkup } from './icons.js';
 import { pathFor, routeFromLocation } from './routes.js';
 import { lockActiveOrg } from './api.js';
 import { earliestContentMs } from './summary.js';
@@ -1491,6 +1491,21 @@ const NOTICE_KEY = 'sailviz.noticeDismissed.v1';
     banner.hidden = true;
     try { globalThis.localStorage?.setItem(NOTICE_KEY, '1'); } catch { /* noop */ }
   });
+})();
+
+// アイコンのスプライトを1度だけ読み、ページに埋め込む。以後のアイコンはページ内の参照にする
+// (ファイルの参照のままだと再描画のたびに取りに行き、休止中のサーバーを起こして表示が遅れる)。
+// 読めなければファイルの参照のまま(見た目は同じ)。
+(async () => {
+  try {
+    const res = await fetch(SPRITE_URL);
+    if (!res.ok) return;
+    document.body.insertAdjacentHTML('afterbegin', inlineSpriteMarkup(await res.text()));
+    setInlineSprite(true);
+    for (const u of document.querySelectorAll(`use[href^="${SPRITE_URL}#"]`)) {
+      u.setAttribute('href', iconHref(u.getAttribute('href').slice(SPRITE_URL.length + 1)));
+    }
+  } catch { /* ファイルの参照のまま */ }
 })();
 
 // ログイン後はアドレスの画面から入る(/ ならホーム)。未ログインで開いたアドレスもログイン後にここで開く。
