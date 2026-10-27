@@ -12,6 +12,7 @@ import { openRepo } from './repos/openRepo.js';
 import { createAccountsRepo } from './repos/accountsRepo.js';
 import { createSessionsRepo } from './repos/sessionsRepo.js';
 import { createAppRepo } from './repos/appRepo.js';
+import { createVideoCommentsRepo } from './repos/videoCommentsRepo.js';
 import { createMailer, mailProviderWarning } from './mail.js';
 import { DELETED_DIR_NAME, purgeDeleted } from './deletedData.js';
 
@@ -33,6 +34,8 @@ const accounts = db ? createAccountsRepo({ db }) : null;
 // 記録セッション(Phase 3。§10.4)も同じ DB。
 const sessions = db ? createSessionsRepo({ db }) : null;
 const app = db ? createAppRepo({ db }) : null;
+// 動画の瞬間コメント(②)も同じ DB。
+const videoComments = db ? createVideoCommentsRepo({ db }) : null;
 // メール送信のアダプタ。MAIL_PROVIDER 未設定は log(確認リンクをログに出すだけ)。brevo は 2026-10-19 に実キーで送受信確認済み。
 const MAIL_PROVIDER = process.env.MAIL_PROVIDER || 'log';
 // 本番で log のままだとメールが届かない。起動は止めず WARN を1行出す(スモークが拾う)。
@@ -67,7 +70,7 @@ const FEATURES = resolveFeatures(process.env);
 const api = createApi({
   dataDir: DATA_DIR, repo, token: TOKEN, geminiKey: GEMINI_KEY,
   viewUser: VIEW_USER, viewPassword: VIEW_PASSWORD,
-  accounts, mailer, baseUrl: PUBLIC_BASE_URL, migrationOrgId: MIGRATION_ORG_ID, sessions, app,
+  accounts, mailer, baseUrl: PUBLIC_BASE_URL, migrationOrgId: MIGRATION_ORG_ID, sessions, app, videoComments,
 });
 
 const server = createServer(async (req, res) => {

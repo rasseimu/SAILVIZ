@@ -41,3 +41,10 @@ export function msToJstWall(ms) {
   const g = (t) => parts.find((p) => p.type === t).value;
   return `${g('year')}-${g('month')}-${g('day')}T${g('hour')}:${g('minute')}`;
 }
+
+// 絶対ms の日本時間(Asia/Tokyo)の年・月・日。不正値は null。
+export function jstYmd(ms) {
+  if (typeof ms !== 'number' || !Number.isFinite(ms)) return null;
+  const d = new Date(ms + JST_OFFSET_MS);
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+}

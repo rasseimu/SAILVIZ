@@ -14,26 +14,11 @@ function openDb() {
 }
 
 export async function saveDirHandle(handle) {
-  const db = await openDb();
-  await new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put(handle, KEY);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-  db.close();
+  await saveHandle(KEY, handle);
 }
 
 export async function loadDirHandle() {
-  const db = await openDb();
-  const handle = await new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readonly');
-    const req = tx.objectStore(STORE).get(KEY);
-    req.onsuccess = () => resolve(req.result || null);
-    req.onerror = () => reject(req.error);
-  });
-  db.close();
-  return handle;
+  return loadHandle(KEY);
 }
 
 // 権限を確認し、未許可なら要求する。granted になれば true。
@@ -42,4 +27,35 @@ export async function ensurePermission(handle, mode = 'readwrite') {
   const opts = { mode };
   if ((await handle.queryPermission(opts)) === 'granted') return true;
   return (await handle.requestPermission(opts)) === 'granted';
+}
+
+// キーを指定してハンドルを保存・復元する(動画ルートは 'videoRootDir'。保存フォルダの 'projectDir' とは別)。
+export async function saveHandle(key, handle) {
+  const db = await openDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(handle, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
+export async function loadHandle(key) {
+  const db = await openDb();
+  const handle = await new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).get(key);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+  db.close();
+  return handle;
+}
+
+// 権限の確認だけ(要求はしない。ユーザー操作なしで呼んでもダイアログは出ない)。
+// 'granted' | 'prompt' | 'denied'。ハンドルが無い・確認できなければ 'prompt'。
+export async function queryHandlePermission(handle, mode = 'read') {
+  if (!handle || typeof handle.queryPermission !== 'function') return 'prompt';
+  try { return await handle.queryPermission({ mode }); } catch { return 'prompt'; }
 }

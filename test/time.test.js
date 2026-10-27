@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTime } from '../src/time.js';
+import { parseTime, jstYmd } from '../src/time.js';
 
 test('ns integer -> ms', () => {
   // 1786078509603689000 ns == 1786078509603.689 ms
@@ -49,4 +49,18 @@ test('jstWallToMs/msToJstWall: 往復', () => {
 test('msToJstWall: 非有限は空文字', () => {
   assert.equal(msToJstWall(NaN), '');
   assert.equal(msToJstWall(Infinity), '');
+});
+
+test('jstYmd: 日本時間の年月日(UTC 15:00 は翌日、月末・年末をまたぐ)', () => {
+  assert.deepEqual(jstYmd(Date.UTC(2026, 7, 26, 14, 59)), { year: 2026, month: 8, day: 26 });
+  assert.deepEqual(jstYmd(Date.UTC(2026, 7, 26, 15, 0)), { year: 2026, month: 8, day: 27 });
+  assert.deepEqual(jstYmd(Date.UTC(2026, 0, 31, 15, 0)), { year: 2026, month: 2, day: 1 });
+  assert.deepEqual(jstYmd(Date.UTC(2025, 11, 31, 15, 0)), { year: 2026, month: 1, day: 1 });
+  assert.deepEqual(jstYmd(Date.UTC(2028, 1, 28, 15, 0)), { year: 2028, month: 2, day: 29 });
+});
+
+test('jstYmd: 数値でなければ null', () => {
+  assert.equal(jstYmd(NaN), null);
+  assert.equal(jstYmd(null), null);
+  assert.equal(jstYmd('2026-08-27'), null);
 });

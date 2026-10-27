@@ -14,6 +14,8 @@ import { createSessionsRoute } from './routes/sessions.js';
 import { createMeRoute } from './routes/me.js';
 import { createReflectionExtrasRoute } from './routes/reflectionExtras.js';
 import { createPracticeDaysRoute } from './routes/practiceDays.js';
+import { createVideoCommentsRoute } from './routes/videoComments.js';
+import { createStudyCommentsRoute } from './routes/studyComments.js';
 import { createMailer } from './mail.js';
 import { resolveSubject } from './compatPrincipal.js';
 import { randomBytes } from 'node:crypto';
@@ -25,7 +27,7 @@ import { describeError } from './domain/errorLog.js';
 // mailer / baseUrl は確認・再設定メール用(MAIL_PROVIDER 未設定なら log)。authOptions はテスト用の差し替え。
 export function createApi({
   dataDir, repo, token, geminiKey, viewUser, viewPassword, accounts, mailer, baseUrl, authOptions = {},
-  migrationOrgId, sessions, app,
+  migrationOrgId, sessions, app, videoComments,
 }) {
   // 保存の窓口。明示 repo が無ければ dataDir からファイル実装を組み立てる(既存挙動のまま)。
   const store = repo || createFileRepo(dataDir);
@@ -46,6 +48,14 @@ export function createApi({
   const meRoute = createMeRoute({ app: accounts ? app : null, accounts, now: authOptions.now });
   // 反省の進捗とコメント(Phase 4。§6)。app が無ければ /api/reflections/* は 503。
   const reflectionExtrasRoute = createReflectionExtrasRoute({ app: accounts ? app : null, accounts, now: authOptions.now });
+  // 動画の瞬間コメント(②。③も共用)。videoComments(videoCommentsRepo)は STORAGE=db のときだけ。無ければ 503。
+  const videoCommentsRoute = createVideoCommentsRoute({
+    repo: accounts ? videoComments : null, accounts, store, now: authOptions.now,
+  });
+  // 勉強動画(プロ動画)の瞬間コメント(③)。同じ表(scope 'study')。編集・削除は上の videoCommentsRoute。無ければ 503。
+  const studyCommentsRoute = createStudyCommentsRoute({
+    repo: accounts ? videoComments : null, accounts, now: authOptions.now,
+  });
   // 練習日の器(Phase 4。§7)。app・sessions が無ければ /api/practice-days* は 503。
   const practiceDaysRoute = createPracticeDaysRoute({ app: accounts ? app : null, sessions: accounts ? sessions : null, now: authOptions.now });
   // 閲覧ゲート: user/password が両方設定されている時のみ有効。
@@ -104,6 +114,8 @@ export function createApi({
       if (await sessionsRoute(req, res, ctx)) return true;
       if (await meRoute(req, res, ctx)) return true;
       if (await reflectionExtrasRoute(req, res, ctx)) return true;
+      if (await videoCommentsRoute(req, res, ctx)) return true;
+      if (await studyCommentsRoute(req, res, ctx)) return true;
       if (await practiceDaysRoute(req, res, ctx)) return true;
       if (await compatRoute(req, res, ctx)) return true;
       send(res, 404, { error: 'no route' });

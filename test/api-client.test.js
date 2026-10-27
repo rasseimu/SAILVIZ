@@ -3,6 +3,9 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   apiGetProject, apiPutProject, apiUnlock, apiCommitMinutes, apiCreateProject, apiListProjects, apiMe, apiDeleteProject,
+  apiGetProjectVideos, apiAppendProjectVideos,
+  apiListVideoComments, apiCreateVideoComment, apiUpdateVideoComment, apiDeleteVideoComment, apiVideoCommentsAvailable,
+  apiListStudyComments, apiCreateStudyComment,
 } from '../src/api.js';
 import { getActiveOrgId, setActiveOrgId, resolveActiveOrg } from '../src/activeorg.js';
 
@@ -248,4 +251,96 @@ test('apiDeleteProject: 失敗したら HTTP の状態(403 など)を err.status
   await assert.rejects(() => apiDeleteProject('pd_0123456789'), (e) => e.status === 403);
   globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: true }) });
   await apiDeleteProject('pd_0123456789');
+});
+
+test('api: apiGetProjectVideos は GET /api/projects/:id/videos の videos を返す', async () => {
+  const calls = recordFetch(() => okJson({ videos: [{ id: 'vid0', t: 1, name: 'a.mp4', durationMs: null }] }));
+  const v = await apiGetProjectVideos('pd_0123456789');
+  assert.equal(calls[0].url, '/api/projects/pd_0123456789/videos');
+  assert.equal(calls[0].init.method, undefined);
+  assert.deepEqual(v.map((x) => x.name), ['a.mp4']);
+});
+
+test('api: apiAppendProjectVideos は POST で { videos } を送り { videos, added } を返す。失敗は err.status 付きで投げる', async () => {
+  const calls = recordFetch(() => okJson({ videos: [], added: 0 }));
+  const videos = [{ id: 'vid0', t: 1, name: 'a.mp4', durationMs: null }];
+  assert.deepEqual(await apiAppendProjectVideos('x.sailviz.json', videos), { videos: [], added: 0 });
+  assert.equal(calls[0].url, '/api/projects/x.sailviz.json/videos');
+  assert.equal(calls[0].init.method, 'POST');
+  assert.deepEqual(JSON.parse(calls[0].init.body), { videos });
+  globalThis.fetch = async () => ({ ok: false, status: 401, json: async () => ({}) });
+  await assert.rejects(() => apiAppendProjectVideos('x.sailviz.json', videos), (e) => e.status === 401);
+  globalThis.fetch = async () => ({ ok: false, status: 404, json: async () => ({}) });
+  await assert.rejects(() => apiGetProjectVideos('x.sailviz.json'), (e) => e.status === 404);
+});
+
+test('api: 動画コメントの一覧は { comments, canWrite }。503 は unavailable、それ以外の失敗は err.status 付きで投げる', async () => {
+  const calls = recordFetch(() => okJson({ comments: [{ id: 'vc_1' }], canWrite: true }));
+  assert.deepEqual(await apiListVideoComments('pd_0123456789'), { comments: [{ id: 'vc_1' }], canWrite: true });
+  assert.equal(calls[0].url, '/api/projects/pd_0123456789/video-comments');
+  globalThis.fetch = async () => ({ ok: false, status: 503, json: async () => ({ error: { code: 'unavailable' } }) });
+  assert.deepEqual(await apiListVideoComments('x.sailviz.json'), { comments: [], canWrite: false, unavailable: true });
+  globalThis.fetch = async () => ({ ok: false, status: 404, json: async () => ({ error: { code: 'not_found' } }) });
+  await assert.rejects(() => apiListVideoComments('pd_0123456789'), (e) => e.status === 404);
+});
+
+test('api: 動画コメントの作成・更新・削除のパスとメソッド。失敗はサーバの理由を添える', async () => {
+  const calls = recordFetch(() => okJson({ id: 'vc_1' }, 201));
+  const b = { videoName: 'a.mp4', videoT: 1, positionMs: 0, text: 'x' };
+  assert.deepEqual(await apiCreateVideoComment('pd_0123456789', b), { id: 'vc_1' });
+  await apiUpdateVideoComment('vc_1', 'y');
+  await apiDeleteVideoComment('vc_1');
+  assert.deepEqual(calls.map((c) => [c.init.method, c.url]), [
+    ['POST', '/api/projects/pd_0123456789/video-comments'], ['PATCH', '/api/video-comments/vc_1'], ['DELETE', '/api/video-comments/vc_1'],
+  ]);
+  assert.deepEqual(JSON.parse(calls[0].init.body), b);
+  assert.deepEqual(JSON.parse(calls[1].init.body), { text: 'y' });
+  globalThis.fetch = async () => ({ ok: false, status: 422, json: async () => ({ error: { code: 'invalid_input', message: 'text は 1〜1000 字' } }) });
+  await assert.rejects(() => apiCreateVideoComment('pd_0123456789', b), (e) => e.status === 422 && /1〜1000/.test(e.message));
+  globalThis.fetch = async () => ({ ok: false, status: 403, json: async () => ({ error: { code: 'forbidden' } }) });
+  await assert.rejects(() => apiDeleteVideoComment('vc_1'), (e) => e.status === 403);
+});
+
+test('api: アプリ向け API の形の org_forbidden({ error: { code } })でも表示中の組織を消して以後送らない', async () => {
+  const api = await freshApi();
+  setActiveOrgId('o_a');
+  api.lockActiveOrg('o_a');
+  const calls = recordFetch(() => ({ ok: false, status: 403, clone() { return this; }, json: async () => ({ error: { code: 'org_forbidden', message: 'x' } }) }));
+  await assert.rejects(() => api.apiListVideoComments('pd_0123456789'), /読み込み直して/);
+  assert.equal(getActiveOrgId(), null);
+  await assert.rejects(() => api.apiListProjects(), /読み込み直して/);
+  assert.equal(calls.length, 1);
+});
+
+test('api: apiVideoCommentsAvailable は 503 だけ false', async () => {
+  const calls = recordFetch(() => ({ ok: false, status: 404, json: async () => ({}) }));
+  assert.equal(await apiVideoCommentsAvailable(), true);
+  assert.equal(calls[0].url, '/api/projects/-/video-comments');
+  globalThis.fetch = async () => ({ ok: false, status: 503, json: async () => ({}) });
+  assert.equal(await apiVideoCommentsAvailable(), false);
+});
+
+test('api: 勉強動画のコメント一覧は { comments, canWrite }。503 は unavailable、403 no_org は noOrg、他の失敗は投げる', async () => {
+  const calls = recordFetch(() => okJson({ comments: [{ id: 'vc_1', videoName: 'clip01.mp4', videoSize: 10 }], canWrite: true }));
+  assert.deepEqual(await apiListStudyComments(), { comments: [{ id: 'vc_1', videoName: 'clip01.mp4', videoSize: 10 }], canWrite: true });
+  assert.equal(calls[0].url, '/api/study-comments');
+  assert.equal(calls[0].init.method, undefined);
+  globalThis.fetch = async () => ({ ok: false, status: 503, json: async () => ({ error: { code: 'unavailable' } }) });
+  assert.deepEqual(await apiListStudyComments(), { comments: [], canWrite: false, unavailable: true });
+  globalThis.fetch = async () => ({ ok: false, status: 403, json: async () => ({ error: { code: 'no_org' } }) });
+  assert.deepEqual(await apiListStudyComments(), { comments: [], canWrite: false, noOrg: true });
+  globalThis.fetch = async () => ({ ok: false, status: 403, json: async () => ({ error: { code: 'forbidden' } }) });
+  await assert.rejects(() => apiListStudyComments(), (e) => e.status === 403);
+  globalThis.fetch = async () => ({ ok: false, status: 401, json: async () => ({}) });
+  await assert.rejects(() => apiListStudyComments(), (e) => e.status === 401);
+});
+
+test('api: 勉強動画のコメント作成は POST /api/study-comments。失敗はサーバの理由を添える', async () => {
+  const calls = recordFetch(() => okJson({ id: 'vc_1' }, 201));
+  const b = { videoName: 'clip01.mp4', videoSize: 10, positionMs: 0, text: 'x' };
+  assert.deepEqual(await apiCreateStudyComment(b), { id: 'vc_1' });
+  assert.deepEqual([calls[0].init.method, calls[0].url], ['POST', '/api/study-comments']);
+  assert.deepEqual(JSON.parse(calls[0].init.body), b);
+  globalThis.fetch = async () => ({ ok: false, status: 403, json: async () => ({ error: { code: 'forbidden', message: 'コメントを書く権限がありません' } }) });
+  await assert.rejects(() => apiCreateStudyComment(b), (e) => e.status === 403 && /権限/.test(e.message));
 });

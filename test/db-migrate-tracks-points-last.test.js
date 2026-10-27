@@ -29,7 +29,7 @@ test('008 は tracks の点列を最後の列にし、既存の行をそのま�
   const ins = db.prepare('INSERT INTO tracks (session_id, points, bounds, t_range, point_count, csv_name, view) VALUES (?, ?, ?, ?, ?, ?, ?)');
   for (const r of rows) ins.run(r.session_id, r.points, r.bounds, r.t_range, r.point_count, r.csv_name, r.view);
 
-  assert.equal(migrate(db, all, 2), 1);
+  assert.equal(migrate(db, all.filter((m) => m.version <= 8), 2), 1); // 008 だけ当てる(009 以降は別のテスト)
 
   const cols = db.prepare('PRAGMA table_info(tracks)').all();
   assert.deepEqual(cols.map((c) => c.name), ['session_id', 'bounds', 't_range', 'point_count', 'csv_name', 'view', 'points']);

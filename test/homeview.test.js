@@ -94,5 +94,7 @@ test('guideHtml: 全手順を番号付きで出し、画面遷移か組織管理
   const html = guideHtml();
   assert.equal((html.match(/class="hs-guide-step"/g) || []).length, GUIDE_STEPS.length);
   assert.match(html, /data-home-nav="progress"/);
+  assert.match(html, /data-home-nav="study"/);
+  assert.match(html, /「プロ動画」「コーチング\(beta\)」フォルダの動画/, '勉強ページのガイドは両方のフォルダ');
   assert.match(html, /href="\/account#org"/);
 });

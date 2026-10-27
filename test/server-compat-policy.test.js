@@ -585,3 +585,48 @@ test('GET /api/members: 閲覧ゲートの Cookie とアカウントのセッシ
   const ok = await call(baseA, 'POST', '/api/minutes-imports/commit', { ck: both, body: { practiceDate: day, rows: [{ fullName: legacyMemberList()[0].fullName, goal: '両方の Cookie' }] } });
   assert.equal(ok.status, 200, JSON.stringify(ok.json));
 });
+
+// ---- 動画だけの読み・追記(POST/GET /api/projects/:id/videos)----
+test('動画の追記: 表示中の組織の器なら足せて他の項目は変わらず rev が上がる。他組織の器は 403、無い器は 404、未ログインは 401', { skip }, async () => {
+  const D5 = 'sailviz-20260105-0900.sailviz.json';
+  const { id } = repo.createProject(proj({
+    reflections: [refl('rV', '動画の器')], videos: [{ id: 'vid0', t: 100, name: 'a.mp4', durationMs: null }],
+  }), { name: D5, orgId: ORG });
+  const before = rows('SELECT rev, saved_at, web_state FROM practice_days WHERE id = ?', id)[0];
+  const reflBefore = rows('SELECT id, body, visibility FROM reflections WHERE practice_day_id = ?', id);
+  const videos = [{ id: 'vid0', t: 200, name: 'b.mp4', durationMs: 3000 }];
+
+  const ok = await call(baseA, 'POST', `/api/projects/${id}/videos`, { auth: memberTok, body: { videos } });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.added, 1);
+  assert.deepEqual(ok.json.videos.map((v) => v.name), ['a.mp4', 'b.mp4']);
+  const after = rows('SELECT rev, saved_at, web_state FROM practice_days WHERE id = ?', id)[0];
+  assert.equal(after.rev, before.rev + 1);
+  assert.equal(after.saved_at, before.saved_at, 'saved_at(保存の時刻)は変えない');
+  const { videos: _a, ...restBefore } = JSON.parse(before.web_state);
+  const { videos: _b, ...restAfter } = JSON.parse(after.web_state);
+  assert.deepEqual(restAfter, restBefore, 'web_state の動画以外は変わらない');
+  assert.deepEqual(rows('SELECT id, body, visibility FROM reflections WHERE practice_day_id = ?', id), reflBefore);
+
+  // 同じ動画をもう一度送っても増えず、rev も上がらない
+  const again = await call(baseA, 'POST', `/api/projects/${id}/videos`, { auth: TOKEN, body: { videos } });
+  assert.equal(again.status, 200);
+  assert.equal(again.json.added, 0);
+  assert.equal(rows('SELECT rev FROM practice_days WHERE id = ?', id)[0].rev, after.rev);
+
+  assert.equal((await call(baseA, 'POST', `/api/projects/${pid(D3)}/videos`, { auth: memberTok, body: { videos } })).status, 403, '他組織の器');
+  assert.equal((await call(baseA, 'POST', `/api/projects/${id}/videos`, { auth: outsiderTok, body: { videos } })).status, 403, '他組織のメンバー');
+  assert.equal((await call(baseA, 'POST', '/api/projects/pd_0000000000/videos', { auth: memberTok, body: { videos } })).status, 404);
+  assert.equal((await call(baseA, 'POST', `/api/projects/${id}/videos`)).status, 401);
+  assert.equal((await call(baseA, 'POST', `/api/projects/${id}/videos`, { auth: memberTok, body: { videos: [{ name: 'x.mp4' }] } })).status, 400);
+});
+
+test('動画一覧の GET: 見える器は { videos }、見えない器・無い器は 404、未ログインは 401', { skip }, async () => {
+  const got = await call(baseA, 'GET', `/api/projects/${pid('sailviz-20260105-0900.sailviz.json')}/videos`, { auth: memberTok });
+  assert.equal(got.status, 200);
+  assert.deepEqual(got.json.videos.map((v) => [v.name, v.t]), [['a.mp4', 100], ['b.mp4', 200]]);
+  assert.equal((await call(baseA, 'GET', `/api/projects/${pid(D2)}/videos`, { ck: cookie })).status, 404, 'private だけの器は共有ログインに見えない');
+  assert.equal((await call(baseA, 'GET', `/api/projects/${pid(D1)}/videos`, { auth: outsiderTok })).status, 404, '他組織の器');
+  assert.equal((await call(baseA, 'GET', '/api/projects/pd_0000000000/videos', { auth: memberTok })).status, 404);
+  assert.equal((await call(baseA, 'GET', `/api/projects/${pid(D1)}/videos`)).status, 401);
+});
