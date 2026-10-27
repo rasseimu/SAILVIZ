@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApi } from '../server/api.js';
+import { practiceSummary } from '../src/summary.js';
 
 // node:sqlite ガード: Node <22.5 では skip する
 const [major, minor] = process.versions.node.split('.').map(Number);
@@ -98,6 +99,21 @@ test('GET /api/reflections は練習ごとの反省だけを返す(軌跡を読�
   const e = rows.find((r) => r.id === id);
   assert.deepStrictEqual(e, { id, name, reflections: [{ id: 'rb', people: ['部員 B'] }, { id: 'ra', people: ['部員 A'] }] });
   assert.ok(rows.some((r) => r.id === nameId && Array.isArray(r.reflections)));
+});
+
+test('summaries は軌跡の点列を読まずに、全体を読んだときと同じ要約を返す(件数・練習日時)', { skip: skipMsg }, async () => {
+  const name = 'sailviz-20260105-0900.sailviz.json';
+  const t = (id, start) => ({ ...trk(id), tRange: { start, end: start + 1000 } });
+  const id = await create(name, proj({ tracks: [t('t2', 1_800_000_000_000), t('t1', 1_700_000_000_000)], reflections: [{ id: 'rs', wind: { dir: 'N', speed: 3 } }] }));
+  const row = (await (await fetch(`${base}/api/summaries`)).json()).find((r) => r.id === id);
+  const full = await (await fetch(`${base}/api/projects/${id}`)).json();
+  assert.deepStrictEqual(row, { id, name, ...practiceSummary(full, { name }) });
+  assert.equal(row.trackCount, 2);
+  assert.equal(row.trackedAt, 1_700_000_000_000);
+  const light = createDbRepo({ db, dataDir }).readSummaryWithAccess(id);
+  assert.equal(light.project.tracks.length, 2);
+  assert.ok(light.project.tracks.every((x) => x.points === undefined && x.tRange), '点列は読まない・tRange は読む');
+  assert.equal(light.access.tracks.length, 2);
 });
 
 test('overlay put/get が DB 版で動く', { skip: skipMsg }, async () => {

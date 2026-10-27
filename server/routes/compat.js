@@ -330,7 +330,8 @@ export async function compatRoute(req, res, ctx) {
     for (const { id, name } of await store.listProjects()) {
       try {
         // 器ごとに1回だけ読む。見える中身だけで要約する(見えない器は null)。
-        const { project, access } = await loadWithAccess(id);
+        // DB 版は軌跡の点列を読まない(要約に使うのは軌跡の件数と開始時刻だけ)。
+        const { project, access } = policyOn ? await store.readSummaryWithAccess(id) : await loadWithAccess(id);
         const proj = policyOn ? filterProject(subject, project, access) : project;
         if (proj) rows.push({ id, name, ...practiceSummary(proj, { name }) });
       } catch { /* 壊れたファイルは飛ばす */ }
