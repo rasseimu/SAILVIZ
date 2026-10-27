@@ -3,6 +3,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { join, normalize, extname, sep } from 'node:path';
 import { injectFeatureMeta } from './features.js';
+import { APP_PATHS } from '../src/routes.js';
 
 const TYPES = {
   '.js': 'text/javascript; charset=utf-8',
@@ -45,6 +46,8 @@ export async function serveStatic(req, res, rootDir, { features } = {}) {
   let rel = decodeURIComponent(url.pathname);
   const page = pagePathFor(rel);
   if (page) rel = page;
+  // 画面のアドレス(/home・/practices など。src/routes.js)は index.html。画面は app.js がアドレスから決める。
+  else if (APP_PATHS.has(rel)) rel = '/index.html';
   if (rel === '/' || rel === '') rel = '/index.html';
   const root = normalize(rootDir);
   const full = normalize(join(rootDir, rel));
