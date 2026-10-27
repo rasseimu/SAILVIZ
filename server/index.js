@@ -13,6 +13,7 @@ import { createAccountsRepo } from './repos/accountsRepo.js';
 import { createSessionsRepo } from './repos/sessionsRepo.js';
 import { createAppRepo } from './repos/appRepo.js';
 import { createMailer, mailProviderWarning } from './mail.js';
+import { DELETED_DIR_NAME, purgeDeleted } from './deletedData.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT) || 8000;
@@ -81,6 +82,20 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`SailViz on http://localhost:${PORT}  data=${DATA_DIR}  storage=${STORAGE}  accounts=${accounts ? `on mail=${MAIL_PROVIDER}` : 'OFF'}  write=${TOKEN ? 'on' : 'OFF'}  ai=${GEMINI_KEY ? 'on' : 'OFF'}  view-gate=${VIEW_USER && VIEW_PASSWORD ? 'on' : 'OFF'}${STORAGE === 'db' ? `  migration-org=${MIGRATION_ORG_ID ? 'set' : 'OFF'}` : ''}`);
 });
+
+// 削除した練習の一時保管(deleted_data_folder)の片付け。起動時と1時間ごとに、削除してから
+// 少なくとも1か月たった分(削除した月の翌々月に入った分)を消す。休止から戻ったときも次の回で拾う。
+const DELETED_DIR = join(DATA_DIR, DELETED_DIR_NAME);
+async function purgeDeletedData() {
+  try {
+    const removed = await purgeDeleted(DELETED_DIR);
+    if (removed.length) console.log(`[info] 削除した練習の保管を片付けました: ${removed.length} 件`);
+  } catch (e) {
+    console.warn(`[warn] 削除した練習の保管の片付けに失敗: ${e?.message}`);
+  }
+}
+purgeDeletedData();
+setInterval(purgeDeletedData, 60 * 60 * 1000).unref();
 
 // 終了時に DB を閉じる(WAL をチェックポイント)。
 function shutdown() {

@@ -341,6 +341,27 @@ export function createDbRepo({ db, dataDir }) {
       }
     },
 
+    // 削除の直前に一時保管(server/deletedData.js)へ書き出す中身。DB の行をそのまま(作者・公開範囲・点列を含む)。
+    // 器が無ければ null。{ name, data: { practiceDay, sessions, tracks, reflections, sessionCrew } }
+    exportForTrash(id) {
+      const pd = getPd.get(id);
+      if (!pd) return null;
+      const sessions = db.prepare('SELECT * FROM rec_sessions WHERE practice_day_id = ?').all(pd.id);
+      const ids = sessions.map((s) => s.id);
+      const inIds = (sql) => (ids.length ? db.prepare(`${sql} (${ids.map(() => '?').join(',')})`).all(...ids) : []);
+      const plain = (rows) => rows.map((r) => ({ ...r }));
+      return {
+        name: pd.legacy_name ?? null,
+        data: {
+          practiceDay: { ...pd },
+          sessions: plain(sessions),
+          tracks: plain(inIds('SELECT * FROM tracks WHERE session_id IN')),
+          reflections: plain(db.prepare('SELECT * FROM reflections WHERE practice_day_id = ?').all(pd.id)),
+          sessionCrew: plain(inIds('SELECT * FROM session_crew WHERE session_id IN')),
+        },
+      };
+    },
+
     deleteProject(id) {
       const pd = getPd.get(id);
       if (!pd) return;

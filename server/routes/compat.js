@@ -25,7 +25,7 @@ import { randomBytes } from 'node:crypto';
 export async function compatRoute(req, res, ctx) {
   const {
     store, token, viewEnabled, viewSecret, viewUser, viewPassword,
-    secureCookie, path, method, requireViewer, requireWrite, accounts, now = Date.now,
+    secureCookie, path, method, requireViewer, requireWrite, accounts, now = Date.now, trash = null,
   } = ctx;
 
   // ---- 認可 ----
@@ -398,6 +398,19 @@ export async function compatRoute(req, res, ctx) {
       if (policyOn) {
         const access = store.getProjectAccess(id);
         if (access && !canDeleteDay(writer, access)) { send(res, 403, { error: 'forbidden' }); return true; }
+      }
+      // 消す前に一時保管(deleted_data_folder。少なくとも1か月残る)へ書き出す。書き出せなければ消さない。
+      if (trash && typeof store.exportForTrash === 'function') {
+        const exported = await store.exportForTrash(id);
+        if (exported) {
+          const deletedBy = writer?.kind === 'user' ? { kind: 'user', userId: writer.userId } : { kind: writer?.kind ?? 'token' };
+          try {
+            await trash.save({ id, name: exported.name, deletedBy, data: exported.data });
+          } catch (e) {
+            console.error(`[error] 削除した練習の保管に失敗したため削除しません: ${id}: ${e?.message}`);
+            send(res, 500, { error: 'backup failed' }); return true;
+          }
+        }
       }
       try { await store.deleteProject(id); } catch { /* 既に無ければ黙認 */ }
       send(res, 200, { ok: true }); return true;

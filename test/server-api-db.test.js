@@ -4,7 +4,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,7 +42,7 @@ before(async () => {
   db = openDb(':memory:');
   migrate(db, loadMigrations(MIG_DIR), 1000);
   const repo = createDbRepo({ db, dataDir });
-  const api = createApi({ repo, token: TOKEN, migrationOrgId: 'o_test' }); // DB 版は MIGRATION_ORG_ID が必須(S2.5-P2)
+  const api = createApi({ repo, dataDir, token: TOKEN, migrationOrgId: 'o_test' }); // DB 版は MIGRATION_ORG_ID が必須(S2.5-P2)
   server = createServer(async (req, res) => { if (await api(req, res)) return; res.writeHead(404).end(); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -114,6 +114,33 @@ test('summaries は軌跡の点列を読まずに、全体を読んだときと�
   assert.equal(light.project.tracks.length, 2);
   assert.ok(light.project.tracks.every((x) => x.points === undefined && x.tRange), '点列は読まない・tRange は読む');
   assert.equal(light.access.tracks.length, 2);
+});
+
+test('DELETE は消す前に deleted_data_folder へ DB の行(点列・作者・公開範囲を含む)を書き出す。書き出せなければ消さない(500)', { skip: skipMsg }, async () => {
+  const dir = join(dataDir, 'deleted_data_folder');
+  // 1) 書き出せない(同名のファイルがあってフォルダを作れない)なら消さない
+  const id = await create('sailviz-20260107-0900.sailviz.json', proj({ tracks: [trk('td')], reflections: [{ id: 'rdel', people: ['部員 A'] }] }));
+  db.prepare("UPDATE reflections SET visibility = 'public', author_user_id = 'u_x' WHERE practice_day_id = ?").run(id);
+  await writeFile(dir, 'not a folder');
+  const ng = await fetch(`${base}/api/projects/${id}`, { method: 'DELETE', headers: bearer });
+  assert.equal(ng.status, 500);
+  assert.ok(db.prepare('SELECT 1 FROM practice_days WHERE id = ?').get(id), '練習は残る');
+  await rm(dir);
+  // 2) 書き出してから消す
+  const ok = await fetch(`${base}/api/projects/${id}`, { method: 'DELETE', headers: bearer });
+  assert.equal(ok.status, 200);
+  assert.equal(db.prepare('SELECT 1 FROM practice_days WHERE id = ?').get(id), undefined);
+  const files = (await readdir(dir)).filter((f) => f.endsWith(`_${id}.json`));
+  assert.equal(files.length, 1);
+  const saved = JSON.parse(await readFile(join(dir, files[0]), 'utf8'));
+  assert.equal(saved.id, id);
+  assert.equal(saved.name, 'sailviz-20260107-0900.sailviz.json');
+  assert.equal(saved.data.practiceDay.id, id);
+  assert.equal(saved.data.tracks.length, 1);
+  assert.deepEqual(JSON.parse(saved.data.tracks[0].points), trk('td').points);
+  assert.equal(saved.data.reflections[0].visibility, 'public');
+  assert.equal(saved.data.reflections[0].author_user_id, 'u_x');
+  assert.deepEqual(saved.deletedBy, { kind: 'legacy' });
 });
 
 test('overlay put/get が DB 版で動く', { skip: skipMsg }, async () => {
