@@ -17,6 +17,8 @@ import { createPracticeDaysRoute } from './routes/practiceDays.js';
 import { createMailer } from './mail.js';
 import { resolveSubject } from './compatPrincipal.js';
 import { randomBytes } from 'node:crypto';
+import { join } from 'node:path';
+import { DELETED_DIR_NAME, saveDeleted } from './deletedData.js';
 import { describeError } from './domain/errorLog.js';
 
 // accounts(accountsRepo)があればアカウント API(§10.2)が有効。無い(STORAGE=file)ときは該当パスが 503。
@@ -49,6 +51,9 @@ export function createApi({
   // 閲覧ゲート: user/password が両方設定されている時のみ有効。
   // 有効時はランダム秘密を発行し、ログイン成功で Cookie に載せる(パスワードは載せない)。
   const viewEnabled = Boolean(viewUser && viewPassword);
+  // 削除した練習の一時保管(DATA_DIR/deleted_data_folder)。dataDir が無い(テストの一部)ときは保管しない。
+  const deletedDir = dataDir ? join(dataDir, DELETED_DIR_NAME) : null;
+  const trash = deletedDir ? { save: (entry) => saveDeleted(deletedDir, entry, (authOptions.now || Date.now)()) } : null;
   const viewSecret = viewEnabled ? randomBytes(24).toString('hex') : null;
 
   return async function api(req, res) {
@@ -86,7 +91,7 @@ export function createApi({
     const ctx = {
       store, token, geminiKey, viewEnabled, viewSecret, viewUser, viewPassword,
       secureCookie, path, method, requireViewer, requireWrite, getSubject, accounts,
-      now: authOptions.now || Date.now,
+      now: authOptions.now || Date.now, trash,
     };
 
     try {

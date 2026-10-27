@@ -45,6 +45,11 @@ export function createFileRepo(dataDir) {
       await writeProject(dataDir, name, obj);
       return { id: name, name };
     },
+    // 削除の直前に一時保管へ書き出す中身(保存 JSON そのもの)。無ければ null。
+    async exportForTrash(id) {
+      if (!isValidProjectName(id) || !(await exists(dataDir, id))) return null;
+      return { name: id, data: { project: await readProject(dataDir, id) } };
+    },
     deleteProject: (id) => deleteProject(dataDir, id),
     // opts({ orgId, scopeOrgId })はファイル版では組織を持たないので無視する。
     readOverlay: (name) => readOverlay(dataDir, name),

@@ -3,7 +3,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readdir, readFile as readFileP } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApi } from '../server/api.js';
@@ -172,4 +172,19 @@ test('ai-comment proxies to Gemini and returns text (auth + key)', async () => {
     globalThis.fetch = realFetch;
     await new Promise((r) => srv.close(r));
   }
+});
+
+test('DELETE はファイルを消す前に deleted_data_folder へ保存 JSON を書き出す(ファイル版)', async () => {
+  const name = 'sailviz-20260106-0900.sailviz.json';
+  const bearer = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+  const project = { version: 1, tracks: [], reflections: [{ id: 'rdel', people: ['部員 A'] }] };
+  assert.equal((await fetch(`${base}/api/projects`, { method: 'POST', headers: bearer, body: JSON.stringify({ name, project }) })).status, 201);
+  assert.equal((await fetch(`${base}/api/projects/${name}`, { method: 'DELETE', headers: bearer })).status, 200);
+  assert.equal((await fetch(`${base}/api/projects/${name}`)).status, 404);
+  const dir = join(dataDir, 'deleted_data_folder');
+  const files = (await readdir(dir)).filter((f) => f.endsWith(`_${name}.json`));
+  assert.equal(files.length, 1);
+  const saved = JSON.parse(await readFileP(join(dir, files[0]), 'utf8'));
+  assert.equal(saved.id, name);
+  assert.deepEqual(saved.data.project.reflections, project.reflections);
 });
