@@ -10,6 +10,7 @@ function fakeApi() {
     apiListProjects: async () => Object.keys(db.projects).map((id) => ({ id, name: id, label: id })),
     apiCreateProject: async (name, o) => { const id = `pd_${String(++seq).padStart(10, '0')}`; db.projects[id] = o; return { id, name }; },
     apiListSummaries: async () => [],
+    apiListReflections: async () => Object.entries(db.projects).map(([id, p]) => ({ id, name: id, reflections: p.reflections || [] })),
     apiGetProject: async (n) => db.projects[n],
     apiPutProject: async (n, o) => { db.projects[n] = o; },
     apiDeleteProject: async (n) => { delete db.projects[n]; },
@@ -97,4 +98,10 @@ test('loginAny: 共有ログインが通ればそれ。だめでメールアド�
   calls.splice(0);
   assert.deepEqual(await mk(false, true).loginAny('club-user', 'pw'), { ok: false, error: '共有だめ' });
   assert.deepEqual(calls, [['shared', 'club-user']]); // メールアドレスの形でなければアカウントでは試さない
+});
+
+test('listReflections は練習ごとの反省だけを返す', async () => {
+  const store = createStore(fakeApi());
+  const { id } = await store.createProject('a.sailviz.json', { version: 1, tracks: [{ id: 't' }], reflections: [{ id: 'r1' }] });
+  assert.deepEqual(await store.listReflections(), [{ id, name: id, reflections: [{ id: 'r1' }] }]);
 });

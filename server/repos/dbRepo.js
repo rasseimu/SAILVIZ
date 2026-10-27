@@ -194,6 +194,24 @@ export function createDbRepo({ db, dataDir }) {
       return { project: { ...assembleProject(parts), _rev: pd.rev }, access: accessOf(pd, parts) };
     },
 
+    // 反省だけと access(進捗画面の集計用)。軌跡は並びと認可に要る session_id だけ読み、点列(points)は読まない。
+    // 器が無ければ投げる。
+    readReflectionsWithAccess(id) {
+      const pd = getPd.get(id);
+      if (!pd) throw new Error('not found');
+      const sessions = db.prepare('SELECT * FROM rec_sessions WHERE practice_day_id = ?').all(pd.id);
+      const ids = sessions.map((s) => s.id);
+      const tracks = ids.length
+        ? db.prepare(`SELECT session_id FROM tracks WHERE session_id IN (${ids.map(() => '?').join(',')})`).all(...ids)
+        : [];
+      const reflections = db.prepare('SELECT * FROM reflections WHERE practice_day_id = ?').all(pd.id);
+      const parts = { practiceDay: pd, sessions, tracks, reflections };
+      return {
+        project: { reflections: orderParts(parts).reflections.map((r) => JSON.parse(r.body)) },
+        access: accessOf(pd, parts),
+      };
+    },
+
     // practiceDate と JST 日が一致する器をすべて返す(降順)。
     findProjectsByPracticeDate(practiceDate) {
       const target = jstMidnightMs(Number(practiceDate));

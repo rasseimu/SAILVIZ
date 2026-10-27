@@ -91,6 +91,16 @@ test('unlock endpoint validates password', async () => {
   assert.match(good.headers.get('set-cookie') || '', /sailviz_token=/);
 });
 
+test('GET /api/reflections returns only reflections per project (file version)', async () => {
+  const name = 'sailviz-20260104-0900.sailviz.json';
+  const bearer = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+  const post = await fetch(`${base}/api/projects`, { method: 'POST', headers: bearer,
+    body: JSON.stringify({ name, project: { version: 1, tracks: [{ id: 't', points: [{ t: 1, lat: 35, lon: 139 }] }], reflections: [{ id: 'rf1', people: ['部員 A'] }] } }) });
+  assert.equal(post.status, 201);
+  const rows = await (await fetch(`${base}/api/reflections`)).json();
+  assert.deepStrictEqual(rows.find((r) => r.name === name), { id: name, name, reflections: [{ id: 'rf1', people: ['部員 A'] }] });
+});
+
 test('summaries returns lightweight rows', async () => {
   const rows = await (await fetch(`${base}/api/summaries`)).json();
   assert.equal(Array.isArray(rows), true);

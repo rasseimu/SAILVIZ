@@ -338,6 +338,26 @@ export async function compatRoute(req, res, ctx) {
     send(res, 200, rows); return true;
   }
 
+  // 練習ごとの反省だけ [{ id, name, reflections }](進捗画面の集計用)。軌跡(点列)を返さないので軽い。
+  // 見える反省だけにし、見えない器は出さない(GET /api/projects/:id と同じ判定)。
+  if (path === '/api/reflections' && method === 'GET') {
+    const subject = gateRead(); if (!subject) return true;
+    const rows = [];
+    for (const { id, name } of await store.listProjects()) {
+      try {
+        if (policyOn) {
+          const { project, access } = await store.readReflectionsWithAccess(id);
+          const proj = filterProject(subject, project, access);
+          if (proj) rows.push({ id, name, reflections: proj.reflections });
+        } else {
+          const project = await store.readProject(id);
+          rows.push({ id, name, reflections: Array.isArray(project.reflections) ? project.reflections : [] });
+        }
+      } catch { /* 壊れたファイルは飛ばす */ }
+    }
+    send(res, 200, rows); return true;
+  }
+
   const projMatch = path.match(/^\/api\/projects\/([^/]+)$/);
   if (projMatch) {
     const id = decodeURIComponent(projMatch[1]);

@@ -91,6 +91,15 @@ test('summaries が DB 版で軽量行を返す', { skip: skipMsg }, async () =>
   assert.equal(rows.find((r) => r.name === NAME)?.id, nameId);
 });
 
+test('GET /api/reflections は練習ごとの反省だけを返す(軌跡を読まない)', { skip: skipMsg }, async () => {
+  const name = 'sailviz-20260103-0900.sailviz.json';
+  const id = await create(name, proj({ tracks: [trk('t1')], reflections: [{ id: 'rb', people: ['部員 B'] }, { id: 'ra', people: ['部員 A'] }] }));
+  const rows = await (await fetch(`${base}/api/reflections`)).json();
+  const e = rows.find((r) => r.id === id);
+  assert.deepStrictEqual(e, { id, name, reflections: [{ id: 'rb', people: ['部員 B'] }, { id: 'ra', people: ['部員 A'] }] });
+  assert.ok(rows.some((r) => r.id === nameId && Array.isArray(r.reflections)));
+});
+
 test('overlay put/get が DB 版で動く', { skip: skipMsg }, async () => {
   const put = await fetch(`${base}/api/overlays/progress`, { method: 'PUT', headers: bearer,
     body: JSON.stringify({ r1: { issueStage: 2, goalDone: false } }) });
