@@ -1197,12 +1197,12 @@ async function renderHome() {
     card.className = 'home-card';
     renderCard(card, it, it);
     card.addEventListener('click', () => openPractice(it.id, it.name));
-    // 角の赤バツ削除(編集モード時のみ有効=writes-json)。カードを開かないよう伝播を止める。
+    // 角の赤バツ削除。カードを開かないよう伝播を止める。
+    // 編集モードは廃止済み(applyEditableState)なので常に押せる。消してよいかはサーバーが判定する(見えない中身がある器は 403)。
     const del = document.createElement('button');
     del.className = 'home-card-del writes-json';
     del.textContent = '×';
-    del.title = store.isUnlocked() ? '削除' : '編集モードにすると削除できます';
-    del.disabled = !store.isUnlocked();
+    del.title = '削除';
     del.addEventListener('click', async (e) => {
       e.stopPropagation();
       const label = it.label || it.name;
@@ -1214,7 +1214,10 @@ async function renderHome() {
         invalidateProjectEntriesCache();
         renderHome();
       } catch (err) {
-        statusEl.textContent = `削除に失敗: ${err.message}`;
+        // 一覧では状態表示(#status)が隠れているので、ダイアログで知らせる。
+        window.alert(err.status === 403
+          ? `練習「${label}」は削除できません。ほかの人の非公開の反省・記録が含まれているか、削除の権限がありません。`
+          : `練習「${label}」の削除に失敗しました: ${err.message}`);
       }
     });
     wrap.appendChild(card);

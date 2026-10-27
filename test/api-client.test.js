@@ -2,7 +2,7 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  apiGetProject, apiPutProject, apiUnlock, apiCommitMinutes, apiCreateProject, apiListProjects, apiMe,
+  apiGetProject, apiPutProject, apiUnlock, apiCommitMinutes, apiCreateProject, apiListProjects, apiMe, apiDeleteProject,
 } from '../src/api.js';
 import { getActiveOrgId, setActiveOrgId, resolveActiveOrg } from '../src/activeorg.js';
 
@@ -241,4 +241,11 @@ test('apiPutOverlay: 400 はサーバの理由(名簿外の名前など)を伝�
   const api = await freshApi();
   recordFetch(() => ({ ok: false, status: 400, json: async () => ({ error: 'コメントに名前がありません' }) }));
   await assert.rejects(() => api.apiPutOverlay('progress', {}), /コメントに名前がありません/);
+});
+
+test('apiDeleteProject: 失敗したら HTTP の状態(403 など)を err.status に付けて投げる', async () => {
+  globalThis.fetch = async () => ({ ok: false, status: 403, json: async () => ({ error: 'forbidden' }) });
+  await assert.rejects(() => apiDeleteProject('pd_0123456789'), (e) => e.status === 403);
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: true }) });
+  await apiDeleteProject('pd_0123456789');
 });

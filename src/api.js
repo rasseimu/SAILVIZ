@@ -84,7 +84,7 @@ export async function apiPutProject(id, obj) {
 }
 export async function apiDeleteProject(id) {
   const res = await send(projectPath(id), 'DELETE');
-  if (!res.ok) throw new Error(`削除に失敗 (${res.status})`);
+  if (!res.ok) throw Object.assign(new Error(`削除に失敗 (${res.status})`), { status: res.status });
 }
 // 進捗を読んだサーバの時刻(X-Sailviz-Read-At)。保存のときに送り返すと、サーバはそれより前からあるコメントを
 // 「この画面で消したもの」として消し、読んだ後にアプリで足されたコメントだけを残す。保存では更新しない(読み直すまで同じ)。
