@@ -9,7 +9,20 @@ const index = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 test('登録画面: 名簿の案内と同意文がある', () => {
   assert.match(main, /id: 'ac-reg-roster-note'/);
   assert.match(main, /部の名簿に載っているアドレスで登録してください/);
-  assert.match(main, /利用規約・プライバシーポリシー・位置情報と録音の用途に同意します/);
+  assert.match(main, /'・位置情報と録音の用途に同意します'/);
+});
+
+test('登録画面: 同意文から利用規約とプライバシーポリシーを別タブで開ける', () => {
+  assert.match(main, /h\('a', \{ id: 'ac-reg-terms-link', href: '\/terms\.html', target: '_blank', rel: 'noopener' \}, '利用規約'\)/);
+  assert.match(main, /h\('a', \{ id: 'ac-reg-privacy-link', href: '\/privacy\.html', target: '_blank', rel: 'noopener' \}, 'プライバシーポリシー'\)/);
+});
+
+test('規約とプライバシーポリシーのページが互いにリンクしている', () => {
+  const terms = readFileSync(new URL('../terms.html', import.meta.url), 'utf8');
+  const privacy = readFileSync(new URL('../privacy.html', import.meta.url), 'utf8');
+  assert.match(terms, /<title>SailViz 利用規約<\/title>/);
+  assert.match(terms, /href="\/privacy\.html"/);
+  assert.match(privacy, /href="\/terms\.html"/);
 });
 
 test('名簿画面: ヘッダは「氏名,メール」の形という案内がある', () => {

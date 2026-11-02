@@ -208,7 +208,12 @@ function registerForm(after = toAccount, inviteCode) {
     h('p', { class: 'ac-note' }, '登録すると確認メールが届きます。メールのリンクを開くとアカウントが有効になります。'),
     EXTRAS && h('p', { id: 'ac-reg-roster-note', class: 'ac-note' }, '部の名簿に載っているアドレスで登録してください。名簿と違うアドレスでは、部に自動で紐付きません。'),
     field('メールアドレス', email), field('パスワード(8文字以上)', pw), field('氏名(漢字フルネーム・スペースなし)', name), field('所属(例: ○○大学ヨット部)', affil),
-    h('label', { id: 'ac-reg-agree-label', class: 'ac-check' }, agree, '利用規約・プライバシーポリシー・位置情報と録音の用途に同意します'), btn);
+    // 利用規約・プライバシーポリシーは別タブで開く(入力中のフォームを消さない)。App Store の審査でアプリ内から開けることが求められる。
+    h('label', { id: 'ac-reg-agree-label', class: 'ac-check' }, agree,
+      h('span', {},
+        h('a', { id: 'ac-reg-terms-link', href: '/terms.html', target: '_blank', rel: 'noopener' }, '利用規約'), '・',
+        h('a', { id: 'ac-reg-privacy-link', href: '/privacy.html', target: '_blank', rel: 'noopener' }, 'プライバシーポリシー'),
+        '・位置情報と録音の用途に同意します')), btn);
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     submitting(btn, async () => {
